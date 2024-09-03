@@ -1,4 +1,4 @@
-<img src="./assets/logo.svg" alt="drawing" width="50"/
+<img src="./assets/logo.svg" alt="drawing" width="50"/>
 
 # CHIP for AffiliateWP
 
