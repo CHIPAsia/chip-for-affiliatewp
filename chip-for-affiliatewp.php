@@ -217,7 +217,7 @@ function add_chip_to_payout_method($payout_methods) {
 add_filter( 'affwp_referrals_bulk_actions', 'bulk_action_chip_bayar' );
 
 function bulk_action_chip_bayar( $actions ) {
-  $actions['pay_now'] = __( 'Pay Now via CHIP (tak siap lagi)', 'affwp-paypal-payouts' );
+  $actions['pay_now'] = __( 'Pay Now via CHIP (tak siap lagi)', 'affwp-chip-payouts' );
   return $actions;
 }
 
@@ -264,7 +264,7 @@ function process_pay_now_chip_send($data) {
 
 
   if( is_wp_error( $transfer ) ) {
-    wp_safe_redirect( admin_url( 'admin.php?page=affiliate-wp-referrals&affwp_notice=paypal_error&message=' . urlencode( $transfer->get_error_message() ) . '&code=' . urlencode( $transfer->get_error_code() ) ) ); exit;
+    wp_safe_redirect( admin_url( 'admin.php?page=affiliate-wp-referrals&affwp_notice=chip_error&message=' . urlencode( $transfer->get_error_message() ) . '&code=' . urlencode( $transfer->get_error_code() ) ) ); exit;
 
   }
 
@@ -351,6 +351,8 @@ function chip_send_pay_referral($referral_id) {
 
   $user = get_userdata($user_id);
 
+  $reference_prefix = substr(affiliate_wp()->settings->get('chip_reference_prefix'), 0, 2);
+
   $body = [
     'amount' => $referral->amount,
     'bank_account_id' => $response['id'],
@@ -419,13 +421,284 @@ function admin_notices_chip_send() {
 
     case 'chip_success' :
 
-      echo '<div class="updated"><p>' . sprintf( __( 'Referral #%d paid out via CHIP successfully', 'affwp-paypal-payouts' ), $referral_id, $transfer_id, $transfer_id ) . '</p></div>';
+      echo '<div class="updated"><p>' . sprintf( __( 'Referral #%d paid out via CHIP successfully', 'affwp-chip-payouts' ), $referral_id, $transfer_id, $transfer_id ) . '</p></div>';
       break;
 
     case 'chip_error' :
 
-      echo '<div class="error"><p><strong>' . __( 'Error:', 'affwp-paypal-payouts' ) . '</strong>&nbsp;' . $code . esc_html( $message ) . '</p></div>';
+      echo '<div class="error"><p><strong>' . __( 'Error:', 'affwp-chip-payouts' ) . '</strong>&nbsp;' . $code . esc_html( $message ) . '</p></div>';
       break;
 
+  }
+}
+
+add_action( 'affwp_process_payout_chip', 'process_bulk_chip_payout', 10, 5 );
+
+/**
+	 * Payout referrals in bulk for a specified timeframe via CHIP.
+	 *
+	 *
+	 * @param string $start         Referrals start date.
+	 * @param string $end           Referrals end date data.
+	 * @param float  $minimum       Minimum payout.
+	 * @param int    $affiliate_id  Affiliate ID.
+	 * @param string $payout_method Payout method.
+	 *
+	 * @return void
+	 */
+function process_bulk_chip_payout( $start, $end, $minimum, $affiliate_id, $payout_method ) {
+
+		if ( ! current_user_can( 'manage_payouts' ) ) {
+			wp_die( __( 'You do not have permission to process payouts', 'affwp-chip-payouts' ) );
+		}
+    
+		$args = array(
+			'status'       => 'unpaid',
+			'number'       => -1,
+			'affiliate_id' => $affiliate_id,
+			'date'         => array(
+				'start' => $start,
+				'end'   => $end,
+			),
+		);
+
+		// Final  affiliate / referral data to be paid out.
+		$data = array();
+
+		// The affiliates that have earnings to be paid.
+		$affiliates = array();
+
+		// Retrieve the referrals from the database.
+		$referrals = affiliate_wp()->referrals->get_referrals( $args );
+
+		if ( $referrals ) {
+
+			foreach ( $referrals as $referral ) {
+
+				$affiliate = affwp_get_affiliate( $referral->affiliate_id );
+				if ( ! $affiliate->user ) {
+					continue;
+				}
+
+				if ( in_array( $referral->affiliate_id, $affiliates ) ) {
+
+					// Add the amount to an affiliate that already has a referral in the export.
+					$amount = $data[ $referral->affiliate_id ]['amount'] + $referral->amount;
+
+					$data[ $referral->affiliate_id ]['amount']      = $amount;
+					$data[ $referral->affiliate_id ]['referrals'][] = $referral->referral_id;
+
+				} else {
+
+					$email = affwp_get_affiliate_payment_email( $referral->affiliate_id );
+
+					$data[ $referral->affiliate_id ] = array(
+						'email'     => $email,
+						'amount'    => $referral->amount,
+						'currency'  => ! empty( $referral->currency ) ? $referral->currency : affwp_get_currency(),
+						'referrals' => array( $referral->referral_id ),
+					);
+
+					$affiliates[] = $referral->affiliate_id;
+
+				}
+			}
+
+			$payouts = array();
+
+			$i = 0;
+
+			foreach ( $data as $affiliate_id => $payout ) {
+
+				if ( $minimum > 0 && $payout['amount'] < $minimum ) {
+
+					// Ensure the minimum amount was reached.
+					unset( $data[ $affiliate_id ] );
+
+					// Skip to the next affiliate.
+					continue;
+				}
+
+				$payouts[ $affiliate_id ] = array(
+					'email'       => $payout['email'],
+					'amount'      => $payout['amount'],
+					/* translators: 1: Referrals start date, 2: Referrals end date, 3: Home URL */
+					'description' => sprintf( __( 'Payment for referrals between %1$s and %2$s from %3$s', 'affwp-chip-payouts' ), $start, $end, home_url() ),
+					'referrals'   => $payout['referrals'],
+				);
+
+				$i++;
+			}
+
+			$redirect_args = array(
+				'affwp_notice' => 'chip_bulk_pay_success',
+        'message'      => 'Bulk payment initiated. It will processed by batch.',
+			);
+
+      wp_schedule_single_event( time(), 'chip_schedule_bulk_payment', array($payouts) );
+
+			// if ( is_wp_error( $success ) ) {
+
+			// 	$redirect_args['affwp_notice'] = 'chip_error';
+			// 	$redirect_args['message']      = $success->get_error_message();
+			// 	$redirect_args['code']         = $success->get_error_code();
+
+			// } else {
+
+			// 	foreach ( $payouts as $affiliate_id => $payout ) {
+			// 		if ( function_exists( 'affwp_add_payout' ) ) {
+			// 			affwp_add_payout( array(
+			// 				'affiliate_id'  => $affiliate_id,
+			// 				'referrals'     => $payout['referrals'],
+			// 				'amount'        => $payout['amount'],
+			// 				'payout_method' => 'chip',
+			// 			) );
+			// 		} else {
+			// 			foreach ( $payout['referrals'] as $referral ) {
+			// 				affwp_set_referral_status( $referral, 'paid' );
+			// 			}
+			// 		}
+			// 	}
+
+			// }
+
+			$redirect = affwp_admin_url( 'referrals', $redirect_args );
+
+			// A header is used here instead of wp_redirect() due to the esc_url() bug that removes [] from URLs.
+			header( 'Location:' . $redirect );
+			exit;
+
+		}
+
+}
+
+add_action( 'chip_schedule_bulk_payment', 'chip_schedule_bulk_payment', 10, 1 );
+function chip_schedule_bulk_payment( $payouts ) {
+  foreach( $payouts as $affiliate_id => $payout ) {
+    wp_schedule_single_event( time(), 'chip_send_bulk_payment', array($affiliate_id, $payout) );
+  }
+}
+
+add_action( 'chip_send_bulk_payment', 'chip_send_bulk_payment', 10, 2 );
+function chip_send_bulk_payment($affiliate_id, $payout) {
+  error_log('companyyyyyyyyyyyyyy');
+  $user_id = affwp_get_affiliate_user_id( $affiliate_id );
+
+  $payment_account_number = get_user_meta(
+    $user_id,
+    'payment_account_number',
+    true
+  );
+
+  $payment_bank_code = get_user_meta(
+    $user_id,
+    'payment_bank_code',
+    true
+  );
+
+  $body = [
+    'account_number' => $payment_account_number,
+    'bank_code' => $payment_bank_code,
+    'name' => substr(affwp_get_affiliate_name( $affiliate_id ), 0, 128),
+  ];
+
+  $mode = 'live';
+  $url = 'https://api.chip-in.asia';
+  if (affiliate_wp()->settings->get('chip_test_mode')) {
+    $mode = 'test';
+    $url = 'https://staging-api.chip-in.asia';
+  }
+
+  $api_key = affiliate_wp()->settings->get('chip_'.$mode.'_api_key');
+  $secret_key = affiliate_wp()->settings->get('chip_'.$mode.'_secret_key');
+
+  $epoch = time();
+
+  $str = $epoch . $api_key;
+  $hmac = hash_hmac( 'sha512', $str, $secret_key );
+
+  $endpoint = $url . '/api/send/bank_accounts';
+
+  $header = [
+    'Content-Type: application/json' , 
+    "Authorization: Bearer $api_key",
+    "Checksum: $hmac",
+    "Epoch: $epoch",
+  ];
+
+  $process = curl_init( $endpoint );
+  curl_setopt($process, CURLOPT_HEADER , 0);
+  curl_setopt($process, CURLOPT_HTTPHEADER, $header);
+  curl_setopt($process, CURLOPT_TIMEOUT, 30);
+  curl_setopt($process, CURLOPT_RETURNTRANSFER, 1);
+  curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($body) );
+
+  $return = curl_exec($process);
+  curl_close($process);
+
+  $response = json_decode($return, true);
+
+  if (!isset($response['status'])) {
+    return new WP_Error( 'error', __( 'There is an error with bank account verification', 'affwp-payouts' ) );
+  }
+
+  if ($response['status'] == 'rejected') {
+    return new WP_Error( 'bank_account_reject', __( 'Bank account has been rejected', 'affwp-payouts' ) );
+  }
+
+  if ($response['status'] != 'verified') {
+    return new WP_Error( 'bank_account_unverified', __( 'Bank account is pending verification', 'affwp-payouts' ) );
+  }
+
+  $endpoint = $url . '/api/send/send_instructions';
+  $reference_prefix = substr(affiliate_wp()->settings->get('chip_reference_prefix'), 0, 2);
+
+  $body = [
+    'amount' => $payout['amount'],
+    'bank_account_id' => $response['id'],
+    'description' => substr($payout['description'],0, 140),
+    'email' => $payout['email'],
+    'reference' => substr($reference_prefix . '-'.implode("|", $payout['referrals']), 0, 40)
+  ];
+
+  $process = curl_init( $endpoint );
+  curl_setopt($process, CURLOPT_HEADER , 0);
+  curl_setopt($process, CURLOPT_HTTPHEADER, $header);
+  curl_setopt($process, CURLOPT_TIMEOUT, 30);
+  curl_setopt($process, CURLOPT_RETURNTRANSFER, 1);
+  curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($body) );
+
+  $return = curl_exec($process);
+  curl_close($process);
+
+  $response = json_decode($return, true);
+
+  if (!isset($response['state']) OR !in_array($response['state'], ['completed', 'executing'])) {
+    return new WP_Error( 'send_instruction_failed', __( 'Send instruction failed', 'affwp-payouts' ) );
+  }
+
+  $send_status = 'paid';
+
+  if ($response['state'] == 'executing' ) {
+    $send_status = 'processing';
+  }
+  error_log('chipchipchipchip');
+
+  if ( function_exists( 'affwp_add_payout' ) ) {
+    affwp_add_payout( array(
+      'affiliate_id'  => $affiliate_id,
+      'referrals'     => $payout['referrals'],
+      'amount'        => $payout['amount'],
+      'payout_method' => 'CHIP',
+      'service_invoice_link' => $response['receipt_url'],
+      'service_id' => $response['id'],
+      'service_account' => "CHIP Send Balance",
+      'description' => "Payment to: $payment_account_number ($payment_bank_code). ID: {$response['id']}",
+      'status' => $send_status,
+    ) );
+  } else {
+    foreach ( $payout['referrals'] as $referral ) {
+      affwp_set_referral_status( $referral, 'paid' );
+    }
   }
 }
