@@ -69,6 +69,10 @@ function tambah_bank_account($affiliate) {
 
 add_filter( 'affiliatewp_register_section_payment_methods', 'tambah_chip_send_setting');
 function tambah_chip_send_setting($setting) {
+  if (affwp_get_currency() != 'MYR') {
+    return $setting;
+  }
+
   $setting []= 'chip_payouts';
   return $setting;
 }
@@ -102,6 +106,10 @@ function tambah_chip_send_api_key_setting() {
 add_filter( 'affwp_settings_commissions' , 'tambah_chip_send_ke_commission_setting_page');
 
 function tambah_chip_send_ke_commission_setting_page($settings) {
+  if (affwp_get_currency() != 'MYR') {
+    return $settings;
+  }
+
   $settings['chip_payouts'] = [
     'name'            => __( 'CHIP Send', 'affiliate-wp' ),
     'desc'            => __( 'Enable the CHIP Send Payouts payment method', 'affiliate-wp' ),
@@ -210,6 +218,10 @@ function chip_send_get_bank_code() {
 add_filter('affwp_payout_methods', 'add_chip_to_payout_method');
 
 function add_chip_to_payout_method($payout_methods) {
+  if (affwp_get_currency() != 'MYR') {
+    return $payout_methods;
+  }
+
   $payout_methods['chip'] = __( 'CHIP Send', 'affiliate-wp' );
   return $payout_methods;
 }
@@ -217,6 +229,11 @@ function add_chip_to_payout_method($payout_methods) {
 add_filter( 'affwp_referrals_bulk_actions', 'bulk_action_chip_bayar' );
 
 function bulk_action_chip_bayar( $actions ) {
+
+  if (affwp_get_currency() != 'MYR') {
+    return $actions;
+  }
+
   $actions['pay_now'] = __( 'Pay Now via CHIP (tak siap lagi)', 'affwp-chip-payouts' );
   return $actions;
 }
@@ -224,6 +241,10 @@ function bulk_action_chip_bayar( $actions ) {
 add_filter( 'affwp_referral_action_links', 'action_links_chip_send', 10, 2 );
 
 function action_links_chip_send( $links, $referral ) {
+
+  if (affwp_get_currency() != 'MYR') {
+    return $links;
+  }
 
   $user_id = affwp_get_affiliate_user_id( $referral->affiliate_id );
 
@@ -272,6 +293,19 @@ function process_pay_now_chip_send($data) {
 }
 
 function chip_send_pay_referral($referral_id) {
+  global $wpdb;
+
+  $data = array(
+    'referral_id' => $referral_id,
+    'send_status' => 'pending_start'
+  );
+
+  $table_name = $wpdb->prefix.'affiliate_wp_referrals_chip';
+  $wpdb->insert($table_name, $data);
+
+  if ($wpdb->last_error) {
+    return new WP_Error( 'error_duplicate', __( 'Duplicate send request has been sent', 'chip-for-affiliatewp' ) );
+  }
 
   $mode = 'live';
   $url = 'https://api.chip-in.asia';
@@ -321,6 +355,8 @@ function chip_send_pay_referral($referral_id) {
     'name' => substr(affwp_get_affiliate_name( $referral->affiliate_id ), 0, 128),
   ];
 
+  $wpdb->update($table_name,array('send_status' => 'pending_bank_verification'),array('referral_id' => $referral_id),array('%s'));
+
   $process = curl_init( $endpoint );
   curl_setopt($process, CURLOPT_HEADER , 0);
   curl_setopt($process, CURLOPT_HTTPHEADER, $header);
@@ -334,16 +370,21 @@ function chip_send_pay_referral($referral_id) {
   $response = json_decode($return, true);
 
   if (!isset($response['status'])) {
+    $wpdb->delete($table_name,array('referral_id' => $referral_id),array('%d'));
     return new WP_Error( 'error', __( 'There is an error with bank account verification', 'affwp-payouts' ) );
   }
 
   if ($response['status'] == 'rejected') {
+    $wpdb->delete($table_name,array('referral_id' => $referral_id),array('%d'));
     return new WP_Error( 'bank_account_reject', __( 'Bank account has been rejected', 'affwp-payouts' ) );
   }
 
   if ($response['status'] != 'verified') {
+    $wpdb->delete($table_name,array('referral_id' => $referral_id),array('%d'));
     return new WP_Error( 'bank_account_unverified', __( 'Bank account is pending verification', 'affwp-payouts' ) );
   }
+
+  $wpdb->update($table_name,array('send_status' => 'bank_verification_successful'),array('referral_id' => $referral_id),array('%s'));
 
   $endpoint = $url . '/api/send/send_instructions';
 
@@ -361,6 +402,8 @@ function chip_send_pay_referral($referral_id) {
     'reference' => substr($reference_prefix . '-'.$referral->payout_id, 0, 40)
   ];
 
+  $wpdb->update($table_name,array('send_status' => 'pending_send_instruction'),array('referral_id' => $referral_id),array('%s'));
+
   $process = curl_init( $endpoint );
   curl_setopt($process, CURLOPT_HEADER , 0);
   curl_setopt($process, CURLOPT_HTTPHEADER, $header);
@@ -374,8 +417,11 @@ function chip_send_pay_referral($referral_id) {
   $response = json_decode($return, true);
 
   if (!isset($response['state']) OR !in_array($response['state'], ['completed', 'executing'])) {
+    $wpdb->delete($table_name,array('referral_id' => $referral_id),array('%d'));
     return new WP_Error( 'send_instruction_failed', __( 'Send instruction failed', 'affwp-payouts' ) );
   }
+
+  $wpdb->update($table_name,array('send_status' => 'completed'),array('referral_id' => $referral_id),array('%s'));
 
   $send_status = 'paid';
 
@@ -581,7 +627,35 @@ function chip_schedule_bulk_payment( $payouts ) {
 
 add_action( 'chip_send_bulk_payment', 'chip_send_bulk_payment', 10, 2 );
 function chip_send_bulk_payment($affiliate_id, $payout) {
-  error_log('companyyyyyyyyyyyyyy');
+
+  global $wpdb;
+
+  $table_name = $wpdb->prefix.'affiliate_wp_referrals_chip';
+
+  $placeholders = implode(',', array_fill(0, count($payout['referrals']), '%d'));
+
+  $query = $wpdb->prepare("SELECT * FROM your_table_name WHERE column_a IN ($placeholders)",...$payout['referrals']);
+
+  $row = $wpdb->get_row($query);
+
+  if ($row) {
+    return;
+  }
+
+  foreach($payout['referrals'] as $ref_id) {
+    $data = array(
+      'referral_id' => $ref_id,
+      'send_status' => 'pending_start'
+    );
+
+    $table_name = $wpdb->prefix.'affiliate_wp_referrals_chip';
+    $wpdb->insert($table_name, $data);
+  
+    if ($wpdb->last_error) {
+      return new WP_Error( 'error_duplicate', __( 'Duplicate send request has been sent', 'chip-for-affiliatewp' ) );
+    }
+  }
+
   $user_id = affwp_get_affiliate_user_id( $affiliate_id );
 
   $payment_account_number = get_user_meta(
@@ -601,6 +675,10 @@ function chip_send_bulk_payment($affiliate_id, $payout) {
     'bank_code' => $payment_bank_code,
     'name' => substr(affwp_get_affiliate_name( $affiliate_id ), 0, 128),
   ];
+
+  foreach($payout['referrals'] as $ref_id) {
+    $wpdb->update($table_name,array('send_status' => 'pending_bank_verification'),array('referral_id' => $ref_id),array('%s'));
+  }
 
   $mode = 'live';
   $url = 'https://api.chip-in.asia';
@@ -639,15 +717,28 @@ function chip_send_bulk_payment($affiliate_id, $payout) {
   $response = json_decode($return, true);
 
   if (!isset($response['status'])) {
+    foreach($payout['referrals'] as $ref_id) {
+      $wpdb->delete($table_name,array('referral_id' => $ref_id),array('%d'));
+    }
     return new WP_Error( 'error', __( 'There is an error with bank account verification', 'affwp-payouts' ) );
   }
 
   if ($response['status'] == 'rejected') {
+    foreach($payout['referrals'] as $ref_id) {
+      $wpdb->delete($table_name,array('referral_id' => $ref_id),array('%d'));
+    }
     return new WP_Error( 'bank_account_reject', __( 'Bank account has been rejected', 'affwp-payouts' ) );
   }
 
   if ($response['status'] != 'verified') {
+    foreach($payout['referrals'] as $ref_id) {
+      $wpdb->delete($table_name,array('referral_id' => $ref_id),array('%d'));
+    }
     return new WP_Error( 'bank_account_unverified', __( 'Bank account is pending verification', 'affwp-payouts' ) );
+  }
+
+  foreach($payout['referrals'] as $ref_id) {
+    $wpdb->update($table_name,array('send_status' => 'bank_verification_successful'),array('referral_id' => $ref_id),array('%s'));
   }
 
   $endpoint = $url . '/api/send/send_instructions';
@@ -660,6 +751,10 @@ function chip_send_bulk_payment($affiliate_id, $payout) {
     'email' => $payout['email'],
     'reference' => substr($reference_prefix . '-'.implode("|", $payout['referrals']), 0, 40)
   ];
+
+  foreach($payout['referrals'] as $ref_id) {
+    $wpdb->update($table_name,array('send_status' => 'pending_send_instruction'),array('referral_id' => $ref_id),array('%s'));
+  }
 
   $process = curl_init( $endpoint );
   curl_setopt($process, CURLOPT_HEADER , 0);
@@ -674,7 +769,14 @@ function chip_send_bulk_payment($affiliate_id, $payout) {
   $response = json_decode($return, true);
 
   if (!isset($response['state']) OR !in_array($response['state'], ['completed', 'executing'])) {
+    foreach($payout['referrals'] as $ref_id) {
+      $wpdb->delete($table_name,array('referral_id' => $ref_id),array('%d'));
+    }
     return new WP_Error( 'send_instruction_failed', __( 'Send instruction failed', 'affwp-payouts' ) );
+  }
+
+  foreach($payout['referrals'] as $ref_id) {
+    $wpdb->update($table_name,array('send_status' => 'completed'),array('referral_id' => $ref_id),array('%s'));
   }
 
   $send_status = 'paid';
@@ -682,7 +784,6 @@ function chip_send_bulk_payment($affiliate_id, $payout) {
   if ($response['state'] == 'executing' ) {
     $send_status = 'processing';
   }
-  error_log('chipchipchipchip');
 
   if ( function_exists( 'affwp_add_payout' ) ) {
     affwp_add_payout( array(
@@ -701,4 +802,23 @@ function chip_send_bulk_payment($affiliate_id, $payout) {
       affwp_set_referral_status( $referral, 'paid' );
     }
   }
+}
+
+register_activation_hook(__FILE__,'chip_for_affiliatewp_create_table');
+
+function chip_for_affiliatewp_create_table() {
+  require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+
+  global $wpdb;
+
+  $table_name = $wpdb->prefix . 'affiliate_wp_referrals_chip';
+
+  $create_ddl = "CREATE TABLE $table_name (
+    referral_id BIGINT(20) NOT NULL AUTO_INCREMENT,
+    send_status VARCHAR(255) NOT NULL,
+    PRIMARY KEY (referral_id)
+  );";
+
+  // Create the table if it doesn't exist
+  maybe_create_table($table_name, $create_ddl);
 }
