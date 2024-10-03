@@ -124,7 +124,7 @@ function tambah_chip_send_ke_commission_setting_page($settings) {
 
   $settings['chip_live_api_key'] = [
     'name'            => __( 'Live API Key', 'affiliate-wp' ),
-    'desc'            => __( 'Insert CHIP Send Live API Key that are provided by CHIP.', 'affiliate-wp' ),
+    'desc'            => __( '<p>Your send account balance is: <strong>RM 0.00</strong><br>Insert CHIP Send Live API Key that are provided by CHIP.</p>', 'affiliate-wp' ),
     'type'            => 'text',
   ];
 
@@ -136,13 +136,13 @@ function tambah_chip_send_ke_commission_setting_page($settings) {
 
   $settings['chip_test_api_key'] = [
     'name'            => __( 'Test API Key', 'affiliate-wp' ),
-    'desc'            => __( 'Insert CHIP Send Test API Key that are provided by CHIP.', 'affiliate-wp' ),
+    'desc'            => __( '<p>Your send account balance is: <strong>RM 0.00</strong><br>Insert CHIP Send Test API Key that are provided by CHIP.</p>', 'affiliate-wp' ),
     'type'            => 'text',
   ];
 
   $settings['chip_test_secret_key'] = [
     'name'            => __( 'Test Secret Key', 'affiliate-wp' ),
-    'desc'            => __( 'Insert CHIP Send Test Secret Key that are provided by CHIP.', 'affiliate-wp' ),
+    'desc'            => __( '<p>Insert CHIP Send Test Secret Key that are provided by CHIP.</p>', 'affiliate-wp' ),
     'type'            => 'text',
   ];
 
@@ -234,7 +234,7 @@ function bulk_action_chip_bayar( $actions ) {
     return $actions;
   }
 
-  $actions['pay_now'] = __( 'Pay Now via CHIP (tak siap lagi)', 'affwp-chip-payouts' );
+  $actions['pay_now_chip'] = __( 'Pay Now via CHIP', 'affwp-chip-payouts' );
   return $actions;
 }
 
@@ -293,6 +293,10 @@ function process_pay_now_chip_send($data) {
 }
 
 function chip_send_pay_referral($referral_id) {
+  if ( !chip_has_api_credentials() ) {
+    return;
+  }
+
   global $wpdb;
 
   $data = array(
@@ -497,6 +501,10 @@ function process_bulk_chip_payout( $start, $end, $minimum, $affiliate_id, $payou
 		if ( ! current_user_can( 'manage_payouts' ) ) {
 			wp_die( __( 'You do not have permission to process payouts', 'affwp-chip-payouts' ) );
 		}
+
+    if ( !chip_has_api_credentials() ) {
+      return;
+    }
     
 		$args = array(
 			'status'       => 'unpaid',
@@ -821,4 +829,39 @@ function chip_for_affiliatewp_create_table() {
 
   // Create the table if it doesn't exist
   maybe_create_table($table_name, $create_ddl);
+}
+
+add_action( 'affwp_referrals_do_bulk_action_pay_now_chip', 'process_bulk_action_pay_now_chip' );
+
+function process_bulk_action_pay_now_chip($referral_id): void {
+
+  if( empty( $referral_id ) ) {
+    return;
+  }
+
+  if( ! current_user_can( 'manage_referrals' ) ) {
+    return;
+  }
+
+  if ( !chip_has_api_credentials() ) {
+    return;
+  }
+  
+  chip_send_pay_referral($referral_id);
+}
+
+function chip_has_api_credentials(): bool {
+  $mode = 'live';
+  if (affiliate_wp()->settings->get('chip_test_mode')) {
+    $mode = 'test';
+  }
+
+  $api_key = affiliate_wp()->settings->get('chip_'.$mode.'_api_key');
+  $secret_key = affiliate_wp()->settings->get('chip_'.$mode.'_secret_key');
+
+  if (empty($api_key) OR empty($secret_key)) {
+    return false;
+  }
+
+  return true;
 }
