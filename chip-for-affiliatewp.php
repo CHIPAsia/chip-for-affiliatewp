@@ -91,6 +91,7 @@ function tambah_chip_send_api_key_setting() {
         'chip_live_api_key',
         'chip_live_secret_key',
         'chip_test_api_key',
+        'chip_test_balance',
         'chip_test_secret_key',
         'chip_reference_prefix',
       )
@@ -101,6 +102,44 @@ function tambah_chip_send_api_key_setting() {
       'value'          => true
     ),
   );
+}
+
+add_action('affwp_notices_registry_init', 'add_chip_send_notices');
+
+function add_chip_send_notices($notice_registry) {
+  $notice_args = array(
+    'class'         => 'updated',
+    'message'       => 'CHIP Send Test Balance Refreshed',
+    'dismissible'   => true,
+    // 'dismiss_label' => _x( 'Close', 'chip-send-test-balance', 'chip-for-affiliatewp' ),
+  );
+  $notice_registry->add_notice( 'chip_send_test_balance_refreshed', $notice_args );
+}
+
+add_action('admin_menu', 'add_hidden_chip_page');
+
+function add_hidden_chip_page() {
+  add_submenu_page( 
+    null, 
+    'CHIP Test Refresh Balance',
+    'CHIP Test Refresh Balance',
+    'manage_options', 
+    'chip_test_refresh_balance', 
+    'refresh_chip_send_test_balance' );
+}
+
+function refresh_chip_send_test_balance() {
+  // TODO: add logic to get balance and store into option table
+  wp_safe_redirect(
+    affwp_admin_url(
+      'settings',
+      [
+        'tab'          => 'commissions',
+        'affwp_notice' => 'chip_send_test_balance_refreshed',
+      ]
+    )
+  );
+  exit;
 }
 
 add_filter( 'affwp_settings_commissions' , 'tambah_chip_send_ke_commission_setting_page');
@@ -138,6 +177,15 @@ function tambah_chip_send_ke_commission_setting_page($settings) {
     'name'            => __( 'Test API Key', 'affiliate-wp' ),
     'desc'            => __( '<p>Your send account balance is: <strong>RM 0.00</strong><br>Insert CHIP Send Test API Key that are provided by CHIP.</p>', 'affiliate-wp' ),
     'type'            => 'text',
+  ];
+
+  $wizard_url = menu_page_url( 'chip_test_refresh_balance', false );
+  $settings['chip_test_balance'] = [
+    'name'            => __( 'Test Balance', 'affiliate-wp' ),
+    'desc'            => __( '<p>Your CHIP Send test account balance. <a href="'.$wizard_url.'">Refresh</a></p>', 'affiliate-wp' ),
+    'type'            => 'text',
+    'disabled'        => true,
+    'std'             => 'RM 0.00',
   ];
 
   $settings['chip_test_secret_key'] = [
