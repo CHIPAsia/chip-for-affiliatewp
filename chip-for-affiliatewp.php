@@ -201,7 +201,7 @@ function refresh_chip_send_live_balance() {
 
   $notice = 'chip_send_balance_not_updated';
   if (!empty($api_key) AND !empty($secret_key)) {
-    $endpoint = 'https://staging-api.chip-in.asia/api/send/accounts';
+    $endpoint = 'https://api.chip-in.asia/api/send/accounts';
     $epoch = time();
 
     $str = $epoch . $api_key;
