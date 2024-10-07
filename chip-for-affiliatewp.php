@@ -90,9 +90,10 @@ function tambah_chip_send_api_key_setting() {
         'chip_test_mode',
         'chip_live_api_key',
         'chip_live_secret_key',
+        'chip_live_balance',
         'chip_test_api_key',
-        'chip_test_balance',
         'chip_test_secret_key',
+        'chip_test_balance',
         'chip_reference_prefix',
       )
     ),
@@ -109,11 +110,19 @@ add_action('affwp_notices_registry_init', 'add_chip_send_notices');
 function add_chip_send_notices($notice_registry) {
   $notice_args = array(
     'class'         => 'updated',
-    'message'       => 'CHIP Send Test Balance Refreshed',
+    'message'       => 'CHIP Send Balance refresh success',
     'dismissible'   => true,
     // 'dismiss_label' => _x( 'Close', 'chip-send-test-balance', 'chip-for-affiliatewp' ),
   );
-  $notice_registry->add_notice( 'chip_send_test_balance_refreshed', $notice_args );
+  $notice_registry->add_notice( 'chip_send_balance_refreshed', $notice_args );
+
+  $notice_args = array(
+    'class'         => 'notice notice-warning',
+    'message'       => 'CHIP Send Balance refresh failed',
+    'dismissible'   => true,
+    // 'dismiss_label' => _x( 'Close', 'chip-send-test-balance', 'chip-for-affiliatewp' ),
+  );
+  $notice_registry->add_notice( 'chip_send_balance_not_updated', $notice_args );
 }
 
 add_action('admin_menu', 'add_hidden_chip_page');
@@ -126,16 +135,110 @@ function add_hidden_chip_page() {
     'manage_options', 
     'chip_test_refresh_balance', 
     'refresh_chip_send_test_balance' );
+  
+  add_submenu_page( 
+    null, 
+    'CHIP Live Refresh Balance',
+    'CHIP Live Refresh Balance',
+    'manage_options', 
+    'chip_live_refresh_balance', 
+    'refresh_chip_send_live_balance' );
 }
 
 function refresh_chip_send_test_balance() {
-  // TODO: add logic to get balance and store into option table
+  $api_key = affiliate_wp()->settings->get('chip_test_api_key');
+  $secret_key = affiliate_wp()->settings->get('chip_test_secret_key');
+
+  $notice = 'chip_send_balance_not_updated';
+  if (!empty($api_key) AND !empty($secret_key)) {
+    $endpoint = 'https://staging-api.chip-in.asia/api/send/accounts';
+    $epoch = time();
+
+    $str = $epoch . $api_key;
+    $hmac = hash_hmac( 'sha512', $str, $secret_key );
+  
+    $header = [
+      'Content-Type: application/json' , 
+      "Authorization: Bearer $api_key",
+      "Checksum: $hmac",
+      "Epoch: $epoch",
+    ];
+    $process = curl_init( $endpoint );
+    curl_setopt($process, CURLOPT_HEADER , 0);
+    curl_setopt($process, CURLOPT_HTTPHEADER, $header);
+    curl_setopt($process, CURLOPT_TIMEOUT, 30);
+    curl_setopt($process, CURLOPT_RETURNTRANSFER, 1);
+
+    $return = curl_exec($process);
+    curl_close($process);
+
+    $response = json_decode($return, true);
+
+    if (isset($response['results']) AND !empty($response['results'])) {
+      $current_balance = $response['results'][0]['current_balance'];
+      
+      update_option( 'chip_send_test_balance', $current_balance, false );
+
+      $notice = 'chip_send_balance_refreshed';
+    }
+  }
+
   wp_safe_redirect(
     affwp_admin_url(
       'settings',
       [
         'tab'          => 'commissions',
-        'affwp_notice' => 'chip_send_test_balance_refreshed',
+        'affwp_notice' => $notice,
+      ]
+    )
+  );
+  exit;
+}
+
+function refresh_chip_send_live_balance() {
+  $api_key = affiliate_wp()->settings->get('chip_live_api_key');
+  $secret_key = affiliate_wp()->settings->get('chip_live_secret_key');
+
+  $notice = 'chip_send_balance_not_updated';
+  if (!empty($api_key) AND !empty($secret_key)) {
+    $endpoint = 'https://staging-api.chip-in.asia/api/send/accounts';
+    $epoch = time();
+
+    $str = $epoch . $api_key;
+    $hmac = hash_hmac( 'sha512', $str, $secret_key );
+  
+    $header = [
+      'Content-Type: application/json' , 
+      "Authorization: Bearer $api_key",
+      "Checksum: $hmac",
+      "Epoch: $epoch",
+    ];
+    $process = curl_init( $endpoint );
+    curl_setopt($process, CURLOPT_HEADER , 0);
+    curl_setopt($process, CURLOPT_HTTPHEADER, $header);
+    curl_setopt($process, CURLOPT_TIMEOUT, 30);
+    curl_setopt($process, CURLOPT_RETURNTRANSFER, 1);
+
+    $return = curl_exec($process);
+    curl_close($process);
+
+    $response = json_decode($return, true);
+
+    if (isset($response['results']) AND !empty($response['results'])) {
+      $current_balance = $response['results'][0]['current_balance'];
+      
+      update_option( 'chip_send_live_balance', $current_balance, false );
+
+      $notice = 'chip_send_balance_refreshed';
+    }
+  }
+
+  wp_safe_redirect(
+    affwp_admin_url(
+      'settings',
+      [
+        'tab'          => 'commissions',
+        'affwp_notice' => $notice,
       ]
     )
   );
@@ -163,7 +266,7 @@ function tambah_chip_send_ke_commission_setting_page($settings) {
 
   $settings['chip_live_api_key'] = [
     'name'            => __( 'Live API Key', 'affiliate-wp' ),
-    'desc'            => __( '<p>Your send account balance is: <strong>RM 0.00</strong><br>Insert CHIP Send Live API Key that are provided by CHIP.</p>', 'affiliate-wp' ),
+    'desc'            => __( '<p>Insert CHIP Send Live API Key that are provided by CHIP.</p>', 'affiliate-wp' ),
     'type'            => 'text',
   ];
 
@@ -173,25 +276,34 @@ function tambah_chip_send_ke_commission_setting_page($settings) {
     'type'            => 'text',
   ];
 
-  $settings['chip_test_api_key'] = [
-    'name'            => __( 'Test API Key', 'affiliate-wp' ),
-    'desc'            => __( '<p>Your send account balance is: <strong>RM 0.00</strong><br>Insert CHIP Send Test API Key that are provided by CHIP.</p>', 'affiliate-wp' ),
-    'type'            => 'text',
-  ];
-
-  $wizard_url = menu_page_url( 'chip_test_refresh_balance', false );
-  $settings['chip_test_balance'] = [
-    'name'            => __( 'Test Balance', 'affiliate-wp' ),
-    'desc'            => __( '<p>Your CHIP Send test account balance. <a href="'.$wizard_url.'">Refresh</a></p>', 'affiliate-wp' ),
+  $live_refresh_balance = menu_page_url( 'chip_live_refresh_balance', false );
+  $settings['chip_live_balance'] = [
+    'name'            => __( 'Live Balance', 'affiliate-wp' ),
+    'desc'            => __( '<p>Your CHIP Send live account balance. <a href="'.esc_url($live_refresh_balance).'">Refresh</a></p>', 'affiliate-wp' ),
     'type'            => 'text',
     'disabled'        => true,
-    'std'             => 'RM 0.00',
+    'std'             => get_option('chip_send_live_balance'),
+  ];
+
+  $settings['chip_test_api_key'] = [
+    'name'            => __( 'Test API Key', 'affiliate-wp' ),
+    'desc'            => __( '<p>Insert CHIP Send Test API Key that are provided by CHIP.</p>', 'affiliate-wp' ),
+    'type'            => 'text',
   ];
 
   $settings['chip_test_secret_key'] = [
     'name'            => __( 'Test Secret Key', 'affiliate-wp' ),
     'desc'            => __( '<p>Insert CHIP Send Test Secret Key that are provided by CHIP.</p>', 'affiliate-wp' ),
     'type'            => 'text',
+  ];
+
+  $test_refresh_balance = menu_page_url( 'chip_test_refresh_balance', false );
+  $settings['chip_test_balance'] = [
+    'name'            => __( 'Test Balance', 'affiliate-wp' ),
+    'desc'            => __( '<p>Your CHIP Send test account balance. <a href="'.esc_url($test_refresh_balance).'">Refresh</a></p>', 'affiliate-wp' ),
+    'type'            => 'text',
+    'disabled'        => true,
+    'std'             => get_option('chip_send_test_balance'),
   ];
 
   $settings['chip_reference_prefix'] = [
