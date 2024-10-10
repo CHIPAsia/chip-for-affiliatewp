@@ -123,6 +123,34 @@ function add_chip_send_notices($notice_registry) {
     // 'dismiss_label' => _x( 'Close', 'chip-send-test-balance', 'chip-for-affiliatewp' ),
   );
   $notice_registry->add_notice( 'chip_send_balance_not_updated', $notice_args );
+
+  $notice_args = array(
+    'class'         => 'updated',
+    'message'       => 'CHIP Send Instruction succcess!',
+    'dismissible'   => true,
+    // 'dismiss_label' => _x( 'Close', 'chip-send-test-balance', 'chip-for-affiliatewp' ),
+  );
+  $notice_registry->add_notice( 'chip_send_instruction_success', $notice_args );
+
+  $notice_args = array(
+    'class'         => 'updated',
+    'message'       => 'CHIP Bulk Send Instruction initiated. All task has been scheduled via WP Cron.',
+    'dismissible'   => true,
+    // 'dismiss_label' => _x( 'Close', 'chip-send-test-balance', 'chip-for-affiliatewp' ),
+  );
+  $notice_registry->add_notice( 'chip_bulk_send_instruction_success', $notice_args );
+
+  $notice_args = array(
+    'class'         => 'notice notice-warning',
+    'message'       => 'CHIP Send Instruction failed!',
+    'dismissible'   => true,
+    // 'dismiss_label' => _x( 'Close', 'chip-send-test-balance', 'chip-for-affiliatewp' ),
+  );
+
+  if (isset($_GET['message'])) {
+    $notice_args['message'] .= ' '. $_GET['message'];
+  }
+  $notice_registry->add_notice( 'chip_send_instruction_failed', $notice_args );
 }
 
 add_action('admin_menu', 'add_hidden_chip_page');
@@ -445,11 +473,10 @@ function process_pay_now_chip_send($data) {
 
 
   if( is_wp_error( $transfer ) ) {
-    wp_safe_redirect( admin_url( 'admin.php?page=affiliate-wp-referrals&affwp_notice=chip_error&message=' . urlencode( $transfer->get_error_message() ) . '&code=' . urlencode( $transfer->get_error_code() ) ) ); exit;
-
+    wp_safe_redirect( admin_url( 'admin.php?page=affiliate-wp-referrals&affwp_notice=chip_send_instruction_failed&message=' . urlencode( $transfer->get_error_message() ) . '&code=' . urlencode( $transfer->get_error_code() ) ) ); exit;
   }
 
-  wp_safe_redirect( admin_url( 'admin.php?page=affiliate-wp-referrals&affwp_notice=chip_success&referral=' . $referral_id ) ); exit;
+  wp_safe_redirect( admin_url( 'admin.php?page=affiliate-wp-referrals&affwp_notice=chip_send_instruction_success&referral=' . $referral_id ) ); exit;
 }
 
 function chip_send_pay_referral($referral_id) {
@@ -465,9 +492,8 @@ function chip_send_pay_referral($referral_id) {
   );
 
   $table_name = $wpdb->prefix.'affiliate_wp_referrals_chip';
-  $wpdb->insert($table_name, $data);
 
-  if ($wpdb->last_error) {
+  if (!$wpdb->insert($table_name, $data)) {
     return new WP_Error( 'error_duplicate', __( 'Duplicate send request has been sent', 'chip-for-affiliatewp' ) );
   }
 
@@ -563,7 +589,7 @@ function chip_send_pay_referral($referral_id) {
     'bank_account_id' => $response['id'],
     'description' => substr($referral->description,0, 140),
     'email' => $email ?? $user->user_email,
-    'reference' => substr($reference_prefix . '-'.$referral->payout_id, 0, 40)
+    'reference' => substr($reference_prefix . '-'.$referral_id, 0, 40)
   ];
 
   $wpdb->update($table_name,array('send_status' => 'pending_send_instruction'),array('referral_id' => $referral_id),array('%s'));
@@ -612,34 +638,6 @@ function chip_send_pay_referral($referral_id) {
   }
 
   return 'completed';
-}
-
-add_action( 'admin_notices', 'admin_notices_chip_send'  );
-
-function admin_notices_chip_send() {
-  if( empty( $_REQUEST['affwp_notice' ] ) ) {
-    return;
-  }
-
-  $affiliates  = ! empty( $_REQUEST['affiliate'] ) ? $_REQUEST['affiliate']                        : 0;
-  $referral_id = ! empty( $_REQUEST['referral'] )  ? absint( $_REQUEST['referral'] )               : 0;
-  $transfer_id = ! empty( $_REQUEST['transfer'] )  ? sanitize_text_field( $_REQUEST['transfer'] )  : '';
-  $message     = ! empty( $_REQUEST['message'] )   ? urldecode( $_REQUEST['message'] )             : '';
-  $code        = ! empty( $_REQUEST['code'] )      ? urldecode( $_REQUEST['code'] ) . ' '          : '';
-
-  switch( $_REQUEST['affwp_notice'] ) {
-
-    case 'chip_success' :
-
-      echo '<div class="updated"><p>' . sprintf( __( 'Referral #%d paid out via CHIP successfully', 'affwp-chip-payouts' ), $referral_id, $transfer_id, $transfer_id ) . '</p></div>';
-      break;
-
-    case 'chip_error' :
-
-      echo '<div class="error"><p><strong>' . __( 'Error:', 'affwp-chip-payouts' ) . '</strong>&nbsp;' . $code . esc_html( $message ) . '</p></div>';
-      break;
-
-  }
 }
 
 add_action( 'affwp_process_payout_chip', 'process_bulk_chip_payout', 10, 5 );
@@ -745,43 +743,17 @@ function process_bulk_chip_payout( $start, $end, $minimum, $affiliate_id, $payou
 			}
 
 			$redirect_args = array(
-				'affwp_notice' => 'chip_bulk_pay_success',
+				'affwp_notice' => 'chip_bulk_send_instruction_success',
         'message'      => 'Bulk payment initiated. It will processed by batch.',
 			);
 
       wp_schedule_single_event( time(), 'chip_schedule_bulk_payment', array($payouts) );
-
-			// if ( is_wp_error( $success ) ) {
-
-			// 	$redirect_args['affwp_notice'] = 'chip_error';
-			// 	$redirect_args['message']      = $success->get_error_message();
-			// 	$redirect_args['code']         = $success->get_error_code();
-
-			// } else {
-
-			// 	foreach ( $payouts as $affiliate_id => $payout ) {
-			// 		if ( function_exists( 'affwp_add_payout' ) ) {
-			// 			affwp_add_payout( array(
-			// 				'affiliate_id'  => $affiliate_id,
-			// 				'referrals'     => $payout['referrals'],
-			// 				'amount'        => $payout['amount'],
-			// 				'payout_method' => 'chip',
-			// 			) );
-			// 		} else {
-			// 			foreach ( $payout['referrals'] as $referral ) {
-			// 				affwp_set_referral_status( $referral, 'paid' );
-			// 			}
-			// 		}
-			// 	}
-
-			// }
 
 			$redirect = affwp_admin_url( 'referrals', $redirect_args );
 
 			// A header is used here instead of wp_redirect() due to the esc_url() bug that removes [] from URLs.
 			header( 'Location:' . $redirect );
 			exit;
-
 		}
 
 }
@@ -817,9 +789,7 @@ function chip_send_bulk_payment($affiliate_id, $payout) {
     );
 
     $table_name = $wpdb->prefix.'affiliate_wp_referrals_chip';
-    $wpdb->insert($table_name, $data);
-  
-    if ($wpdb->last_error) {
+    if (!$wpdb->insert($table_name, $data)) {
       return new WP_Error( 'error_duplicate', __( 'Duplicate send request has been sent', 'chip-for-affiliatewp' ) );
     }
   }
@@ -982,9 +952,11 @@ function chip_for_affiliatewp_create_table() {
   $table_name = $wpdb->prefix . 'affiliate_wp_referrals_chip';
 
   $create_ddl = "CREATE TABLE $table_name (
-    referral_id BIGINT(20) NOT NULL AUTO_INCREMENT,
+    id BIGINT(20) NOT NULL AUTO_INCREMENT,
+    referral_id BIGINT(20) NOT NULL,
     send_status VARCHAR(255) NOT NULL,
-    PRIMARY KEY (referral_id)
+    PRIMARY KEY (referral_id),
+    UNIQUE KEY `referrer` (`referral_id`)
   );";
 
   // Create the table if it doesn't exist
@@ -1006,7 +978,7 @@ function process_bulk_action_pay_now_chip($referral_id): void {
   if ( !chip_has_api_credentials() ) {
     return;
   }
-  
+
   chip_send_pay_referral($referral_id);
 }
 
