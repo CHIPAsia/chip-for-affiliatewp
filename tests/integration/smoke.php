@@ -127,7 +127,7 @@ check( 'duplicate reference rejected by CHIP', 200 !== $rd['code'] );
 $r = chip_request( 'GET', '/send/send_instructions/' . $instruction_id );
 check( 'requery reachable', 200 === $r['code'] );
 $terminal = in_array( ( $r['body']['state'] ?? '' ), array( 'completed', 'rejected', 'accepted', 'executing' ), true );
-check( 'state is a known AASM state: ' . ( $r['body']['state'] ?? '?' ), $terminal );
+check( 'instruction settled into a known terminal-or-in-flight state: ' . ( $r['body']['state'] ?? '?' ), $terminal );
 
 // 5. Webhook CRUD round-trip
 $r = chip_request(
