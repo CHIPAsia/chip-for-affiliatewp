@@ -67,7 +67,7 @@ function wp_clear_scheduled_hook( $hook ) {
 }
 
 function rest_url( $path = '' ) {
-	return 'https://example.test/' . ltrim( $path, '/' );
+	return ( empty( $GLOBALS['__is_ssl'] ) ? 'http://' : 'https://' ) . 'example.test/' . ltrim( $path, '/' );
 }
 
 class WP_REST_Server {
@@ -215,6 +215,12 @@ function plugin_dir_url( $file ) {
 
 function plugin_dir_path( $file ) {
 	return rtrim( dirname( $file ), '/' ) . '/';
+}
+
+$GLOBALS['__is_ssl'] = false;
+
+function is_ssl() {
+	return ! empty( $GLOBALS['__is_ssl'] );
 }
 
 $GLOBALS['__transients'] = array();
@@ -651,6 +657,13 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/accounts', 'code' => 200, 
 chip_affiliatewp_request( 'GET', '/send/accounts' );
 check( 'live base url', false !== strpos( $GLOBALS['__http_log'][0]['url'], 'https://api.chip-in.asia/api/' ) );
 check( 'live key used', $GLOBALS['__http_log'][0]['headers']['Authorization'] === 'Bearer e0645c9e-fcf2-4f29-a327-202f7ed3d969' );
+
+echo "\n== Test 2b: webhook URL honours is_ssl ==\n";
+$GLOBALS['__is_ssl'] = false;
+check( 'http fallback without SSL', ! str_starts_with( chip_affiliatewp_webhook_url(), 'https://' ) );
+$GLOBALS['__is_ssl'] = true;
+check( 'https preferred behind SSL', str_starts_with( chip_affiliatewp_webhook_url(), 'https://' ) );
+$GLOBALS['__is_ssl'] = false;
 
 echo "\n== Test 3: amount formatting ==\n";
 check( 'int amount', chip_affiliatewp_format_amount( '100' ) === '100.00' );
