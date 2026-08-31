@@ -1,0 +1,289 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: CHIP for AffiliateWP 1.0.0\n"
+"Report-Msgid-Bugs-To: https://github.com/CHIPAsia/chip-for-affiliatewp/issues\n"
+"POT-Creation-Date: 2026-09-01 08:30+0800\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Domain: chip-for-affiliatewp\n"
+
+#: includes/class-chip-affiliatewp-payouts.php:554
+msgid ""
+"A payment cannot be processed for this referral since it is not marked as "
+"Unpaid."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-bank-accounts.php:184
+msgid "Account number for the affiliate payout sent via CHIP Send."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:124
+msgid "Affiliate commission payout #%s"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-bank-accounts.php:180
+msgid "Bank Account Number"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-bank-accounts.php:164
+msgid "Bank Code"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:100
+#: includes/class-chip-affiliatewp-payouts.php:578
+msgid "Bank account is not verified yet (status: %s)."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-bank-accounts.php:175
+msgid "Bank code for the affiliate payout sent via CHIP Send."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:20
+#: includes/class-chip-affiliatewp-admin.php:90
+msgid "CHIP Send"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-api.php:86
+#: includes/class-chip-affiliatewp-webhooks.php:160
+msgid "CHIP Send API credentials are not configured."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:240
+msgid ""
+"CHIP Send API credentials are not set yet — payouts are disabled until they "
+"are configured."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-api.php:139
+msgid "CHIP Send API error (HTTP %1$s): %2$s"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-api.php:147
+msgid "CHIP Send API returned an unexpected response."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:156
+msgid "CHIP Send Payment Method"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:96
+msgid "CHIP Send Test Mode"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-bank-accounts.php:143
+msgid "CHIP Send did not return a bank account ID."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:155
+#: includes/class-chip-affiliatewp-payouts.php:627
+msgid "CHIP Send did not return a send instruction ID."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:285
+msgid "CHIP Send did not return a webhook ID."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:318
+msgid "CHIP Send instruction %1$s. %2$s"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:156
+msgid "CHIP Send payout method is not enabled."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:267
+msgid ""
+"CHIP Send webhook is not set up yet (%1$s). Payouts still work — statuses "
+"are requeried hourly — but confirmations arrive faster with the webhook."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:596
+msgid "Commission for referral #%d"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:133
+msgid "Email a CHIP receipt to the affiliate on every payout."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:91
+msgid "Enable the CHIP Send payout method."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:102
+msgid "Live API Key"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:108
+msgid "Live Secret Key"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:373
+msgid "Malformed payload."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:196
+msgid ""
+"Missing a webhook delivery is not fatal: payouts left in processing are "
+"requeried hourly from the CHIP Send API."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:355
+msgid "Missing signature."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:550
+msgid "No route was found matching the URL and request method."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:139
+msgid ""
+"PEM public key of the CHIP Send webhook used to verify inbound deliveries. "
+"Register the webhook URL shown below in the CHIP portal."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:89
+msgid "Payout amount must be greater than zero."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:78
+#: includes/class-chip-affiliatewp-payouts.php:566
+msgid ""
+"Please enter your CHIP Send API credentials in AffiliateWP → Settings → "
+"Commissions → CHIP Send before attempting to process payments."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:126
+msgid "Reference Prefix"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:193
+msgid ""
+"Register this URL as a CHIP Send webhook (event hooks: "
+"send_instruction_status). Paste the webhook public key from the CHIP portal "
+"into the Webhook Public Key field above."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:132
+msgid "Send Recipient Receipt"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:367
+msgid "Signature verification failed."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:114
+msgid "Test API Key"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:120
+msgid "Test Secret Key"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:103
+msgid "The CHIP Send live API key."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:109
+msgid ""
+"The CHIP Send live secret key. Used only for signing; it is never sent to "
+"CHIP."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:115
+msgid "The CHIP Send test API key."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:121
+msgid ""
+"The CHIP Send test secret key. Used only for signing; it is never sent to "
+"CHIP."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:361
+msgid "The configured webhook public key is not valid."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:396
+msgid "The payload is missing a send instruction ID or state."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:657
+msgid ""
+"The payout record could not be created. The referral may already have an "
+"active payout."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:70
+msgid "The specified payout does not exist."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:550
+msgid "The specified referral does not exist."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:127
+msgid ""
+"The webhook URL (%1$s) is not reachable: %2$s. The webhook was not "
+"registered — fix site reachability or configure payouts without webhooks "
+"(the hourly requery sweep still works)."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:106
+msgid "The webhook URL is not publicly reachable from this site."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:562
+msgid "There is no affiliate connected to this referral."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:589
+msgid "This affiliate account does not have a payment email."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-bank-accounts.php:124
+msgid "This affiliate has no bank account details on file."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:111
+msgid "This affiliate has no payment email on file."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:74
+msgid "This payout is not a CHIP Send payout."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:558
+msgid ""
+"This referral is already attached to a payout. Resolve that payout to pay it"
+" again."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:127
+msgid "Two characters used to prefix CHIP Send references."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:97
+msgid "Use the CHIP Send staging environment."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:138
+msgid "Webhook Public Key"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:188
+msgid "Webhook URL"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:351
+msgid "Webhook signature verification is not configured yet."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-api.php:141
+msgid "request failed"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-bank-accounts.php:168
+msgid "— Select bank —"
+msgstr ""
