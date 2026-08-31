@@ -3,12 +3,10 @@
  * Plugin Name: CHIP for AffiliateWP
  * Description: Pay affiliate commissions via CHIP Send payouts.
  * Version: 1.0.0
- * Author: Chip In Sdn Bhd
- * Author URI: https://www.chip-in.asia
+ * Author: wanzulnet
+ * Author URI: https://profiles.wordpress.org/wanzulnet/
  * Requires PHP: 7.1
  * Requires at least: 4.7
- *
- * Requires Plugins: affiliate-wp
  *
  * Copyright: © 2024-2026 CHIP
  * License: GNU General Public License v3.0
@@ -27,6 +25,16 @@ define( 'CHIP_AFFILIATEWP_FILE', __FILE__ );
 define( 'CHIP_AFFILIATEWP_BASENAME', plugin_basename( CHIP_AFFILIATEWP_FILE ) );
 define( 'CHIP_AFFILIATEWP_URL', plugin_dir_url( CHIP_AFFILIATEWP_FILE ) );
 define( 'CHIP_AFFILIATEWP_PATH', plugin_dir_path( CHIP_AFFILIATEWP_FILE ) );
+
+/**
+ * Loads the plugin text domain for translations.
+ *
+ * @return void
+ */
+function chip_affiliatewp_load_textdomain() {
+	load_plugin_textdomain( 'chip-for-affiliatewp', false, dirname( CHIP_AFFILIATEWP_BASENAME ) . '/languages' );
+}
+add_action( 'init', 'chip_affiliatewp_load_textdomain' );
 
 // Include plugin modules.
 require_once CHIP_AFFILIATEWP_PATH . 'includes/chip-affiliatewp-functions.php';
