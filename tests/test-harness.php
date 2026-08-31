@@ -201,12 +201,58 @@ function add_query_arg( $args, $url ) {
 	return $url . ( strpos( $url, '?' ) === false ? '?' : '&' ) . http_build_query( $args );
 }
 
+$GLOBALS['__transients'] = array();
+
+function get_transient( $key ) {
+	return $GLOBALS['__transients'][ $key ] ?? false;
+}
+
+function set_transient( $key, $value, $expiry = 0 ) {
+	$GLOBALS['__transients'][ $key ] = $value;
+	return true;
+}
+
+$GLOBALS['__options_store'] = array();
+
+function get_option( $name, $default = false ) {
+	return $GLOBALS['__options_store'][ $name ] ?? $default;
+}
+
+function update_option( $name, $value ) {
+	$GLOBALS['__options_store'][ $name ] = $value;
+	return true;
+}
+
+function current_user_can( $cap ) {
+	return true;
+}
+
+$GLOBALS['__probe_response'] = null; // WP_Error or array('code'=>..)
+
+function wp_remote_post( $url, $args = array() ) {
+	$GLOBALS['__probe_calls'][] = $url;
+
+	$response = $GLOBALS['__probe_response'] ?? array( 'response' => array( 'code' => 401 ), 'body' => '' );
+
+	if ( is_wp_error( $response ) ) {
+		return $response;
+	}
+
+	return $response;
+}
+
 function rawurlencode_deep( $v ) { return is_string( $v ) ? rawurlencode( $v ) : $v; }
 
 // WP settings object.
 class Fake_WP_Settings {
 	public function get( $key, $default = false ) {
 		return $GLOBALS['__options'][ $key ] ?? $default;
+	}
+	public function set( $settings, $save = false ) {
+		foreach ( (array) $settings as $k => $v ) {
+			$GLOBALS['__options'][ $k ] = $v;
+		}
+		return true;
 	}
 	public function register_section( ...$args ) {
 		$GLOBALS['__registered_sections'][] = $args;
@@ -487,6 +533,9 @@ function reset_state() {
 	$GLOBALS['__users']          = array();
 	$GLOBALS['__schedule']       = array();
 	$GLOBALS['__as']             = array();
+	$GLOBALS['__transients']     = array();
+	$GLOBALS['__probe_calls']    = array();
+	$GLOBALS['__probe_response'] = null;
 
 	$GLOBALS['__options']['chip_payouts']     = 1;
 	$GLOBALS['__options']['chip_test_mode']   = 1;
@@ -853,6 +902,71 @@ call_user_func( $GLOBALS['__activate_cb'] );
 check( 'hourly sweep scheduled', ! empty( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) );
 call_user_func( $GLOBALS['__deactivate_cb'] );
 check( 'sweep cleared', empty( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) );
+
+echo "\n== Test 19: webhook auto-registration (reachable site) ==\n";
+reset_state();
+$GLOBALS['__probe_response'] = array( 'response' => array( 'code' => 401 ), 'body' => '' );
+$GLOBALS['__options_store']['admin_email'] = 'admin@test.dev';
+// Probe OK (401 is still "reachable"), then list empty, create returns full record.
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'id' => 55, 'name' => 'AffiliateWP Payouts', 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'PUBKEY-TEST-55' ) );
+$result = chip_affiliatewp_ensure_webhook();
+check( 'webhook registered', true === $result );
+check( 'webhook id stored', 55 === (int) affiliate_wp()->settings->get( 'chip_webhook_id_test', '' ) );
+check( 'public key stored', 'PUBKEY-TEST-55' === (string) affiliate_wp()->settings->get( 'chip_webhook_key_test', '' ) );
+
+// Idempotent: second ensure sees stored webhook via fast path (GET /webhooks/55 only).
+$GLOBALS['__http_log'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/55', 'code' => 200, 'body' => array( 'id' => 55, 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'PUBKEY-TEST-55' ) );
+$result = chip_affiliatewp_ensure_webhook();
+check( 'fast path reuses stored webhook', true === $result && 1 === count( $GLOBALS['__http_log'] ) );
+
+// Webhook resolved from auto-registration verifies payload keys.
+check( 'webhook_configured true', true === chip_affiliatewp_webhook_configured() );
+check( 'public key resolver returns stored key', 'PUBKEY-TEST-55' === chip_affiliatewp_webhook_public_key() );
+
+echo "\n== Test 20: unreachable site must NOT register webhook ==\n";
+reset_state();
+$GLOBALS['__options_store']['admin_email'] = 'admin@test.dev';
+$GLOBALS['__probe_response'] = new WP_Error( 'http_request_failed', 'cURL error 7: Failed to connect' );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'id' => 99, 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'SHOULD-NOT-HAPPEN' ) );
+$result = chip_affiliatewp_ensure_webhook();
+check( 'registration refused when unreachable', is_wp_error( $result ) && 'chip_webhook_unreachable' === $result->get_error_code() );
+check( 'no webhook id stored', '' === (string) affiliate_wp()->settings->get( 'chip_webhook_id_test', '' ) );
+$methods_used = array_map( function ( $l ) { return $l['method']; }, $GLOBALS['__http_log'] );
+check( 'no register/update call made to CHIP only listed', ! in_array( 'POST', $methods_used, true ) && ! in_array( 'PATCH', $methods_used, true ) );
+
+// Probe failure cached: repeated attempts fail fast without a probe call.
+$GLOBALS['__probe_calls'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'results' => array() ) );
+$result = chip_affiliatewp_ensure_webhook( true );
+check( 'cached unreachability respected', is_wp_error( $result ) && 0 === count( array_filter( $GLOBALS['__probe_calls'] ) ) );
+
+echo "\n== Test 21: duplicate webhook discovery (re-list finds same URL) ==\n";
+reset_state();
+$GLOBALS['__probe_response'] = array( 'response' => array( 'code' => 401 ), 'body' => '' );
+$GLOBALS['__options_store']['admin_email'] = 'admin@test.dev';
+// List shows an existing webhook with our URL -> PATCH it, not POST.
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 71, 'callback_url' => chip_affiliatewp_webhook_url() ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/71', 'code' => 200, 'body' => array( 'id' => 71, 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'PUBKEY-71' ) );
+$GLOBALS['__http_log'] = array();
+$result = chip_affiliatewp_ensure_webhook( true );
+check( 'existing url webhook reused', true === $result && 71 === (int) affiliate_wp()->settings->get( 'chip_webhook_id_test', '' ) );
+$methods_used = array_map( function ( $l ) { return $l['method']; }, $GLOBALS['__http_log'] );
+check( 'list used GET then PATCH (no POST create)', ! in_array( 'POST', $methods_used, true ) );
+
+echo "\n== Test 22: webhook admin notices ==\n";
+reset_state();
+$GLOBALS['__probe_response'] = new WP_Error( 'http_request_failed', 'down' );
+$notices = chip_affiliatewp_webhook_setup_notices();
+check( 'notice when unreachable and no webhook', 1 === count( $notices ) );
+$GLOBALS['__probe_response'] = null;
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'id' => 80, 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'K80' ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 80, 'callback_url' => chip_affiliatewp_webhook_url() ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/80', 'code' => 200, 'body' => array( 'id' => 80, 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'K80' ) );
+$notices = chip_affiliatewp_webhook_setup_notices();
+check( 'no notice once webhook configured', 0 === count( $notices ) );
 
 echo "\n==============================\n";
 echo "PASSES: {$passes}  FAILURES: " . count( $failures ) . "\n";

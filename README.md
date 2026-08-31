@@ -43,14 +43,15 @@ Go to **AffiliateWP → Settings → Commissions → CHIP Send Payment Method**:
 
 On **Affiliates → Edit Affiliate**, set the affiliate's **Bank Code** and **Bank Account Number**. Payouts to affiliates without bank details are failed safely and their referrals released back to unpaid.
 
-### Webhook setup
+### Webhook setup (automatic)
 
-1. In the CHIP portal, create a CHIP Send webhook with:
-   - **Callback URL**: the Webhook URL shown in the plugin settings (e.g. `https://your-site.test/wp-json/chip-affiliatewp/v1/webhook`)
-   - **Event hooks**: `send_instruction_status` at minimum
-2. Copy the webhook's **public key** (from the webhook details) into the **Webhook Public Key** setting.
+The plugin registers its own CHIP Send webhook the first time settings are saved with credentials configured:
 
-Every delivery is verified against the RSA signature in its `X-Signature` header before anything is processed; unverified or redelivered events are rejected or ignored. Missing a delivery is not fatal — the hourly requery heals it.
+1. It checks whether the site's webhook URL is **publicly reachable** — if not, no webhook is created (a registered-but-unreachable webhook would only collect delivery failures); setup retries later from the admin dashboard.
+2. It reuses an existing webhook pointing at the site's webhook URL, or creates one (`AffiliateWP Payouts`, event hooks: `send_instruction_status`, `bank_account_status`).
+3. It stores the webhook's `public_key` and uses it to verify every inbound delivery's `X-Signature` header. Manual key entry via the **Webhook Public Key** setting still works and takes precedence.
+
+Missing a delivery is not fatal — payouts left in processing are requeried hourly from the CHIP Send API, and both paths converge on the same state machine.
 
 ## Testing the integration
 
