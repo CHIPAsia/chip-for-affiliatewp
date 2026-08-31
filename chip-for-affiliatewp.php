@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CHIP for AffiliateWP
  * Description: Pay affiliate commissions via CHIP Send payouts.
- * Version: 2.0.0
+ * Version: 1.0.0
  * Author: Chip In Sdn Bhd
  * Author URI: https://www.chip-in.asia
  * Requires PHP: 7.1
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 } // Cannot access directly.
 
 // Define plugin constants.
-define( 'CHIP_AFFILIATEWP_VERSION', '2.0.0' );
+define( 'CHIP_AFFILIATEWP_VERSION', '1.0.0' );
 define( 'CHIP_AFFILIATEWP_FILE', __FILE__ );
 define( 'CHIP_AFFILIATEWP_BASENAME', plugin_basename( CHIP_AFFILIATEWP_FILE ) );
 define( 'CHIP_AFFILIATEWP_URL', plugin_dir_url( CHIP_AFFILIATEWP_FILE ) );
