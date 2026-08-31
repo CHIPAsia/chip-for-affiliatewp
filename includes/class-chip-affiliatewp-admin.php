@@ -107,7 +107,7 @@ function chip_affiliatewp_register_settings( $settings ) {
 	$settings['chip_live_secret_key'] = array(
 		'name' => __( 'Live Secret Key', 'chip-for-affiliatewp' ),
 		'desc' => __( 'The CHIP Send live secret key. Used only for signing; it is never sent to CHIP.', 'chip-for-affiliatewp' ),
-		'type' => 'text',
+		'type' => 'password',
 	);
 
 	$settings['chip_test_api_key'] = array(
@@ -119,7 +119,7 @@ function chip_affiliatewp_register_settings( $settings ) {
 	$settings['chip_test_secret_key'] = array(
 		'name' => __( 'Test Secret Key', 'chip-for-affiliatewp' ),
 		'desc' => __( 'The CHIP Send test secret key. Used only for signing; it is never sent to CHIP.', 'chip-for-affiliatewp' ),
-		'type' => 'text',
+		'type' => 'password',
 	);
 
 	$settings['chip_reference_prefix'] = array(

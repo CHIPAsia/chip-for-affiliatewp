@@ -1,0 +1,14 @@
+=== CHIP for AffiliateWP Changelog ===
+
+All notable changes are documented in readme.txt (WordPress format).
+
+= 1.0.0 - 2026-09-01 =
+* Initial release: complete CHIP Send payout integration.
+* Signed API client (epoch + HMAC-SHA512 checksum) with test/live environment switching.
+* Payout method ("chip") participates in AffiliateWP payout batches and single-referral payments.
+* Automatic CHIP Send webhook registration (per-site secret URL, reachability-gated) with public-key capture; inbound deliveries RSA-verified; duplicate and out-of-order deliveries ignored.
+* Missed-webhook healing via scheduled status checks and an hourly requery sweep.
+* Idempotent payouts: deterministic unique references, existing-instruction reuse, and safe failure handling that releases referrals back to unpaid.
+* Affiliate bank details (bank code + account number) on the Edit Affiliate screen with Malaysian bank codes.
+* Bahasa Melayu translation included (ms_MY).
+* Optional recipient receipts on payouts.
