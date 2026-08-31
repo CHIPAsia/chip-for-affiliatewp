@@ -205,6 +205,18 @@ function add_query_arg( $args, $url ) {
 	return $url . ( strpos( $url, '?' ) === false ? '?' : '&' ) . http_build_query( $args );
 }
 
+function plugin_basename( $file ) {
+	return basename( dirname( $file ) ) . '/' . basename( $file );
+}
+
+function plugin_dir_url( $file ) {
+	return 'http://example.test/wp-content/plugins/' . basename( dirname( $file ) ) . '/';
+}
+
+function plugin_dir_path( $file ) {
+	return rtrim( dirname( $file ), '/' ) . '/';
+}
+
 $GLOBALS['__transients'] = array();
 
 function get_transient( $key ) {
@@ -592,6 +604,7 @@ function reset_state() {
 	$GLOBALS['__users']          = array();
 	$GLOBALS['__schedule']       = array();
 	$GLOBALS['__as']             = array();
+	$GLOBALS['__as_scheduled']   = array();
 	$GLOBALS['__transients']     = array();
 	$GLOBALS['__probe_calls']    = array();
 	$GLOBALS['__probe_response'] = null;
