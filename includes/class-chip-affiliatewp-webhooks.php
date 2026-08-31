@@ -12,21 +12,40 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Builds the plugin webhook URL.
  *
- * Prefers HTTPS when the request that registered the URL was made over SSL
- * (or an HTTPS-aware proxy header is present): CHIP Send deliveries must not
- * hop through an HTTP->HTTPS redirect, because some HTTP clients rewriting
- * the redirect change POST to GET and land on a 404.
+ * The URL carries a per-site secret path suffix (same pattern as
+ * chip-for-givewp): every WordPress install gets a different webhook URL,
+ * so the endpoint cannot be discovered by scanning for a fixed path. The
+ * secret is generated once per install and reused. Prefers HTTPS when the
+ * request context is SSL: CHIP Send deliveries must not hop through an
+ * HTTP->HTTPS redirect, because some HTTP clients rewriting the redirect
+ * change POST to GET and land on a 404.
  *
  * @return string
  */
 function chip_affiliatewp_webhook_url() {
-	$url = rest_url( 'chip-affiliatewp/v1/webhook' );
+	$url = rest_url( 'chip-affiliatewp/v1/webhook/' . chip_affiliatewp_webhook_secret() );
 
 	if ( is_ssl() ) {
 		$url = preg_replace( '#^http:#', 'https:', $url );
 	}
 
 	return $url;
+}
+
+/**
+ * Returns the per-site webhook URL secret, generating it on first use.
+ *
+ * @return string 32-char hex secret.
+ */
+function chip_affiliatewp_webhook_secret() {
+	$secret = affiliate_wp()->settings->get( 'chip_webhook_secret', '' );
+
+	if ( ! is_string( $secret ) || '' === $secret ) {
+		$secret = bin2hex( random_bytes( 16 ) );
+		affiliate_wp()->settings->set( array( 'chip_webhook_secret' => $secret ) );
+	}
+
+	return $secret;
 }
 
 /**
@@ -483,17 +502,42 @@ function chip_affiliatewp_find_payout_by_instruction_id( $instruction_id ) {
 /**
  * Registers the inbound webhook REST route.
  *
+ * The route path carries a per-site secret suffix: each WordPress install
+ * therefore has a different webhook URL, and requests to the bare path are
+ * answered 404 so the endpoint cannot be discovered by scanning.
+ *
  * @return void
  */
 function chip_affiliatewp_register_rest_route() {
+	$secret_suffix = chip_affiliatewp_webhook_secret();
+
 	register_rest_route(
 		'chip-affiliatewp/v1',
 		'/webhook',
+		array(
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => 'chip_affiliatewp_handle_webhook_not_found',
+			'permission_callback' => '__return_true',
+		)
+	);
+
+	register_rest_route(
+		'chip-affiliatewp/v1',
+		'/webhook/' . $secret_suffix,
 		array(
 			'methods'             => WP_REST_Server::CREATABLE,
 			'callback'            => 'chip_affiliatewp_handle_webhook',
 			'permission_callback' => '__return_true',
 		)
 	);
+}
+
+/**
+ * Answers requests to the undecorated webhook path with a 404.
+ *
+ * @return WP_Error
+ */
+function chip_affiliatewp_handle_webhook_not_found() {
+	return new WP_Error( 'rest_no_route', __( 'No route was found matching the URL and request method.', 'chip-for-affiliatewp' ), array( 'status' => 404 ) );
 }
 add_action( 'rest_api_init', 'chip_affiliatewp_register_rest_route' );
