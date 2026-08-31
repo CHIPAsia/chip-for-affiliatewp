@@ -12,10 +12,21 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Builds the plugin webhook URL.
  *
+ * Prefers HTTPS when the request that registered the URL was made over SSL
+ * (or an HTTPS-aware proxy header is present): CHIP Send deliveries must not
+ * hop through an HTTP->HTTPS redirect, because some HTTP clients rewriting
+ * the redirect change POST to GET and land on a 404.
+ *
  * @return string
  */
 function chip_affiliatewp_webhook_url() {
-	return rest_url( 'chip-affiliatewp/v1/webhook' );
+	$url = rest_url( 'chip-affiliatewp/v1/webhook' );
+
+	if ( is_ssl() ) {
+		$url = preg_replace( '#^http:#', 'https:', $url );
+	}
+
+	return $url;
 }
 
 /**
