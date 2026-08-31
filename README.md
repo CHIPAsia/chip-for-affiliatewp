@@ -9,9 +9,9 @@ Pay your affiliates' commissions as [CHIP Send](https://docs.chip-in.asia/chip-s
 1. Admin marks unpaid referrals for payment (single referral via the Referrals screen, or a batch via **AffiliateWP → Payouts**).
 2. The plugin registers the affiliate's bank account with CHIP Send (idempotent — one CHIP bank account per affiliate bank details) and creates a send instruction.
 3. The payout starts in **Processing**; referrals stay **Unpaid** until CHIP confirms.
-4. CHIP delivers a webhook; the payout flip to **Paid** and its referrals to **Paid**. If a delivery is ever missed, an hourly sweep requeries CHIP for any payout still in processing — the two paths converge on the same state machine, so money is marked paid only when CHIP says `completed`.
+4. CHIP delivers a webhook; the payout flips to **Paid** and its referrals to **Paid**. If a delivery is ever missed, an hourly sweep requeries CHIP for any payout still in processing — the two paths converge on the same state machine, so money is marked paid only when CHIP says `completed`.
 
-Duplicate protection: every send instruction carries a deterministic, unique reference derived from the payout ID, CHIP rejects duplicate submissions, and payouts already carrying an instruction are never re-sent.
+5. Duplicate protection: every send instruction carries a deterministic, unique reference derived from the payout ID; CHIP rejects duplicate submissions, and payouts already carrying an instruction are never re-sent.
 
 ## Compatibility
 

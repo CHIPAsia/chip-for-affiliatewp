@@ -39,7 +39,7 @@ function chip_affiliatewp_reference_prefix() {
  * Returns a stable per-affiliate bank account reference, derived from the
  * account details themselves.
  *
- * A reference derived from the account number and bank code meansCHIP can
+ * A reference derived from the account number and bank code means CHIP can
  * reject duplicate submissions for identical recipients, while corrected
  * details produce a fresh reference instead of colliding with a rejected
  * registration.
@@ -251,14 +251,14 @@ function chip_affiliatewp_bank_codes() {
 		'CHASMYKX' => 'JP Morgan Chase Bank Berhad',
 		'KFHOMYKL' => 'Kuwait Finance House',
 		'MBBEMYKL' => 'Maybank Berhad',
-		'AFBQMYKL' => 'MBSB BANK BERHAD',
+		'AFBQMYKL' => 'MBSB Bank Berhad',
 		'MHCBMYKA' => 'Mizuho Bank (Malaysia) Berhad',
 		'OCBCMYKL' => 'OCBC Bank Berhad',
 		'PBBEMYKL' => 'Public Bank Berhad',
 		'RHBBMYKL' => 'RHB Bank Berhad',
 		'SCBLMYKX' => 'Standard Chartered Bank Malaysia Berhad',
 		'SMBCMYKL' => 'Sumitomo Mitsui Banking Corporation (M) Berhad',
-		'TNGDMYNB' => 'Touch `n Go eWallet',
+		'TNGDMYNB' => 'Touch \'n Go eWallet',
 		'UOVBMYKL' => 'United Overseas Bank Berhad (UOB)',
 	);
 }

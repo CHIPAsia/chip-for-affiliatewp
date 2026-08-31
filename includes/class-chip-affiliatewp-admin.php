@@ -79,13 +79,6 @@ add_action( 'chip_affiliatewp_check_payout_status', 'chip_affiliatewp_run_schedu
  */
 add_action( 'chip_affiliatewp_hourly_sweep', 'chip_affiliatewp_sweep_processing_payouts' );
 
-
-/**
- * Runs the hourly sweep of processing payouts.
- */
-add_action( 'chip_affiliatewp_hourly_sweep', 'chip_affiliatewp_sweep_processing_payouts' );
-
-
 /**
  * Adds the CHIP Send settings to the Commissions tab.
  *
@@ -95,13 +88,13 @@ add_action( 'chip_affiliatewp_hourly_sweep', 'chip_affiliatewp_sweep_processing_
 function chip_affiliatewp_register_settings( $settings ) {
 	$settings['chip_payouts'] = array(
 		'name' => __( 'CHIP Send', 'chip-for-affiliatewp' ),
-		'desc' => __( 'Enable the CHIP Send payout method', 'chip-for-affiliatewp' ),
+		'desc' => __( 'Enable the CHIP Send payout method.', 'chip-for-affiliatewp' ),
 		'type' => 'checkbox',
 	);
 
 	$settings['chip_test_mode'] = array(
 		'name' => __( 'CHIP Send Test Mode', 'chip-for-affiliatewp' ),
-		'desc' => __( 'Use the CHIP Send staging environment', 'chip-for-affiliatewp' ),
+		'desc' => __( 'Use the CHIP Send staging environment.', 'chip-for-affiliatewp' ),
 		'type' => 'checkbox',
 	);
 
