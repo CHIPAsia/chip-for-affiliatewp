@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Syntax check all PHP files
+        run: |
+          ERR=0
+          for f in $(find . -name "*.php" -not -path "./vendor/*" -not -path "./node_modules/*"); do
+            php -l "$f" > /dev/null 2>&1 || { echo "SYNTAX ERROR: $f"; ERR=1; }
+          done
+          exit $ERR
+
+      - name: Run test harness
+        run: php -f tests/test-harness.php
+
+  phpcs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: phpcs
+
+      - name: Install WordPress coding standards
+        run: |
+          composer global require wp-coding-standards/wpcs dealerdirect/phpcodesniffer-composer-installer --no-interaction
+          echo "$(composer global config home --absolute 2>/dev/null)/vendor/bin" >> "$GITHUB_PATH"
+          phpcs --config-set installed_paths "$(composer global config home --absolute 2>/dev/null)/vendor/wp-coding-standards/wpcs"
+
+      - name: PHPCS (WordPress standards)
+        run: phpcs --standard=phpcs.xml .
