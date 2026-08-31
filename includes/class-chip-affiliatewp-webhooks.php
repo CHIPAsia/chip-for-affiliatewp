@@ -238,8 +238,17 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 	if ( $existing_id ) {
 		$response = chip_affiliatewp_request( 'PATCH', '/webhooks/' . $existing_id, $body );
 	} elseif ( $stale_id ) {
-		// Same-named webhook from an older site URL; repoint it here.
-		$response = chip_affiliatewp_request( 'PATCH', '/webhooks/' . $stale_id, $body );
+		// Same-named webhook from an older site URL; repoint it here. The
+		// CHIP Send API PATCH endpoint only applies the name field, so a
+		// repoint requires deleting the stale webhook and creating a new
+		// one with the current callback URL.
+		$deleted = chip_affiliatewp_request( 'DELETE', '/webhooks/' . $stale_id );
+
+		if ( is_wp_error( $deleted ) ) {
+			$response = $deleted;
+		} else {
+			$response = chip_affiliatewp_request( 'POST', '/webhooks', $body );
+		}
 	} else {
 		$response = chip_affiliatewp_request( 'POST', '/webhooks', $body );
 	}
