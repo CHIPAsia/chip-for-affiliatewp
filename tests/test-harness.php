@@ -177,6 +177,10 @@ function wp_remote_request( $url, $args ) {
 
 	foreach ( $GLOBALS['__http_queue'] as $idx => $entry ) {
 		if ( false !== strpos( $url, $entry['match'] ) ) {
+			// Optional host constraint: only match when the URL hits the named host.
+			if ( ! empty( $entry['url_host'] ) && false === strpos( $url, $entry['url_host'] ) ) {
+				continue;
+			}
 			unset( $GLOBALS['__http_queue'][ $idx ] );
 			$GLOBALS['__http_queue'] = array_values( $GLOBALS['__http_queue'] );
 			return array(
@@ -367,6 +371,55 @@ class Fake_Payouts_DB {
 		}
 		return true;
 	}
+
+	public function get_item( $payout_id ) {
+		return isset( $GLOBALS['__payout_rows'][ $payout_id ] )
+			? $GLOBALS['__payout_rows'][ $payout_id ]
+			: null;
+	}
+}
+
+/**
+ * Adds a processing payout row for a batch of tests.
+ *
+ * @param int    $payout_id    Payout ID to use.
+ * @param int    $affiliate_id Affiliate ID.
+ * @param string $amount       Amount.
+ * @return int Payout ID.
+ */
+function harness_add_payout( $payout_id, $affiliate_id, $amount, $batch_id = 0, $status = 'processing' ) {
+	$GLOBALS['__payout_rows'][ $payout_id ] = (object) array(
+		'payout_id'            => $payout_id,
+		'affiliate_id'         => $affiliate_id,
+		'referrals'            => '',
+		'amount'               => $amount,
+		'payout_method'        => 'chip',
+		'status'               => $status,
+		'batch_id'             => $batch_id,
+		'service_id'           => 0,
+		'service_invoice_link' => '',
+		'description'          => '',
+	);
+	return $payout_id;
+}
+
+/**
+ * Plucks a column, mirroring WP's wp_list_pluck.
+ *
+ * @param array  $list List of arrays/objects.
+ * @param string $key  Field to pluck.
+ * @return array
+ */
+function wp_list_pluck( $list, $key ) {
+	$out = array();
+	foreach ( $list as $item ) {
+		if ( is_object( $item ) ) {
+			$out[] = $item->{$key};
+		} else {
+			$out[] = isset( $item[ $key ] ) ? $item[ $key ] : null;
+		}
+	}
+	return $out;
 }
 
 class Fake_User {
@@ -458,7 +511,13 @@ function affwp_add_payout( $args ) {
 }
 
 function as_schedule_single_action( $ts, $hook, $args, $group ) {
-	$GLOBALS['__as'][] = array( $ts, $hook, $args );
+	$GLOBALS['__as'][]             = array( $ts, $hook, $args );
+	$GLOBALS['__as_scheduled'][]  = array(
+		'timestamp' => $ts,
+		'hook'      => $hook,
+		'args'      => $args,
+		'group'     => $group,
+	);
 	return 1;
 }
 
@@ -820,11 +879,17 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 		'batch_id'      => 9,
 	)
 );
+$globals_referrals = 61;
 $GLOBALS['__referral_rows'][61] = new Fake_Referral( 61, 3, '300.00', 'unpaid', $payout_id );
+$GLOBALS['__as_scheduled'] = array();
+do_action( 'affwp_batch_generate_payouts_completed', 9 );
+check( 'batch schedules one AS action per payout', 1 === count( $GLOBALS['__as_scheduled'] ) );
+check( 'batch does not submit inline', 0 === count( array_filter( $GLOBALS['__http_log'], function ( $l ) { return false !== strpos( $l['url'], 'send_instructions' ); } ) ) );
+// Process the scheduled submission for real.
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 84, 'status' => 'verified', 'reference' => 'XT' ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 950, 'state' => 'received' ) );
-do_action( 'affwp_batch_generate_payouts_completed', 9 );
+call_user_func( 'chip_affiliatewp_run_scheduled_submission', $payout_id );
 $row = affwp_get_payout( $payout_id );
 check( 'batch payout submitted', 950 === (int) json_decode( $row->description, true )['instruction_id'] );
 
@@ -967,6 +1032,132 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/80', 'code' => 200, 'body' => array( 'id' => 80, 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'K80' ) );
 $notices = chip_affiliatewp_webhook_setup_notices();
 check( 'no notice once webhook configured', 0 === count( $notices ) );
+
+echo "\n== Test 23: failed payout can heal to paid (double-pay guard) ==\n";
+reset_state();
+$fail_payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 14 ),
+		'amount'        => '10.00',
+		'payout_method' => 'chip',
+		'status'        => 'failed',
+	)
+);
+$GLOBALS['__referral_rows'][14] = new Fake_Referral( 14, 3, '10.00', 'unpaid', $fail_payout_id );
+affiliate_wp()->affiliates->payouts->update(
+	$fail_payout_id,
+	array( 'service_id' => 7001 ),
+	'',
+	'payout'
+);
+// Late 'completed' webhook for an instruction the plugin thought had failed.
+$result = chip_affiliatewp_apply_instruction(
+	$fail_payout_id,
+	array( 'id' => 7001, 'state' => 'completed', 'receipt_url' => 'https://staging.chip-in.asia/receipts/send/heal1' )
+);
+check( 'completed heals failed payout', true === $result );
+check( 'payout now paid', 'paid' === affiliate_wp()->affiliates->payouts->get_item( $fail_payout_id )->status );
+check( 'referral healed to paid', 'paid' === $GLOBALS['__referral_rows'][14]->status );
+// Non-terminal state on a failed payout must NOT resurrect it, just acknowledge.
+$fail2 = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 15 ),
+		'amount'        => '5.00',
+		'payout_method' => 'chip',
+		'status'        => 'failed',
+	)
+);
+$GLOBALS['__referral_rows'][15] = new Fake_Referral( 15, 3, '5.00', 'unpaid', $fail2 );
+check(
+	'executing delivery on failed payout acknowledged without changes',
+	true === chip_affiliatewp_apply_instruction( $fail2, array( 'id' => 7002, 'state' => 'executing' ) )
+		&& 'failed' === affiliate_wp()->affiliates->payouts->get_item( $fail2 )->status
+);
+
+echo "\n== Test 24: requery only uses valid payout statuses (unpaid is a referral status) ==\n";
+reset_state();
+$GLOBALS['__options']['chip_test_mode']     = 1;
+$GLOBALS['__options']['chip_payouts']       = 1;
+$GLOBALS['__options']['chip_test_api_key']  = 'ktest';
+$GLOBALS['__options']['chip_test_secret_key'] = 'stest';
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 16 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][16] = new Fake_Referral( 16, 3, '2.00', 'unpaid', $payout_id );
+affiliate_wp()->affiliates->payouts->update( $payout_id, array( 'service_id' => 7100 ), '', 'payout' );
+$GLOBALS['__http_queue'][] = array(
+	'match' => '/send/send_instructions/7100',
+	'code'  => 200,
+	'body'  => array( 'id' => 7100, 'state' => 'completed', 'receipt_url' => 'https://staging.chip-in.asia/receipts/send/rq1' ),
+);
+chip_affiliatewp_check_payout_status( $payout_id, false );
+check( 'processing payout resolved by service_id lookup path', 'paid' === affiliate_wp()->affiliates->payouts->get_item( $payout_id )->status );
+
+echo "\n== Test 25: batch submissions fan out to scheduled actions (no inline HTTP) ==\n";
+reset_state();
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'ktest';
+$GLOBALS['__options']['chip_test_secret_key'] = 'stest';
+for ( $i = 21; $i <= 23; $i++ ) {
+	harness_add_payout( $i, 3, '1.00', 42 );
+}
+$GLOBALS['__as_scheduled'] = array();
+chip_affiliatewp_process_generated_batch( 42 );
+check( 'one scheduled action per processing payout', 3 === count( $GLOBALS['__as_scheduled'] ) );
+$delay_sequence = wp_list_pluck( $GLOBALS['__as_scheduled'], 'timestamp' );
+check( 'submissions staggered in time', $delay_sequence[0] <= $delay_sequence[1] && $delay_sequence[1] <= $delay_sequence[2] );
+check( 'no inline submission (http log empty)', 0 === count( $GLOBALS['__http_log'] ) );
+
+echo "\n== Test 26: stored mode survives a live test-mode flip ==\n";
+reset_state();
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'ktest';
+$GLOBALS['__options']['chip_test_secret_key'] = 'stest';
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 24 ),
+		'amount'        => '3.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][24] = new Fake_Referral( 24, 3, '3.00', 'unpaid', $payout_id );
+affiliate_wp()->affiliates->payouts->update(
+	$payout_id,
+	array( 'service_id' => 7200, 'description' => wp_json_encode( array( 'instruction_id' => 7200, 'mode' => 'test' ) ) ),
+	'',
+	'payout'
+);
+// Admin flips to live mode with live credentials; test host still answers.
+$GLOBALS['__options']['chip_test_mode']        = 0;
+$GLOBALS['__options']['chip_live_api_key']     = 'klive';
+$GLOBALS['__options']['chip_live_secret_key']  = 'slive';
+$GLOBALS['__http_queue'][] = array(
+	'match'    => '/send/send_instructions/7200',
+	'url_host' => 'staging-api.chip-in.asia',
+	'code'     => 200,
+	'body'     => array( 'id' => 7200, 'state' => 'completed', 'receipt_url' => 'https://staging.chip-in.asia/receipts/send/mode1' ),
+);
+chip_affiliatewp_check_payout_status( $payout_id, false );
+check(
+	'payout resolved against its stored mode after mode flip',
+	'paid' === affiliate_wp()->affiliates->payouts->get_item( $payout_id )->status
+);
 
 echo "\n==============================\n";
 echo "PASSES: {$passes}  FAILURES: " . count( $failures ) . "\n";

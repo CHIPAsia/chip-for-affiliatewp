@@ -24,12 +24,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 define( 'CHIP_AFFILIATEWP_VERSION', '2.0.0' );
 
 /**
- * Returns the CHIP Send API base URL for the current mode.
+ * Returns the CHIP Send API base URL for a mode.
  *
+ * @param string|null $mode 'test', 'live', or null for the current mode.
  * @return string Base URL without trailing slash.
  */
-function chip_affiliatewp_api_base_url() {
-	if ( affiliate_wp()->settings->get( 'chip_test_mode' ) ) {
+function chip_affiliatewp_api_base_url( $mode = null ) {
+	$test_mode = null === $mode
+		? (bool) affiliate_wp()->settings->get( 'chip_test_mode' )
+		: ( 'test' === $mode );
+
+	if ( $test_mode ) {
 		return 'https://staging-api.chip-in.asia/api';
 	}
 
@@ -37,26 +42,30 @@ function chip_affiliatewp_api_base_url() {
 }
 
 /**
- * Returns the settings key matching the configured environment.
+ * Returns the settings key matching a mode.
  *
- * @param string $suffix Settings key suffix, e.g. "api_key".
+ * @param string      $suffix Settings key suffix, e.g. "api_key".
+ * @param string|null $mode   'test' or 'live'; null uses the current mode.
  * @return string Settings key such as "chip_test_api_key".
  */
-function chip_affiliatewp_setting_key( $suffix ) {
-	$mode = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
+function chip_affiliatewp_setting_key( $suffix, $mode = null ) {
+	if ( null === $mode ) {
+		$mode = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
+	}
 
 	return 'chip_' . $mode . '_' . $suffix;
 }
 
 /**
- * Returns the configured API credentials for the current mode.
+ * Returns the configured API credentials for a mode.
  *
+ * @param string|null $mode 'test' or 'live'; null uses the current mode.
  * @return array { api_key: string, secret_key: string }
  */
-function chip_affiliatewp_credentials() {
+function chip_affiliatewp_credentials( $mode = null ) {
 	return array(
-		'api_key'    => (string) affiliate_wp()->settings->get( chip_affiliatewp_setting_key( 'api_key' ) ),
-		'secret_key' => (string) affiliate_wp()->settings->get( chip_affiliatewp_setting_key( 'secret_key' ) ),
+		'api_key'    => (string) affiliate_wp()->settings->get( chip_affiliatewp_setting_key( 'api_key', $mode ) ),
+		'secret_key' => (string) affiliate_wp()->settings->get( chip_affiliatewp_setting_key( 'secret_key', $mode ) ),
 	);
 }
 
@@ -104,23 +113,24 @@ function chip_affiliatewp_substr( $text, $limit ) {
  * Every request carries a fresh epoch and an HMAC-SHA512 checksum of
  * "<epoch><api_key>" signed with the API secret.
  *
- * @param string $method HTTP method, "GET" or "POST".
- * @param string $path   API path beginning with a slash, e.g. "/send/send_instructions".
- * @param array  $body   Optional JSON payload for POST requests.
- * @param array  $query  Optional query parameters.
+ * @param string      $method HTTP method, "GET" or "POST".
+ * @param string      $path   API path beginning with a slash, e.g. "/send/send_instructions".
+ * @param array       $body   Optional JSON payload for POST requests.
+ * @param array       $query  Optional query parameters.
+ * @param string|null $mode   'test' or 'live'; null uses the current mode.
  * @return array|WP_Error Decoded JSON response, or WP_Error on failure.
  */
-function chip_affiliatewp_request( $method, $path, $body = array(), $query = array() ) {
-	$credentials = chip_affiliatewp_credentials();
+function chip_affiliatewp_request( $method, $path, $body = array(), $query = array(), $mode = null ) {
+	$credentials = chip_affiliatewp_credentials( $mode );
 
 	if ( '' === $credentials['api_key'] || '' === $credentials['secret_key'] ) {
 		return new WP_Error( 'chip_missing_credentials', __( 'CHIP Send API credentials are not configured.', 'chip-for-affiliatewp' ) );
 	}
 
-	$url = chip_affiliatewp_api_base_url() . $path;
+	$url = chip_affiliatewp_api_base_url( $mode ) . $path;
 
 	if ( ! empty( $query ) ) {
-		$url = add_query_arg( array_map( 'rawurlencode', $query ), $url );
+		$url = add_query_arg( $query, $url );
 	}
 
 	$epoch    = (string) time();
@@ -606,8 +616,8 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 		return false;
 	}
 
-	// Terminal payouts are already resolved; redelivered webhooks are acknowledged no-ops.
-	if ( in_array( $payout->status, array( 'paid', 'failed' ), true ) ) {
+	// Paid payouts are fully resolved; redelivered webhooks are acknowledged no-ops.
+	if ( 'paid' === $payout->status ) {
 		return true;
 	}
 
@@ -615,6 +625,15 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 
 	if ( '' === $state ) {
 		return false;
+	}
+
+	// A failed payout is not necessarily terminal at CHIP: the instruction may
+	// exist there and later complete (e.g. the create call timed out after the
+	// server accepted it). Let a completed/rejected delivery heal the record so
+	// AffiliateWP's auto-retry of failed payouts cannot pay the referral twice.
+	if ( 'failed' === $payout->status && ! in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) ) {
+		// Still in flight or unknown: acknowledge the delivery without changes.
+		return true;
 	}
 
 	$data = chip_affiliatewp_payout_data( $payout );
@@ -678,6 +697,16 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 }
 
 /**
+ * Fetches a CHIP Send instruction by ID.
+ *
+ * @param int $instruction_id CHIP Send instruction ID.
+ * @return array|WP_Error Instruction payload, or WP_Error on failure.
+ */
+function chip_affiliatewp_get_instruction( $instruction_id ) {
+	return chip_affiliatewp_request( 'GET', '/send/send_instructions/' . rawurlencode( (string) $instruction_id ) );
+}
+
+/**
  * Requeries the CHIP Send instruction attached to a payout.
  *
  * Heals missed webhooks: the authoritative state is read back from the API.
@@ -693,11 +722,17 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 		return;
 	}
 
-	if ( in_array( $payout->status, array( 'paid', 'failed' ), true ) ) {
+	if ( 'paid' === $payout->status ) {
 		return;
 	}
 
 	$data = chip_affiliatewp_payout_data( $payout );
+
+	if ( empty( $data['instruction_id'] ) && ! empty( $payout->service_id ) ) {
+		// The instruction ID survived in the payouts table (e.g. data JSON was
+		// rewritten by a failure) but not in the payout meta: adopt it.
+		$data['instruction_id'] = (int) $payout->service_id;
+	}
 
 	if ( empty( $data['instruction_id'] ) ) {
 		// Nothing submitted yet; let the sweep retry the submission instead.
@@ -706,12 +741,37 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 		return;
 	}
 
-	$response = chip_affiliatewp_request( 'GET', '/send/send_instructions/' . rawurlencode( (string) $data['instruction_id'] ) );
+	// A failed payout that carries an instruction must reconcile instead of
+	// being retried: the instruction may have completed after a transient
+	// failure (timeout between us and CHIP). Requery and let apply_instruction
+	// heal the record so the affiliate cannot be paid twice.
+	$response = chip_affiliatewp_get_instruction( (int) $data['instruction_id'] );
+
+	if ( is_wp_error( $response ) ) {
+		// Mode flipped after submission: the payout would otherwise be polled
+		// against the wrong host forever. Resolve against the mode it was
+		// submitted in before giving up this pass.
+		$stored_mode = (string) chip_affiliatewp_array_value( $data, 'mode' );
+
+		if ( in_array( $stored_mode, array( 'test', 'live' ), true ) ) {
+			$probe = chip_affiliatewp_request(
+				'GET',
+				'/send/send_instructions/' . rawurlencode( (string) $data['instruction_id'] ),
+				array(),
+				array(),
+				$stored_mode
+			);
+
+			if ( ! is_wp_error( $probe ) ) {
+				$response = $probe;
+			}
+		}
+	}
 
 	if ( is_wp_error( $response ) ) {
 		$data['poll_count'] = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );
 		$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
-	 chip_affiliatewp_update_payout_data( $payout_id, $data );
+		chip_affiliatewp_update_payout_data( $payout_id, $data );
 
 		if ( $reschedule ) {
 			chip_affiliatewp_schedule_check( $payout_id, 300 );
@@ -779,6 +839,10 @@ function chip_affiliatewp_sweep_processing_payouts() {
 /**
  * Submits every CHIP payout of a completed payout batch.
  *
+ * Submissions are fanned out one Action Scheduler action per payout (the same
+ * pattern Stripe uses) so a large batch cannot hit the PHP time limit part
+ * way through a long chain of synchronous CHIP round-trips.
+ *
  * @param int $batch_id Payout batch ID.
  * @return void
  */
@@ -806,9 +870,35 @@ function chip_affiliatewp_process_generated_batch( $batch_id ) {
 		return;
 	}
 
+	$delay = 0;
+
 	foreach ( $payouts as $payout ) {
-		chip_affiliatewp_submit_payout( (int) $payout->payout_id );
+		as_schedule_single_action(
+			time() + $delay,
+			'chip_affiliatewp_submit_payout_action',
+			array( 'payout_id' => (int) $payout->payout_id ),
+			'chip-affiliatewp'
+		);
+
+		// Stagger submissions so concurrent bank-account lookups do not pile up.
+		$delay += 5;
 	}
+}
+
+add_action( 'chip_affiliatewp_submit_payout_action', 'chip_affiliatewp_run_scheduled_submission' );
+
+/**
+ * Runs a scheduled single-payout submission.
+ *
+ * @param int $payout_id Payout ID.
+ * @return void
+ */
+function chip_affiliatewp_run_scheduled_submission( $payout_id ) {
+	if ( ! affiliate_wp()->settings->get( 'chip_payouts' ) || ! chip_affiliatewp_has_credentials() ) {
+		return;
+	}
+
+	chip_affiliatewp_submit_payout( absint( $payout_id ) );
 }
 
 /**
@@ -1376,15 +1466,18 @@ function chip_affiliatewp_find_payout_by_instruction_id( $instruction_id ) {
 	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
 		array(
 			'payout_method' => 'chip',
-			'status'        => array( 'processing', 'paid', 'failed', 'unpaid' ),
+			'status'        => array( 'processing', 'paid', 'failed' ),
 			'service_id'    => $instruction_id,
 			'number'        => 1,
-			'fields'        => 'payout_id',
 		)
 	);
 
 	if ( ! empty( $payouts ) ) {
 		$found = is_array( $payouts ) ? array_shift( $payouts ) : $payouts;
+
+		if ( is_object( $found ) ) {
+			return absint( $found->payout_id );
+		}
 
 		return absint( $found );
 	}
@@ -1438,7 +1531,9 @@ add_action( 'affwp_batch_generate_payouts_completed', 'chip_affiliatewp_process_
  * @return array
  */
 function chip_affiliatewp_register_single_referral_handler( $handlers ) {
-	$handlers['chip'] = 'chip_affiliatewp_pay_single_referral';
+	if ( affiliate_wp()->settings->get( 'chip_payouts' ) ) {
+		$handlers['chip'] = 'chip_affiliatewp_pay_single_referral';
+	}
 
 	return $handlers;
 }
@@ -1713,6 +1808,7 @@ function chip_affiliatewp_affiliate_bank_fields( $affiliate ) {
 		</th>
 		<td>
 			<select name="payment_bank_code" id="payment_bank_code">
+				<option value="" <?php selected( $details['bank_code'], '' ); ?>><?php esc_html_e( '— Select bank —', 'chip-for-affiliatewp' ); ?></option>
 				<?php foreach ( chip_affiliatewp_bank_codes() as $bank_code => $label ) : ?>
 					<option value="<?php echo esc_attr( $bank_code ); ?>" <?php selected( $details['bank_code'], $bank_code ); ?>>
 						<?php echo esc_html( $label ); ?>
