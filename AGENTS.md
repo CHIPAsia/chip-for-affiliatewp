@@ -101,7 +101,7 @@ Defined in three places — bump together:
 - readme.txt follows the full WordPress readme format (headers, description,
   installation, FAQ, changelog, upgrade notice); `Tested up to` tracks the
   current WordPress major release.
-- Author: Chip In Sdn Bhd (https://chip-in.asia); contributors list the
+- Author: CHIP IN SDN BHD (https://chip-in.asia); contributors list the
   wordpress.org username.
 - i18n: all user-facing strings use `__('…', 'chip-for-affiliatewp')`;
   `load_plugin_textdomain` runs on `init`; `languages/` holds offline `.mo`
