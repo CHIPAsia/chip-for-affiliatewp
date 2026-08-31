@@ -1,0 +1,14 @@
+# Files that must NOT be included in the WordPress.org SVN submission
+# (development-only artifacts). Used with `wp dist-archive` or build-dist.sh.
+
+.git
+.github
+dist
+scripts
+tests
+README.md
+AGENTS.md
+CLAUDE.md
+*.distignore
+.DS_Store
+*.bak
