@@ -4,7 +4,7 @@ Tags: affiliatewp, affiliates, payouts, chip send, malaysia
 Requires at least: 4.7
 Tested up to: 6.8
 Requires PHP: 7.1
-Stable tag: 2.0.0
+Stable tag: 1.0.0
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -60,8 +60,9 @@ In the CHIP portal under Control → Settings → Applications. The secret key i
 
 == Changelog ==
 
-= 2.0.0 =
-* Complete CHIP Send payout integration: signed API client (epoch + HMAC-SHA512 checksum) with test/live environment switching.
+= 1.0.0 =
+* Initial release: complete CHIP Send payout integration.
+* Signed API client (epoch + HMAC-SHA512 checksum) with test/live environment switching.
 * Payout method ("chip") available to affiliates; participates in AffiliateWP payout batches and single-referral payments.
 * Automatic CHIP Send webhook registration with public-key capture; inbound deliveries signature-verified; duplicate and out-of-order deliveries ignored.
 * Missed-webhook healing via scheduled status checks and an hourly requery sweep.
@@ -69,10 +70,7 @@ In the CHIP portal under Control → Settings → Applications. The secret key i
 * Affiliate bank details (bank code + account number) on the Edit Affiliate screen with Malaysian bank codes.
 * Optional recipient receipts on payouts.
 
-= 1.0.0 =
-* Initial proof-of-concept release.
-
 == Upgrade Notice ==
 
-= 2.0.0 =
+= 1.0.0 =
 Full CHIP Send payout support with webhooks and automatic retries. Test mode credentials are configured separately from live credentials — check your settings after upgrading.
