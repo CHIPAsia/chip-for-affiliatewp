@@ -3,8 +3,8 @@
  * Plugin Name: CHIP for AffiliateWP
  * Description: Pay affiliate commissions via CHIP Send payouts.
  * Version: 1.0.0
- * Author: wanzulnet
- * Author URI: https://profiles.wordpress.org/wanzulnet/
+ * Author: Chip In Sdn Bhd
+ * Author URI: https://chip-in.asia
  * Requires PHP: 7.1
  * Requires at least: 4.7
  *

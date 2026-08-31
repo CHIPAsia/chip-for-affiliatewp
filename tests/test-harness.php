@@ -846,6 +846,10 @@ $details = openssl_pkey_get_details( $keypair );
 $pub_pem = $details['key'];
 $GLOBALS['__options']['chip_webhook_public_key'] = $pub_pem;
 
+// Webhook URL now carries a per-site secret suffix; the settings store must
+// have a secret so the harness URL matches the registered rest route stub.
+$GLOBALS['__options']['chip_webhook_secret'] = 'fixedharnesssecret000000000000000000';
+
 $body = json_encode( array( 'id' => 900, 'state' => 'completed', 'reference' => 'XT-PO-501' ) );
 openssl_sign( $body, $sig, $priv_pem, OPENSSL_ALGO_SHA512 );
 $request = new Fake_Request();
