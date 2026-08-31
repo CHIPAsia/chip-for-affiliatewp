@@ -1,0 +1,29 @@
+{
+    "name": "chipasia/chip-for-affiliatewp",
+    "description": "CHIP Send payouts for AffiliateWP — pay affiliate commissions straight to Malaysian bank accounts.",
+    "type": "wordpress-plugin",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "CHIP IN SDN BHD",
+            "homepage": "https://chip-in.asia"
+        }
+    ],
+    "require": {
+        "php": ">=7.1"
+    },
+    "require-dev": {
+        "wp-coding-standards/wpcs": "^3.1",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+    },
+    "scripts": {
+        "test": "php -f tests/test-harness.php",
+        "lint": "phpcs --standard=phpcs.xml .",
+        "dist": "bash scripts/build-dist.sh"
+    },
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    }
+}
