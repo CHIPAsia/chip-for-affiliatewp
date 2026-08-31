@@ -168,6 +168,19 @@ function is_wp_error( $thing ) {
 }
 
 function wp_remote_request( $url, $args ) {
+	// Delayed-verification simulation: when set, bank account lookups report
+	// the overridden status instead of the queued response.
+	if ( ! empty( $GLOBALS['__chip_bank_lookup_override'] ) && false !== strpos( $url, '/send/bank_accounts' ) ) {
+		$override = $GLOBALS['__chip_bank_lookup_override'];
+		$code     = 200;
+		$is_post  = 0 === strpos( $args['method'] ?? 'GET', 'POST' );
+		$body     = $is_post ? $override : array( 'results' => array( $override ) );
+		return array(
+			'response' => array( 'code' => $code ),
+			'body'     => json_encode( $body ),
+		);
+	}
+
 	$GLOBALS['__http_log'][] = array(
 		'url'     => $url,
 		'method'  => $args['method'] ?? 'GET',
@@ -1194,5 +1207,10 @@ echo "PASSES: {$passes}  FAILURES: " . count( $failures ) . "\n";
 if ( $failures ) {
 	echo "Failed:\n  - " . implode( "\n  - ", $failures ) . "\n";
 	exit( 1 );
+}
+
+// Allow other scripts to include this file for its stubs without re-running the tests.
+if ( defined( 'CHIP_AFFILIATEWP_HARNESS_SKIP_RUNNER' ) ) {
+	return;
 }
 exit( 0 );
