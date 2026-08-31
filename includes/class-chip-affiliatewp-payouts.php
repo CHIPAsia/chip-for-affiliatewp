@@ -75,7 +75,7 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 	}
 
 	if ( ! chip_affiliatewp_has_credentials() ) {
-		return new WP_Error( 'chip_missing_credentials', __( 'Please enter your CHIP Send API credentials in Affiliates > Settings > Commissions > CHIP Send before attempting to process payments.', 'chip-for-affiliatewp' ) );
+		return new WP_Error( 'chip_missing_credentials', __( 'Please enter your CHIP Send API credentials in AffiliateWP → Settings → Commissions → CHIP Send before attempting to process payments.', 'chip-for-affiliatewp' ) );
 	}
 
 	$data = chip_affiliatewp_payout_data( $payout );
@@ -563,7 +563,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	}
 
 	if ( ! chip_affiliatewp_has_credentials() ) {
-		return new WP_Error( 'chip_missing_credentials', __( 'Please enter your CHIP Send API credentials in Affiliates > Settings > Commissions > CHIP Send before attempting to process payments.', 'chip-for-affiliatewp' ) );
+		return new WP_Error( 'chip_missing_credentials', __( 'Please enter your CHIP Send API credentials in AffiliateWP → Settings → Commissions → CHIP Send before attempting to process payments.', 'chip-for-affiliatewp' ) );
 	}
 
 	$reference  = chip_affiliatewp_reference_prefix() . '-R-' . $referral_id;
@@ -592,6 +592,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	$instruction_description = chip_affiliatewp_substr(
 		(string) $referral->description !== ''
 			? (string) $referral->description
+			// translators: %d: Referral ID
 			: sprintf( __( 'Commission for referral #%d', 'chip-for-affiliatewp' ), $referral_id ),
 		140
 	);

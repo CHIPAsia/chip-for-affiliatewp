@@ -2,7 +2,7 @@
 Contributors: wanzulnet
 Tags: affiliatewp, affiliates, payouts, chip send, malaysia
 Requires at least: 4.7
-Tested up to: 7.1
+Tested up to: 7.0
 Requires PHP: 7.1
 Stable tag: 1.0.0
 License: GPLv3 or later
@@ -36,9 +36,9 @@ All Malaysian banks and e-wallets supported by CHIP Send FPX payouts, including 
 2. Upload the plugin zip via **Plugins → Add New → Upload Plugin** and activate.
 3. Go to **AffiliateWP → Settings → Commissions → CHIP Send Payment Method**:
    * Tick **CHIP Send** to enable the payout method.
-   * Tick **CHIP Send Test Mode** and fill the Test API Key / Test Secret Key while evaluating; switch to the Live keys when going live.
+   * Tick **CHIP Send Test Mode** and fill in the Test API Key and Test Secret Key while evaluating; switch to the Live keys when going live.
 4. Ensure each affiliate has bank details set before paying them.
-5. Pay unpaid referrals as usual (single *Pay* action on the Referrals screen, or a payout batch). The webhook registers itself automatically once credentials are saved.
+5. Pay unpaid referrals as usual (a single *Pay* action on the Referrals screen, or a payout batch). The webhook registers itself automatically once credentials are saved.
 
 == Frequently Asked Questions ==
 

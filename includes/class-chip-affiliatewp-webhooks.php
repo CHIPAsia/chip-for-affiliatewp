@@ -393,7 +393,7 @@ function chip_affiliatewp_handle_webhook( $request ) {
 	}
 
 	if ( empty( $payload['id'] ) || ! isset( $payload['state'] ) ) {
-		return new WP_Error( 'chip_webhook_incomplete', __( 'Payload missing send instruction ID or state.', 'chip-for-affiliatewp' ), array( 'status' => 400 ) );
+		return new WP_Error( 'chip_webhook_incomplete', __( 'The payload is missing a send instruction ID or state.', 'chip-for-affiliatewp' ), array( 'status' => 400 ) );
 	}
 
 	chip_affiliatewp_process_instruction_webhook( $payload );
