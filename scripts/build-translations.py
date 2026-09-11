@@ -59,7 +59,7 @@ TRANSLATIONS = {
     'CHIP Send API credentials are not set yet — payouts are disabled until they are configured.': 'Kredensial API CHIP Send belum ditetapkan — pembayaran dilumpuhkan sehingga ia dikonfigurasi.',
     'CHIP Send API error (HTTP %1$s): %2$s': 'Ralat API CHIP Send (HTTP %1$s): %2$s',
     'CHIP Send API returned an unexpected response.': 'API CHIP Send memulangkan respons yang tidak dijangka.',
-    'Please enter your CHIP Send API credentials in AffiliateWP → Settings → Commissions → CHIP Send before attempting to process payments.': 'Sila masukkan kredensial API CHIP Send anda di AffiliateWP → Tetapan → Komisen → CHIP Send sebelum memproses pembayaran.',
+    'Please enter your CHIP Send API credentials in AffiliateWP → Settings → Payouts → CHIP Send before attempting to process payments.': 'Sila masukkan kredensial API CHIP Send anda di AffiliateWP → Tetapan → Komisen → CHIP Send sebelum memproses pembayaran.',
     # --- webhook ---
     'Register this URL as a CHIP Send webhook (event hooks: send_instruction_status). Paste the webhook public key from the CHIP portal into the Webhook Public Key field above.': 'Daftarkan URL ini sebagai webhook CHIP Send (event hooks: send_instruction_status). tampal kunci awam webhook dari portal CHIP ke dalam medan Kunci Awam Webhook di atas.',
     'The webhook URL (%1$s) is not reachable: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).': 'URL webhook (%1$s) tidak dapat dicapai: %2$s. Webhook tidak didaftarkan — baiki kebolehcapaian laman atau konfigurasi pembayaran tanpa webhook (sapuan requery setiap jam tetap berfungsi).',

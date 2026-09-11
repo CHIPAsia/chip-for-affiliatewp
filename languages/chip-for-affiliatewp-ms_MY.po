@@ -267,7 +267,7 @@ msgstr ""
 #: includes/class-chip-affiliatewp-payouts.php:728
 msgid ""
 "Please enter your CHIP Send API credentials in AffiliateWP → Settings → "
-"Commissions → CHIP Send before attempting to process payments."
+"Payouts → CHIP Send before attempting to process payments."
 msgstr ""
 "Sila masukkan kredensial API CHIP Send anda di AffiliateWP → Tetapan → "
 "Komisen → CHIP Send sebelum memproses pembayaran."

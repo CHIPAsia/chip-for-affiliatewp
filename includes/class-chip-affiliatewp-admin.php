@@ -646,7 +646,7 @@ function chip_affiliatewp_render_credentials_card( $args ) {
  * @return string
  */
 function chip_affiliatewp_batch_initial_status( $status, $payout_method ) {
-	if ( 'chip' === $payout_method && chip_affiliatewp_has_credentials() ) {
+	if ( 'chip' === $payout_method && chip_affiliatewp_is_payout_method_enabled( true, 'chip' ) ) {
 		return 'processing';
 	}
 
