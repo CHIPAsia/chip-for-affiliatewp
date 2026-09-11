@@ -577,16 +577,40 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 /**
  * Hourly sweep: requery and retry CHIP payouts stuck in processing.
  *
- * Covers missed webhooks and submissions that never landed.
+ * Covers missed webhooks and submissions that never landed. Bounded on
+ * purpose: each requery costs one API call, so an unbounded sweep on a busy
+ * store would hold the cron request open for minutes and risk a timeout.
+ *
+ * The per-payout cooldown is applied *before* the budget, so payouts checked
+ * in a previous run do not consume this run's quota and block the rest of the
+ * queue. Ordering oldest-first means a long-stuck payout is retried before a
+ * fresh one, and the cooldown rotates the window so everything is reached.
  *
  * @return void
  */
 function chip_affiliatewp_sweep_processing_payouts() {
+	/**
+	 * Filters how many processing payouts a single sweep requeries.
+	 *
+	 * @param int $limit Maximum payouts per run.
+	 */
+	$limit = (int) apply_filters( 'chip_affiliatewp_sweep_limit', 50 );
+
+	if ( $limit < 1 ) {
+		return;
+	}
+
+	/*
+	 * Read a wider window than the budget so cooldown filtering still leaves
+	 * candidates. Capped so the query itself stays cheap.
+	 */
+	$window = max( $limit * 4, 200 );
+
 	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
 		array(
 			'payout_method' => 'chip',
 			'status'        => 'processing',
-			'number'        => -1,
+			'number'        => $window,
 			'orderby'       => 'payout_id',
 			'order'         => 'ASC',
 		)
@@ -596,21 +620,29 @@ function chip_affiliatewp_sweep_processing_payouts() {
 		return;
 	}
 
+	$cooldown = 10 * MINUTE_IN_SECONDS;
+	$checked  = 0;
+
 	foreach ( $payouts as $payout ) {
+		if ( $checked >= $limit ) {
+			break;
+		}
+
 		if ( ! is_object( $payout ) || empty( $payout->payout_id ) ) {
 			continue;
 		}
 
 		// Respect the per-payout backoff when a recent check already happened.
-		$data     = chip_affiliatewp_payout_data( $payout );
-		$against  = strtotime( (string) chip_affiliatewp_array_value( $data, 'last_checked', '' ) );
-		$cooldown = 10 * MINUTE_IN_SECONDS;
+		$data    = chip_affiliatewp_payout_data( $payout );
+		$against = strtotime( (string) chip_affiliatewp_array_value( $data, 'last_checked', '' ) );
 
 		if ( $against && ( time() - $against ) < $cooldown ) {
 			continue;
 		}
 
 		chip_affiliatewp_check_payout_status( (int) $payout->payout_id, false );
+
+		++$checked;
 	}
 }
 
