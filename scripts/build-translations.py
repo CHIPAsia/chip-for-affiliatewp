@@ -122,6 +122,7 @@ TRANSLATIONS = {
     'Add your bank details to get paid': 'Tambah butiran bank anda untuk dibayar',
     'Balance': 'Baki',
     'Amount to convert': 'Jumlah untuk ditukar',
+    'CHIP Send pays out in MYR only, but this store is set to %s. Change the currency in AffiliateWP settings to send payouts.': 'CHIP Send hanya membayar dalam MYR, tetapi kedai ini ditetapkan kepada %s. Tukar mata wang dalam tetapan AffiliateWP untuk menghantar pembayaran.',
     'Payload too large.': 'Muatan terlalu besar.',
     'None of the referrals in this payout are awaiting payment any more, so nothing was sent.': 'Tiada lagi rujukan dalam pembayaran ini yang menunggu pembayaran, jadi tiada apa dihantar.',
     'The referrals left in this payout have no payable amount.': 'Rujukan yang tinggal dalam pembayaran ini tiada jumlah yang boleh dibayar.',

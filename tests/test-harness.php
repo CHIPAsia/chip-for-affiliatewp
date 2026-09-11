@@ -745,6 +745,10 @@ function reset_state() {
 	$GLOBALS['__options']['chip_test_api_key']   = 'e0645c9e-fcf2-4f29-a327-202f7ed3d969';
 	$GLOBALS['__options']['chip_test_secret_key'] = 'a118729e-4243-4145-83b3-0b8cb213fe8e';
 	$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+	// CHIP Send settles MYR only; the plugin refuses other currencies, so the
+	// default fixture is a MYR store.
+	$GLOBALS['__options']['currency'] = 'MYR';
 }
 
 echo "== Test 1: checksum signing matches docs algorithm ==\n";
@@ -1885,6 +1889,54 @@ $req2 = new Fake_Request();
 $req2->body = $normal;
 $result2 = chip_affiliatewp_handle_webhook( $req2 );
 check( 'normal body passes the size gate', is_wp_error( $result2 ) && false === strpos( $result2->get_error_code(), 'too_large' ) );
+
+echo "\n== Test 40: payouts are refused on a non-MYR store ==\n";
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// A USD store must not send a bare number that CHIP reads as MYR.
+$GLOBALS['__options']['currency'] = 'USD';
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 80 ),
+		'amount'        => '100.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][80] = new Fake_Referral( 80, 3, '100.00', 'unpaid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$result = chip_affiliatewp_submit_payout( $payout_id );
+check( 'USD store payout fails', is_wp_error( $result ) );
+check( 'USD store sent no instruction', array() === $GLOBALS['__http_queue'] );
+check( 'USD store reason names the currency', false !== strpos( $result->get_error_message(), 'USD' ) );
+check( 'USD store reason explains MYR only', false !== strpos( $result->get_error_message(), 'MYR' ) );
+
+// A MYR store proceeds.
+$GLOBALS['__options']['currency'] = 'MYR';
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 81 ),
+		'amount'        => '5.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][81] = new Fake_Referral( 81, 3, '5.00', 'unpaid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9500, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+check( 'MYR store payout proceeds', 9500 === (int) chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] );
+
+// Currency lookup is case-insensitive.
+$GLOBALS['__options']['currency'] = 'myr';
+check( 'lower-case currency still accepted', 'MYR' === chip_affiliatewp_currency() );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

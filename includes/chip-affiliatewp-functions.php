@@ -43,6 +43,24 @@ function chip_affiliatewp_format_money( $amount, $currency = 'MYR' ) {
 }
 
 /**
+ * Returns the store's configured currency code, upper-cased.
+ *
+ * Reads AffiliateWP's setting rather than assuming, because the plugin has to
+ * refuse payouts when it is not MYR.
+ *
+ * @return string
+ */
+function chip_affiliatewp_currency() {
+	$currency = function_exists( 'affwp_get_currency' ) ? affwp_get_currency() : '';
+
+	if ( '' === $currency ) {
+		$currency = (string) affiliate_wp()->settings->get( 'currency', '' );
+	}
+
+	return strtoupper( (string) $currency );
+}
+
+/**
  * Parses a stored UTC timestamp into a Unix epoch.
  *
  * Timestamps are written with gmdate(), so they are UTC. strtotime() would
