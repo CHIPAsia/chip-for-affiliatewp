@@ -66,6 +66,29 @@ function wp_clear_scheduled_hook( $hook ) {
 	unset( $GLOBALS['__schedule'][ $hook ] );
 }
 
+function as_schedule_recurring_action( $ts, $interval, $hook, $args = array(), $group = '' ) {
+	$GLOBALS['__as_scheduled'][] = array( 'timestamp' => $ts, 'hook' => $hook, 'args' => $args, 'group' => $group );
+	// Mirrored so tests asserting on the WP-Cron registry still see it.
+	$GLOBALS['__schedule'][ $hook ] = $ts;
+	return 1;
+}
+
+function as_unschedule_all_actions( $hook, $args = array(), $group = '' ) {
+	$kept = array();
+
+	foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+		if ( $action['hook'] === $hook ) {
+			continue;
+		}
+
+		$kept[] = $action;
+	}
+
+	$GLOBALS['__as_scheduled'] = $kept;
+
+	return count( $kept );
+}
+
 function rest_url( $path = '' ) {
 	return ( empty( $GLOBALS['__is_ssl'] ) ? 'http://' : 'https://' ) . 'example.test/' . ltrim( $path, '/' );
 }
@@ -2465,6 +2488,40 @@ foreach ( $GLOBALS['__http_log'] as $call ) {
 	}
 }
 check( 'within-limit convert reaches the API', 1 === $posted );
+
+echo "\n== Test 50: deactivation clears every scheduled action ==\n";
+reset_state();
+
+// Queue one of each action the plugin schedules.
+$GLOBALS['__as_scheduled'] = array();
+chip_affiliatewp_schedule_check( 810, 120 );
+as_schedule_single_action( time() + 60, 'chip_affiliatewp_submit_payout_action', array( 'payout_id' => 811 ), chip_affiliatewp_as_group() );
+as_schedule_recurring_action( time() + 60, 3600, 'chip_affiliatewp_hourly_sweep', array(), chip_affiliatewp_as_group() );
+$GLOBALS['__as_scheduled'][] = array( 'timestamp' => time() + 60, 'hook' => 'chip_affiliatewp_hourly_sweep', 'args' => array(), 'group' => chip_affiliatewp_as_group() );
+
+$before = 0;
+foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+	if ( 0 === strpos( $action['hook'], 'chip_affiliatewp_' ) ) {
+		++$before;
+	}
+}
+check( 'actions are queued before deactivation', $before >= 3 );
+
+chip_affiliatewp_unschedule_sweep();
+
+$after = 0;
+foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+	if ( 0 === strpos( $action['hook'], 'chip_affiliatewp_' ) ) {
+		++$after;
+	}
+}
+check( 'deactivation clears every scheduled action', 0 === $after );
+
+// A hook the plugin does not own must survive.
+$GLOBALS['__as_scheduled'] = array();
+as_schedule_single_action( time() + 60, 'some_other_plugin_task', array(), 'other-plugin' );
+chip_affiliatewp_unschedule_sweep();
+check( "another plugin's action is untouched", 1 === count( $GLOBALS['__as_scheduled'] ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

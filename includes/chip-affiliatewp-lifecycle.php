@@ -59,10 +59,24 @@ function chip_affiliatewp_schedule_sweep() {
  * @return void
  */
 function chip_affiliatewp_unschedule_sweep() {
-	wp_clear_scheduled_hook( 'chip_affiliatewp_hourly_sweep' );
+	/*
+	 * Every action this plugin schedules, not just the sweep. Deactivating with
+	 * payout checks or queued submissions still pending would leave Action
+	 * Scheduler firing callbacks for a plugin that is no longer loaded, and a
+	 * later reactivation would inherit a backlog of stale work.
+	 */
+	$hooks = array(
+		'chip_affiliatewp_hourly_sweep',
+		'chip_affiliatewp_check_payout_status',
+		'chip_affiliatewp_submit_payout_action',
+	);
 
-	if ( function_exists( 'as_unschedule_all_actions' ) ) {
-		as_unschedule_all_actions( 'chip_affiliatewp_hourly_sweep', array(), chip_affiliatewp_as_group() );
+	foreach ( $hooks as $hook ) {
+		wp_clear_scheduled_hook( $hook );
+
+		if ( function_exists( 'as_unschedule_all_actions' ) ) {
+			as_unschedule_all_actions( $hook, array(), chip_affiliatewp_as_group() );
+		}
 	}
 }
 

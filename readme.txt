@@ -68,6 +68,8 @@ In the CHIP portal under Control → Settings → Applications. The secret key i
 * Missed-webhook healing via scheduled status checks and an hourly requery sweep.
 * Idempotent payouts: deterministic unique references, existing-instruction reuse, and safe failure handling that releases referrals back to unpaid.
 * Affiliate bank details (bank code + account number) on the Edit Affiliate screen with Malaysian bank codes.
+* Balance card in the settings panel showing the allocated Send balance and what is available to convert, with a one-click budget conversion request.
+* Reset webhook button to clear this site's webhook and register it again, without touching other webhooks in the merchant's CHIP account.
 * Optional recipient receipts on payouts.
 
 == Upgrade Notice ==
