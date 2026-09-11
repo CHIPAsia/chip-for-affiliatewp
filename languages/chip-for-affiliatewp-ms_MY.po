@@ -355,7 +355,7 @@ msgstr "Mod"
 msgid "No bank details"
 msgstr "Tiada butiran bank"
 
-#: includes/class-chip-affiliatewp-webhooks.php:602
+#: includes/class-chip-affiliatewp-webhooks.php:670
 msgid "No route was found matching the URL and request method."
 msgstr "Tiada laluan sepadan dengan URL dan kaedah permintaan tersebut."
 
@@ -511,7 +511,7 @@ msgstr "Bank itu tidak disokong"
 msgid "The configured webhook public key is not valid."
 msgstr "Kunci awam webhook yang dikonfigurasi tidak sah."
 
-#: includes/class-chip-affiliatewp-webhooks.php:439
+#: includes/class-chip-affiliatewp-webhooks.php:457
 msgid "The payload is missing a send instruction ID or state."
 msgstr "Muatan tiada ID atau keadaan arahan penghantaran (send instruction)."
 

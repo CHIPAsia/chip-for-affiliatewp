@@ -3657,6 +3657,79 @@ foreach ( $GLOBALS['__http_log'] as $call ) {
 
 check( 'a reviewed payout is requeryed after the long cooldown', in_array( 9702, $probed, true ) );
 
+echo "\n== Test 63: a bank-account status webhook refreshes the cache ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']      = 1;
+$GLOBALS['__options']['chip_test_mode']    = 1;
+$GLOBALS['__affiliates_map'][3]            = 7;
+$GLOBALS['__users'][7]                     = new Fake_User( 7, 'affiliate@test.dev' );
+
+// Verified account cached for the affiliate.
+update_user_meta( 7, 'payment_account_number', '157380112229' );
+update_user_meta( 7, 'payment_bank_code', 'MBBEMYKL' );
+update_user_meta(
+	7,
+	'chip_bank_account',
+	array(
+		'id'          => 84,
+		'status'      => 'verified',
+		'reference'   => 'XT-AFF-3-abc123',
+		'fingerprint' => chip_affiliatewp_bank_details_fingerprint( 3 ),
+	)
+);
+
+check( 'a verified account is cached', 84 === (int) ( get_user_meta( 7, 'chip_bank_account', true )['id'] ?? 0 ) );
+
+// Sign the payload as CHIP would, then deliver it through the real handler.
+$keypair = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+openssl_pkey_export( $keypair, $priv_pem );
+$details = openssl_pkey_get_details( $keypair );
+$GLOBALS['__options']['chip_webhook_public_key'] = $details['key'];
+$GLOBALS['__options']['chip_webhook_secret']     = 'fixedharnesssecret000000000000000000';
+
+$bank_body = json_encode( array( 'id' => 84, 'status' => 'rejected', 'reference' => 'XT-AFF-3-abc123' ) );
+openssl_sign( $bank_body, $bank_sig, $priv_pem, OPENSSL_ALGO_SHA512 );
+
+$bank_request = new Fake_Request();
+$bank_request->body = $bank_body;
+$bank_request->headers['HTTP_X_SIGNATURE'] = base64_encode( $bank_sig );
+$bank_request->headers['HTTP_EVENT_TYPE']  = 'bank_account_status';
+
+$bank_resp = chip_affiliatewp_handle_webhook( $bank_request );
+
+check( 'the bank status webhook is handled', is_array( $bank_resp ) );
+check( 'the bank status webhook reports a refresh', 'bank_account_refreshed' === ( $bank_resp['response']['handled'] ?? '' ) );
+
+$after = get_user_meta( 7, 'chip_bank_account', true );
+check( 'a rejected account is dropped from the cache', empty( $after['id'] ) );
+
+// A budget allocation event is still a no-op.
+$budget_body = json_encode( array( 'id' => 99, 'status' => 'approved' ) );
+openssl_sign( $budget_body, $budget_sig, $priv_pem, OPENSSL_ALGO_SHA512 );
+
+$budget_request = new Fake_Request();
+$budget_request->body = $budget_body;
+$budget_request->headers['HTTP_X_SIGNATURE'] = base64_encode( $budget_sig );
+$budget_request->headers['HTTP_EVENT_TYPE']  = 'budget_allocation_status';
+
+$budget_resp = chip_affiliatewp_handle_webhook( $budget_request );
+check( 'a budget event is still ignored', 'ignored' === ( $budget_resp['response']['handled'] ?? '' ) );
+
+// A payload with no usable reference must not touch the cache.
+update_user_meta( 7, 'chip_bank_account', array( 'id' => 85, 'status' => 'verified', 'reference' => 'XT-AFF-3-abc123' ) );
+chip_affiliatewp_forget_cached_bank_account_from_webhook( array( 'id' => 85, 'status' => 'rejected' ) );
+check( 'a payload without a reference changes nothing', 85 === (int) ( get_user_meta( 7, 'chip_bank_account', true )['id'] ?? 0 ) );
+
+// A payout reference must not be mistaken for a bank reference.
+chip_affiliatewp_forget_cached_bank_account_from_webhook( array( 'id' => 85, 'status' => 'rejected', 'reference' => 'XT-PO-12' ) );
+check( 'a payout reference does not clear a bank cache', 85 === (int) ( get_user_meta( 7, 'chip_bank_account', true )['id'] ?? 0 ) );
+
+// The filter can keep the cache.
+add_filter( 'chip_affiliatewp_forget_bank_account_on_webhook', function () { return false; } );
+chip_affiliatewp_forget_cached_bank_account_from_webhook( array( 'id' => 85, 'status' => 'rejected', 'reference' => 'XT-AFF-3-abc123' ) );
+check( 'the filter can keep the cached account', 85 === (int) ( get_user_meta( 7, 'chip_bank_account', true )['id'] ?? 0 ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

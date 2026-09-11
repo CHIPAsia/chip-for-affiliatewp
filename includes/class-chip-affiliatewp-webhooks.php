@@ -425,8 +425,26 @@ function chip_affiliatewp_handle_webhook( $request ) {
 		$payload = $payload[0];
 	}
 
-	// Bank account and budget allocation events carry no local state to update.
-	if ( 'bank_account_status' === $event_type || 'budget_allocation_status' === $event_type
+	/*
+	 * A bank account changing status invalidates the record we cached for the
+	 * affiliate. CHIP sends this when an account moves — notably verified to
+	 * rejected, long after we stored it as good. Leaving the stale copy means
+	 * the next payout resolves a dead account, is refused, and the affiliate
+	 * only learns about it from a failed payout instead of straight away.
+	 *
+	 * The payload is used as a signal to re-read, not as the new record: the
+	 * cached shape is what the read path expects, and re-reading keeps CHIP the
+	 * source of truth. Nothing is written from the payload itself, so a payload
+	 * we do not fully recognise cannot corrupt the cache.
+	 */
+	if ( 'bank_account_status' === $event_type ) {
+		chip_affiliatewp_forget_cached_bank_account_from_webhook( $payload );
+
+		return rest_ensure_response( array( 'handled' => 'bank_account_refreshed' ) );
+	}
+
+	// Budget allocation events carry no local state to update.
+	if ( 'budget_allocation_status' === $event_type
 		|| ( ! isset( $payload['state'] ) && isset( $payload['status'] ) ) ) {
 		return rest_ensure_response( array( 'handled' => 'ignored' ) );
 	}
@@ -442,6 +460,56 @@ function chip_affiliatewp_handle_webhook( $request ) {
 	chip_affiliatewp_process_instruction_webhook( $payload );
 
 	return rest_ensure_response( array( 'handled' => true ) );
+}
+
+/**
+ * Forgets a cached bank account when CHIP reports a status change.
+ *
+ * The payload is only trusted well enough to identify WHICH affiliate to
+ * refresh — the account reference, which is derived from the affiliate's
+ * details. The cached record is then dropped so the next payout re-reads the
+ * current status from CHIP. Nothing is written from the payload, so a change in
+ * its shape cannot leave the cache holding a record CHIP never sent.
+ *
+ * @param array $payload Webhook payload.
+ * @return void
+ */
+function chip_affiliatewp_forget_cached_bank_account_from_webhook( $payload ) {
+	$reference = (string) chip_affiliatewp_array_value( $payload, 'reference', '' );
+
+	if ( '' === $reference ) {
+		return;
+	}
+
+	/*
+	 * Bank references look like "<prefix>-AFF-<affiliate_id>-<hash>". Parsing
+	 * the affiliate out of it is what tells us whose cache to drop.
+	 */
+	if ( ! preg_match( '/-AFF-(\d+)/', $reference, $matches ) ) {
+		return;
+	}
+
+	$affiliate_id = absint( $matches[1] );
+
+	if ( ! $affiliate_id ) {
+		return;
+	}
+
+	/**
+	 * Filters whether a bank-account status webhook clears the cached record.
+	 *
+	 * Return false to keep the cache, e.g. when another integration owns the
+	 * account and the local copy is deliberately not refreshed.
+	 *
+	 * @param bool  $forget       Whether to drop the cache. Default true.
+	 * @param int   $affiliate_id Affiliate ID.
+	 * @param array $payload      Webhook payload.
+	 */
+	if ( ! apply_filters( 'chip_affiliatewp_forget_bank_account_on_webhook', true, $affiliate_id, $payload ) ) {
+		return;
+	}
+
+	chip_affiliatewp_forget_bank_account( $affiliate_id );
 }
 
 /**
