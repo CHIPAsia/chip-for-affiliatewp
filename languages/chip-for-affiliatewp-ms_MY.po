@@ -242,11 +242,11 @@ msgstr "Kelayakan Live"
 msgid "Live Mode"
 msgstr "Mod Live"
 
-#: includes/class-chip-affiliatewp-webhooks.php:374
+#: includes/class-chip-affiliatewp-webhooks.php:387
 msgid "Malformed payload."
 msgstr "Muatan tidak sah."
 
-#: includes/class-chip-affiliatewp-webhooks.php:355
+#: includes/class-chip-affiliatewp-webhooks.php:368
 msgid "Missing signature."
 msgstr "Tandatangan tiada."
 
@@ -258,7 +258,7 @@ msgstr "Mod"
 msgid "No bank details"
 msgstr "Tiada butiran bank"
 
-#: includes/class-chip-affiliatewp-webhooks.php:560
+#: includes/class-chip-affiliatewp-webhooks.php:573
 msgid "No route was found matching the URL and request method."
 msgstr "Tiada laluan sepadan dengan URL dan kaedah permintaan tersebut."
 
@@ -273,6 +273,10 @@ msgstr ""
 #: includes/class-chip-affiliatewp-admin.php:182
 msgid "Pay affiliate commissions straight to Malaysian bank accounts"
 msgstr "Bayar komisen afiliasi terus ke akaun bank Malaysia"
+
+#: includes/class-chip-affiliatewp-webhooks.php:358
+msgid "Payload too large."
+msgstr "Muatan terlalu besar."
 
 #: includes/class-chip-affiliatewp-payouts.php:142
 msgid "Payout amount must be greater than zero."
@@ -334,7 +338,7 @@ msgstr "Mohon penukaran"
 msgid "Secret Key"
 msgstr "Kunci Rahsia"
 
-#: includes/class-chip-affiliatewp-webhooks.php:368
+#: includes/class-chip-affiliatewp-webhooks.php:381
 msgid "Signature verification failed."
 msgstr "Pengesahan tandatangan gagal."
 
@@ -365,11 +369,11 @@ msgstr ""
 msgid "Test Secret Key"
 msgstr "Kunci Rahsia Ujian"
 
-#: includes/class-chip-affiliatewp-webhooks.php:361
+#: includes/class-chip-affiliatewp-webhooks.php:374
 msgid "The configured webhook public key is not valid."
 msgstr "Kunci awam webhook yang dikonfigurasi tidak sah."
 
-#: includes/class-chip-affiliatewp-webhooks.php:397
+#: includes/class-chip-affiliatewp-webhooks.php:410
 msgid "The payload is missing a send instruction ID or state."
 msgstr "Muatan tiada ID atau keadaan arahan penghantaran (send instruction)."
 
@@ -477,7 +481,7 @@ msgstr "Webhook bersambung"
 msgid "Webhook not set up yet"
 msgstr "Webhook belum disediakan"
 
-#: includes/class-chip-affiliatewp-webhooks.php:351
+#: includes/class-chip-affiliatewp-webhooks.php:364
 msgid "Webhook signature verification is not configured yet."
 msgstr "Pengesahan tandatangan webhook belum dikonfigurasi."
 

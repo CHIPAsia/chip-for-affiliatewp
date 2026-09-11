@@ -165,6 +165,10 @@ class WP_Error {
 	public function get_error_message() {
 		return $this->message;
 	}
+
+	public function get_error_data() {
+		return $this->data;
+	}
 }
 
 function is_wp_error( $thing ) {
@@ -1859,6 +1863,28 @@ date_default_timezone_set( $original_tz );
 // Defensive: unparseable input yields 0 rather than a bogus epoch.
 check( 'empty timestamp yields 0', 0 === chip_affiliatewp_parse_utc( '' ) );
 check( 'garbage timestamp yields 0', 0 === chip_affiliatewp_parse_utc( 'not-a-date' ) );
+
+echo "\n== Test 39: oversized webhook bodies are rejected before verification ==\n";
+
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__options']['chip_webhook_public_key'] = 'irrelevant-for-this-check';
+
+// Build a request stub with an oversized body and no valid signature.
+$oversized = str_repeat( 'a', 131073 );
+$req = new Fake_Request();
+$req->body = $oversized;
+$result = chip_affiliatewp_handle_webhook( $req );
+check( 'oversized body is rejected', is_wp_error( $result ) );
+check( 'oversized body returns 413', is_wp_error( $result ) && 413 === $result->get_error_data()['status'] );
+check( 'oversized body is rejected before signature checks', is_wp_error( $result ) && false !== strpos( $result->get_error_code(), 'too_large' ) );
+
+// A normal-sized body still reaches the signature check.
+$normal = wp_json_encode( array( 'id' => 1, 'state' => 'completed' ) );
+$req2 = new Fake_Request();
+$req2->body = $normal;
+$result2 = chip_affiliatewp_handle_webhook( $req2 );
+check( 'normal body passes the size gate', is_wp_error( $result2 ) && false === strpos( $result2->get_error_code(), 'too_large' ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

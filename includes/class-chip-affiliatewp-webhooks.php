@@ -345,6 +345,19 @@ function chip_affiliatewp_handle_webhook( $request ) {
 	$signature  = (string) $request->get_header( 'X-Signature' );
 	$event_type = (string) $request->get_header( 'Event-Type' );
 
+	/*
+	 * Bound the body before doing any crypto. The URL carries a per-site
+	 * secret, but if it ever leaks, an unbounded body would let a caller burn
+	 * CPU on RSA verification of an arbitrarily large payload. CHIP's own
+	 * deliveries are a few KB, so anything past the cap is not a real event.
+	 */
+	// 128 KiB: comfortably above CHIP's real deliveries, well below anything abusive.
+	$max_body = (int) apply_filters( 'chip_affiliatewp_webhook_max_body_bytes', 131072 );
+
+	if ( strlen( $raw ) > $max_body ) {
+		return new WP_Error( 'chip_webhook_too_large', __( 'Payload too large.', 'chip-for-affiliatewp' ), array( 'status' => 413 ) );
+	}
+
 	$public_key = chip_affiliatewp_webhook_public_key();
 
 	if ( '' === $public_key ) {
