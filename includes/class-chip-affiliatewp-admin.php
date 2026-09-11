@@ -325,8 +325,12 @@ function chip_affiliatewp_handle_convert_balance() {
 	 * The form's max attribute is client-side only, so re-check the ceiling
 	 * here. A request above the convertible balance is rejected by CHIP with a
 	 * generic message; catching it first gives the merchant a real reason.
+	 *
+	 * Read past the cache: a conversion a moment ago has already reduced the
+	 * balance, so a cached figure would still show the old ceiling and let a
+	 * second over-limit request through to CHIP.
 	 */
-	$summary = chip_affiliatewp_get_account_summary( $mode );
+	$summary = chip_affiliatewp_get_account_summary( $mode, true );
 
 	if ( ! is_wp_error( $summary ) && empty( $summary['error'] ) ) {
 		$convertible = (float) chip_affiliatewp_array_value( $summary, 'convertible', 0 );
@@ -356,6 +360,7 @@ function chip_affiliatewp_handle_convert_balance() {
 	if ( is_wp_error( $result ) ) {
 		chip_affiliatewp_add_admin_notice( 'error', $result->get_error_message() );
 	} else {
+		// The cached summary was dropped by the allocation call itself.
 		$approvals = (int) chip_affiliatewp_array_value( $result, 'approvals_required', 0 );
 
 		chip_affiliatewp_add_admin_notice(
