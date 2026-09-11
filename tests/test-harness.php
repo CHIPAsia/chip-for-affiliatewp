@@ -1792,6 +1792,7 @@ $GLOBALS['__http_queue'] = array();
 $result = chip_affiliatewp_submit_payout( $payout_id );
 check( 'all-revoked payout fails', is_wp_error( $result ) );
 check( 'all-revoked payout sent no instruction', array() === $GLOBALS['__http_queue'] );
+check( 'all-revoked payout made no HTTP call at all', array() === $GLOBALS['__http_log'] );
 check( 'all-revoked payout records the reason', false !== strpos( $result->get_error_message(), 'awaiting payment' ) );
 
 // One of two revoked -> amount is reduced to what is still payable.
@@ -1894,6 +1895,7 @@ $req2 = new Fake_Request();
 $req2->body = $normal;
 $result2 = chip_affiliatewp_handle_webhook( $req2 );
 check( 'normal body passes the size gate', is_wp_error( $result2 ) && false === strpos( $result2->get_error_code(), 'too_large' ) );
+check( 'size gate rejects before touching the network', array() === $GLOBALS['__http_log'] );
 
 echo "\n== Test 40: payouts are refused on a non-MYR store ==\n";
 reset_state();
@@ -1919,6 +1921,7 @@ $GLOBALS['__http_queue'] = array();
 $result = chip_affiliatewp_submit_payout( $payout_id );
 check( 'USD store payout fails', is_wp_error( $result ) );
 check( 'USD store sent no instruction', array() === $GLOBALS['__http_queue'] );
+check( 'USD store made no HTTP call at all', array() === $GLOBALS['__http_log'] );
 check( 'USD store reason names the currency', false !== strpos( $result->get_error_message(), 'USD' ) );
 check( 'USD store reason explains MYR only', false !== strpos( $result->get_error_message(), 'MYR' ) );
 
