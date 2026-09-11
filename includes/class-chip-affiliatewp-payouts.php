@@ -118,13 +118,12 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 		'bank_account_id' => (int) $bank_account['id'],
 		'amount'          => chip_affiliatewp_format_amount( $payout->amount ),
 		'email'           => $payment_email,
-		'description'     => chip_affiliatewp_substr(
+		'description'     => chip_affiliatewp_sanitize_description(
 			sprintf(
 				/* translators: %s: payout ID */
-				__( 'Affiliate commission payout #%s', 'chip-for-affiliatewp' ),
+				__( 'Affiliate commission payout No.%s', 'chip-for-affiliatewp' ),
 				$payout_id
-			),
-			140
+			)
 		),
 		'reference'       => $reference,
 	);
@@ -589,12 +588,11 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		return new WP_Error( 'chip_no_email', __( 'This affiliate account does not have a payment email.', 'chip-for-affiliatewp' ) );
 	}
 
-	$instruction_description = chip_affiliatewp_substr(
+	$instruction_description = chip_affiliatewp_sanitize_description(
 		(string) $referral->description !== ''
 			? (string) $referral->description
 			// translators: %d: Referral ID
-			: sprintf( __( 'Commission for referral #%d', 'chip-for-affiliatewp' ), $referral_id ),
-		140
+			: sprintf( __( 'Commission for referral No.%d', 'chip-for-affiliatewp' ), $referral_id )
 	);
 
 	$body = array(

@@ -67,6 +67,59 @@ function chip_affiliatewp_has_credentials() {
 }
 
 /**
+ * Extracts a human-readable error detail from a CHIP API error response.
+ *
+ * CHIP Send reports validation failures in several shapes, so walk them in
+ * order of usefulness and fall back to the raw body when nothing matches.
+ *
+ * @param mixed  $data Decoded response body.
+ * @param string $raw  Raw response body.
+ * @return string Error detail, or an empty string when none is available.
+ */
+function chip_affiliatewp_api_error_detail( $data, $raw = '' ) {
+	if ( is_array( $data ) ) {
+		foreach ( array( 'message', 'error', 'error_message' ) as $key ) {
+			if ( ! empty( $data[ $key ] ) && is_string( $data[ $key ] ) ) {
+				return $data[ $key ];
+			}
+		}
+
+		// `errors` may be a string, a list, or a key => message map.
+		if ( ! empty( $data['errors'] ) ) {
+			$errors = $data['errors'];
+
+			if ( is_string( $errors ) ) {
+				return $errors;
+			}
+
+			if ( is_array( $errors ) ) {
+				$flat = array();
+
+				array_walk_recursive(
+					$errors,
+					static function ( $value, $key ) use ( &$flat ) {
+						if ( is_string( $value ) && '' !== $value ) {
+							$flat[] = is_string( $key ) ? $key . ': ' . $value : $value;
+						}
+					}
+				);
+
+				if ( ! empty( $flat ) ) {
+					return implode( '; ', array_slice( $flat, 0, 3 ) );
+				}
+			}
+		}
+	}
+
+	// Last resort: surface the raw body so support can see what CHIP said.
+	if ( is_string( $raw ) && '' !== trim( $raw ) ) {
+		return wp_strip_all_tags( substr( trim( $raw ), 0, 300 ) );
+	}
+
+	return '';
+}
+
+/**
  * Sends a signed request to the CHIP Send API.
  *
  * Every request carries a fresh epoch and an HMAC-SHA512 checksum of
@@ -121,16 +174,7 @@ function chip_affiliatewp_request( $method, $path, $body = array(), $query = arr
 	$data = json_decode( $raw, true );
 
 	if ( $code < 200 || $code >= 300 ) {
-		$detail = '';
-
-		if ( is_array( $data ) ) {
-			foreach ( array( 'message', 'error', 'errors' ) as $key ) {
-				if ( ! empty( $data[ $key ] ) && is_string( $data[ $key ] ) ) {
-					$detail = $data[ $key ];
-					break;
-				}
-			}
-		}
+		$detail = chip_affiliatewp_api_error_detail( $data, $raw );
 
 		return new WP_Error(
 			'chip_api_error',
@@ -139,6 +183,10 @@ function chip_affiliatewp_request( $method, $path, $body = array(), $query = arr
 				__( 'CHIP Send API error (HTTP %1$s): %2$s', 'chip-for-affiliatewp' ),
 				$code,
 				'' !== $detail ? $detail : __( 'request failed', 'chip-for-affiliatewp' )
+			),
+			array(
+				'status' => $code,
+				'body'   => $data,
 			)
 		);
 	}

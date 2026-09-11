@@ -17,7 +17,7 @@ msgstr ""
 msgid "34"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:554
+#: includes/class-chip-affiliatewp-payouts.php:553
 msgid ""
 "A payment cannot be processed for this referral since it is not marked as "
 "Unpaid."
@@ -36,7 +36,7 @@ msgid "Active"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:124
-msgid "Affiliate commission payout #%s"
+msgid "Affiliate commission payout No.%s"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-bank-accounts.php:180
@@ -48,7 +48,7 @@ msgid "Bank Code"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:100
-#: includes/class-chip-affiliatewp-payouts.php:578
+#: includes/class-chip-affiliatewp-payouts.php:577
 msgid "Bank account is not verified yet (status: %s)."
 msgstr ""
 
@@ -62,7 +62,7 @@ msgstr ""
 msgid "CHIP Send"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-api.php:86
+#: includes/class-chip-affiliatewp-api.php:139
 #: includes/class-chip-affiliatewp-webhooks.php:160
 msgid "CHIP Send API credentials are not configured."
 msgstr ""
@@ -73,11 +73,11 @@ msgid ""
 "are configured."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-api.php:139
+#: includes/class-chip-affiliatewp-api.php:183
 msgid "CHIP Send API error (HTTP %1$s): %2$s"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-api.php:147
+#: includes/class-chip-affiliatewp-api.php:195
 msgid "CHIP Send API returned an unexpected response."
 msgstr ""
 
@@ -96,8 +96,8 @@ msgstr ""
 msgid "CHIP Send did not return a bank account ID."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:155
-#: includes/class-chip-affiliatewp-payouts.php:627
+#: includes/class-chip-affiliatewp-payouts.php:154
+#: includes/class-chip-affiliatewp-payouts.php:625
 msgid "CHIP Send did not return a send instruction ID."
 msgstr ""
 
@@ -105,7 +105,7 @@ msgstr ""
 msgid "CHIP Send did not return a webhook ID."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:318
+#: includes/class-chip-affiliatewp-payouts.php:317
 msgid "CHIP Send instruction %1$s. %2$s"
 msgstr ""
 
@@ -134,8 +134,8 @@ msgid ""
 "are requeried hourly — but confirmations arrive faster with the webhook."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:596
-msgid "Commission for referral #%d"
+#: includes/class-chip-affiliatewp-payouts.php:595
+msgid "Commission for referral No.%d"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:194
@@ -223,7 +223,7 @@ msgid ""
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:78
-#: includes/class-chip-affiliatewp-payouts.php:566
+#: includes/class-chip-affiliatewp-payouts.php:565
 msgid ""
 "Please enter your CHIP Send API credentials in AffiliateWP → Settings → "
 "Commissions → CHIP Send before attempting to process payments."
@@ -285,7 +285,7 @@ msgstr ""
 msgid "The payload is missing a send instruction ID or state."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:657
+#: includes/class-chip-affiliatewp-payouts.php:655
 msgid ""
 "The payout record could not be created. The referral may already have an "
 "active payout."
@@ -295,7 +295,7 @@ msgstr ""
 msgid "The specified payout does not exist."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:550
+#: includes/class-chip-affiliatewp-payouts.php:549
 msgid "The specified referral does not exist."
 msgstr ""
 
@@ -310,11 +310,11 @@ msgstr ""
 msgid "The webhook URL is not publicly reachable from this site."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:562
+#: includes/class-chip-affiliatewp-payouts.php:561
 msgid "There is no affiliate connected to this referral."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:589
+#: includes/class-chip-affiliatewp-payouts.php:588
 msgid "This affiliate account does not have a payment email."
 msgstr ""
 
@@ -340,7 +340,7 @@ msgstr ""
 msgid "This payout is not a CHIP Send payout."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:558
+#: includes/class-chip-affiliatewp-payouts.php:557
 msgid ""
 "This referral is already attached to a payout. Resolve that payout to pay it"
 " again."
@@ -372,7 +372,7 @@ msgid ""
 "to CHIP."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-api.php:141
+#: includes/class-chip-affiliatewp-api.php:185
 msgid "request failed"
 msgstr ""
 

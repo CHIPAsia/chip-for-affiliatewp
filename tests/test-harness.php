@@ -678,6 +678,22 @@ $GLOBALS['__is_ssl'] = true;
 check( 'https preferred behind SSL', str_starts_with( chip_affiliatewp_webhook_url(), 'https://' ) );
 $GLOBALS['__is_ssl'] = false;
 
+echo "\n== Test 2c: description sanitizer matches the CHIP allow-list ==\n";
+// CHIP Send 422s on any character outside: alphanumeric, . space _ - / @ ( )
+$chip_desc_ok = chip_affiliatewp_sanitize_description( 'Affiliate commission payout No.2' );
+check( 'allowed characters survive', 'Affiliate commission payout No.2' === $chip_desc_ok );
+check( 'hash is replaced (referral descriptions)', false === strpos( chip_affiliatewp_sanitize_description( 'Commission for referral #42' ), '#' ) );
+check( 'hash becomes No.', false !== strpos( chip_affiliatewp_sanitize_description( 'Commission for referral #42' ), 'No.42' ) );
+check( 'ampersand is stripped', false === strpos( chip_affiliatewp_sanitize_description( 'A & B' ), '&' ) );
+check( 'percent is stripped', false === strpos( chip_affiliatewp_sanitize_description( '50% bonus' ), '%' ) );
+check( 'quotes are stripped', false === strpos( chip_affiliatewp_sanitize_description( 'Store "X" order' ), '"' ) );
+check( 'colon is stripped', false === strpos( chip_affiliatewp_sanitize_description( 'Order: 123' ), ':' ) );
+check( 'apostrophes are stripped (not in allow-list)', 'Store X' === trim( chip_affiliatewp_sanitize_description( 'Store ' . "\u{2019}" . 'X' . "\u{2019}" ) ) );
+check( 'allowed set preserved ( / @ ( ) _ - . )', 'a/b@c(d)_e-f.g' === chip_affiliatewp_sanitize_description( 'a/b@c(d)_e-f.g' ) );
+check( 'empty input falls back to a safe default', 'Affiliate commission payout' === chip_affiliatewp_sanitize_description( '&&&' ) );
+check( 'length is capped at 140', 140 >= strlen( chip_affiliatewp_sanitize_description( str_repeat( 'a', 300 ) ) ) );
+check( 'no leading/trailing space', chip_affiliatewp_sanitize_description( '  hi  ' ) === 'hi' );
+
 echo "\n== Test 3: amount formatting ==\n";
 check( 'int amount', chip_affiliatewp_format_amount( '100' ) === '100.00' );
 check( 'float amount', chip_affiliatewp_format_amount( 12.44 ) === '12.44' );

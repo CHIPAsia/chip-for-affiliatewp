@@ -48,7 +48,9 @@ TRANSLATIONS = {
     'Touch \'n Go eWallet': 'Touch \'n Go eWallet',
     # --- payout / referral strings ---
     'Commission for referral #%d': 'Komisen untuk rujukan #%d',
+    'Commission for referral No.%d': 'Komisen untuk rujukan No.%d',
     'Affiliate commission payout #%s': 'Pembayaran komisen afiliasi #%s',
+    'Affiliate commission payout No.%s': 'Pembayaran komisen afiliasi No.%s',
     'A payment cannot be processed for this referral since it is not marked as Unpaid.': 'Pembayaran tidak dapat diproses untuk rujukan ini kerana ia tidak ditanda sebagai Belum Dibayar.',
     'Bank account is not verified yet (status: %s).': 'Akaun bank belum disahkan (status: %s).',
     'This affiliate has no bank account details on file.': 'Afiliasi ini tiada butiran akaun bank disimpan.',

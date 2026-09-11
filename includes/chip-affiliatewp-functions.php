@@ -35,3 +35,46 @@ function chip_affiliatewp_substr( $text, $limit ) {
 
 	return substr( $text, 0, $limit );
 }
+
+/**
+ * Sanitizes a description for the CHIP Send API.
+ *
+ * CHIP Send rejects any character outside a fixed allow-list:
+ *
+ *     alphanumeric, period, space, underscore, hyphen, forward slash,
+ *     at symbol, parentheses
+ *
+ * Referral and payout descriptions routinely contain characters outside that
+ * set (notably "#", as in "Commission for referral #42"), which makes the API
+ * answer 422 and the payout fail. Normalize to the allowed set before sending,
+ * then trim to the API's length budget.
+ *
+ * @param string $text  Raw description.
+ * @param int    $limit Maximum length after sanitizing.
+ * @return string Safe description, never empty.
+ */
+function chip_affiliatewp_sanitize_description( $text, $limit = 140 ) {
+	$text = (string) $text;
+
+	// Map common typography to its ASCII equivalent first so meaning survives.
+	$text = str_replace(
+		array( '’', '‘', '“', '”', '–', '—', '…' ),
+		array( "'", "'", '"', '"', '-', '-', '...' ),
+		$text
+	);
+
+	// "#" reads as "number" in these descriptions; CHIP rejects the character.
+	$text = str_replace( '#', 'No.', $text );
+
+	// Drop anything outside the CHIP allow-list.
+	$text = preg_replace( '/[^A-Za-z0-9 ._\-\/@()]/', ' ', $text );
+
+	// Collapse the whitespace the replacement above can introduce.
+	$text = trim( preg_replace( '/\s+/', ' ', $text ) );
+
+	if ( '' === $text ) {
+		$text = 'Affiliate commission payout';
+	}
+
+	return chip_affiliatewp_substr( $text, $limit );
+}
