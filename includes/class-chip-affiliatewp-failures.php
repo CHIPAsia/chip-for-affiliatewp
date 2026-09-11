@@ -81,3 +81,27 @@ function chip_affiliatewp_register_failure_classifier() {
 	\AffWP\Payouts\Failure_Classifier::register( 'chip', 'chip_affiliatewp_classify_failure' );
 }
 add_action( 'init', 'chip_affiliatewp_register_failure_classifier', 20 );
+
+/**
+ * Registers the CHIP copy for the "Payout Failed — Action Required" email.
+ *
+ * Registering a body gives the method its own editable template under
+ * Settings → Emails instead of falling back to the generic copy, so a
+ * merchant can word the "fix your bank details" instruction for CHIP Send.
+ *
+ * @return void
+ */
+function chip_affiliatewp_register_failure_email_template() {
+	if ( ! class_exists( '\AffWP\Payouts\Failure_Email_Registry' ) ) {
+		return;
+	}
+
+	\AffWP\Payouts\Failure_Email_Registry::register(
+		'chip',
+		array(
+			'label' => __( 'CHIP Send', 'chip-for-affiliatewp' ),
+			'body'  => __( "Hi {name},\n\nWe tried to send your {amount} commission from {site_name} to your bank account, but the payment could not go through.\n\nThis usually means the bank account details on your affiliate profile are missing or incorrect. Please check your bank name and account number and update them here:\n{affiliate_payout_settings_url}\n\nOnce your details are correct, we'll include this commission in your next payout.\n\nQuestions? Just reply to this email.\n\nThanks,\n{site_name}", 'chip-for-affiliatewp' ),
+		)
+	);
+}
+add_action( 'init', 'chip_affiliatewp_register_failure_email_template', 20 );
