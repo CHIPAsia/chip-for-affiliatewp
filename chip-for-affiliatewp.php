@@ -6,7 +6,7 @@
  * Author: CHIP IN SDN BHD
  * Author URI: https://chip-in.asia
  * Requires PHP: 7.1
- * Requires at least: 4.7
+ * Requires at least: 5.8
  *
  * Copyright: © 2024-2026 CHIP
  * License: GNU General Public License v3.0
@@ -38,6 +38,42 @@ add_action( 'init', 'chip_affiliatewp_load_textdomain' );
 
 // Include plugin modules.
 require_once CHIP_AFFILIATEWP_PATH . 'includes/chip-affiliatewp-functions.php';
+
+/**
+ * Checks that AffiliateWP is present before the plugin wires itself up.
+ *
+ * Every hook and helper in this plugin resolves through AffiliateWP's API, so
+ * loading without it would fatal on the first call. Bail out cleanly and tell
+ * the merchant what to install instead.
+ *
+ * @return bool True when AffiliateWP is available.
+ */
+function chip_affiliatewp_dependencies_met() {
+	return class_exists( 'Affiliate_WP' ) || function_exists( 'affiliate_wp' );
+}
+
+/**
+ * Reports the missing dependency on the Plugins screen.
+ *
+ * @return void
+ */
+function chip_affiliatewp_missing_dependency_notice() {
+	if ( chip_affiliatewp_dependencies_met() || ! current_user_can( 'activate_plugins' ) ) {
+		return;
+	}
+
+	printf(
+		'<div class="notice notice-error"><p>%s</p></div>',
+		esc_html__( 'CHIP Send for AffiliateWP needs AffiliateWP to be installed and active. Payouts stay disabled until it is.', 'chip-for-affiliatewp' )
+	);
+}
+
+if ( ! chip_affiliatewp_dependencies_met() ) {
+	add_action( 'admin_notices', 'chip_affiliatewp_missing_dependency_notice' );
+
+	return;
+}
+
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-api.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-account.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-bank-accounts.php';

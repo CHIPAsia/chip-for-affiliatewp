@@ -122,6 +122,7 @@ TRANSLATIONS = {
     'Add your bank details to get paid': 'Tambah butiran bank anda untuk dibayar',
     'Balance': 'Baki',
     'Amount to convert': 'Jumlah untuk ditukar',
+    'CHIP Send for AffiliateWP needs AffiliateWP to be installed and active. Payouts stay disabled until it is.': 'CHIP Send untuk AffiliateWP memerlukan AffiliateWP dipasang dan aktif. Pembayaran kekal dilumpuhkan sehingga ia dipasang.',
     'Request conversion': 'Mohon penukaran',
     'This asks CHIP to convert part of your settlement balance into payout budget. Approvers receive an email and approve there — nothing moves until they do.': 'Ini meminta CHIP menukar sebahagian baki penyelesaian anda kepada bajet pembayaran. Pelulus menerima e-mel dan meluluskan di sana — tiada apa bergerak sehingga mereka luluskan.',
     'You do not have permission to convert balance.': 'Anda tiada kebenaran untuk menukar baki.',
