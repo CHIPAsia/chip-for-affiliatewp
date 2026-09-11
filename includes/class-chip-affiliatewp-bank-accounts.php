@@ -48,14 +48,43 @@ function chip_affiliatewp_bank_label( $code ) {
 }
 
 /**
- * Returns the two-character reference prefix setting, sanitized.
+ * Returns the reference prefix used for every CHIP Send reference.
+ *
+ * CHIP stores a reference permanently and refuses a repeat, so the prefix is
+ * what keeps two installations apart when they share one CHIP account: without
+ * it, payout 5 on site A and payout 5 on site B would both be "-PO-5", and the
+ * second site's submission would be refused as a duplicate of the first's
+ * instruction.
+ *
+ * The stored setting is trimmed to two alphanumerics. When nothing usable is
+ * left — a merchant cleared the field, or typed punctuation — a stable
+ * per-site value derived from the site URL is used instead, so references
+ * remain distinct without the merchant having to notice.
  *
  * @return string
  */
 function chip_affiliatewp_reference_prefix() {
-	$prefix = (string) affiliate_wp()->settings->get( 'chip_reference_prefix' );
+	// One canonical form: references must not differ by case, or the same
+	// payout could produce two references and two instructions.
+	$prefix = strtoupper( (string) preg_replace( '/[^A-Za-z0-9]/', '', (string) affiliate_wp()->settings->get( 'chip_reference_prefix' ) ) );
+	$prefix = substr( $prefix, 0, 2 );
 
-	return substr( preg_replace( '/[^A-Za-z0-9.-]/', '', $prefix ), 0, 2 );
+	if ( '' !== $prefix ) {
+		return $prefix;
+	}
+
+	/*
+	 * Derive from the site URL: stable across requests, distinct between
+	 * installations, and not something the merchant has to choose.
+	 */
+	$fallback = strtoupper( substr( md5( (string) home_url() ), 0, 2 ) );
+
+	/**
+	 * Filters the fallback reference prefix used when none is configured.
+	 *
+	 * @param string $fallback Two-character prefix.
+	 */
+	return (string) apply_filters( 'chip_affiliatewp_reference_prefix_fallback', $fallback );
 }
 
 /**

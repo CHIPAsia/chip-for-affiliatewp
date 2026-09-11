@@ -13,7 +13,7 @@ msgstr ""
 msgid "%s: bank details"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:390
+#: includes/class-chip-affiliatewp-bank-accounts.php:419
 msgid ""
 "A Malaysian bank account number is between 6 and 20 digits. Check the number"
 " and try again."
@@ -29,7 +29,7 @@ msgstr ""
 msgid "API Key"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:363
+#: includes/class-chip-affiliatewp-bank-accounts.php:392
 msgid "Account number for the affiliate payout sent via CHIP Send."
 msgstr ""
 
@@ -78,11 +78,11 @@ msgstr ""
 msgid "Bank"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:359
+#: includes/class-chip-affiliatewp-bank-accounts.php:388
 msgid "Bank Account Number"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:343
+#: includes/class-chip-affiliatewp-bank-accounts.php:372
 msgid "Bank Code"
 msgstr ""
 
@@ -95,7 +95,7 @@ msgstr ""
 msgid "Bank account number"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:354
+#: includes/class-chip-affiliatewp-bank-accounts.php:383
 msgid "Bank code for the affiliate payout sent via CHIP Send."
 msgstr ""
 
@@ -145,7 +145,7 @@ msgid ""
 "automatic — nothing to configure here."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:319
+#: includes/class-chip-affiliatewp-bank-accounts.php:348
 msgid "CHIP Send did not return a bank account ID."
 msgstr ""
 
@@ -222,7 +222,7 @@ msgstr ""
 msgid "Choose your bank and enter the account number before saving."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:406
+#: includes/class-chip-affiliatewp-bank-accounts.php:435
 msgid "Choose your bank."
 msgstr ""
 
@@ -274,7 +274,7 @@ msgstr ""
 msgid "Enter your CHIP Send test secret key"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:385
+#: includes/class-chip-affiliatewp-bank-accounts.php:414
 msgid "Enter your bank account number."
 msgstr ""
 
@@ -358,7 +358,7 @@ msgid ""
 "automatically."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:410
+#: includes/class-chip-affiliatewp-bank-accounts.php:439
 msgid "Pick a bank from the list. CHIP Send can only pay to the banks shown."
 msgstr ""
 
@@ -508,7 +508,7 @@ msgstr ""
 msgid "This affiliate has bank details on file and can be paid via CHIP Send."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:300
+#: includes/class-chip-affiliatewp-bank-accounts.php:329
 msgid "This affiliate has no bank account details on file."
 msgstr ""
 
@@ -644,6 +644,6 @@ msgid "— %1$s, %2$s"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-affiliate-area.php:115
-#: includes/class-chip-affiliatewp-bank-accounts.php:347
+#: includes/class-chip-affiliatewp-bank-accounts.php:376
 msgid "— Select bank —"
 msgstr ""

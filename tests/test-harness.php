@@ -3730,6 +3730,46 @@ add_filter( 'chip_affiliatewp_forget_bank_account_on_webhook', function () { ret
 chip_affiliatewp_forget_cached_bank_account_from_webhook( array( 'id' => 85, 'status' => 'rejected', 'reference' => 'XT-AFF-3-abc123' ) );
 check( 'the filter can keep the cached account', 85 === (int) ( get_user_meta( 7, 'chip_bank_account', true )['id'] ?? 0 ) );
 
+echo "\n== Test 64: references stay distinct when no prefix is configured ==\n";
+reset_state();
+
+// A configured prefix is used as-is, trimmed to two alphanumerics.
+$GLOBALS['__options']['chip_reference_prefix'] = '34';
+check( 'a configured prefix is used', '34' === chip_affiliatewp_reference_prefix() );
+
+$GLOBALS['__options']['chip_reference_prefix'] = 'ab';
+check( 'a lowercase prefix is canonicalised', 'AB' === chip_affiliatewp_reference_prefix() );
+
+$GLOBALS['__options']['chip_reference_prefix'] = 'ABC';
+check( 'a long prefix is trimmed to two', 'AB' === chip_affiliatewp_reference_prefix() );
+
+$GLOBALS['__options']['chip_reference_prefix'] = 'a-1';
+check( 'punctuation is stripped from a prefix', 'A1' === chip_affiliatewp_reference_prefix() );
+
+// Nothing usable means a per-site fallback, never an empty prefix.
+$GLOBALS['__options']['chip_reference_prefix'] = '';
+$empty_fallback = chip_affiliatewp_reference_prefix();
+
+check( 'an empty prefix falls back', '' !== $empty_fallback );
+check( 'the fallback is two characters', 2 === strlen( $empty_fallback ) );
+check( 'the fallback is alphanumeric', 1 === preg_match( '/^[A-Z0-9]{2}$/', $empty_fallback ) );
+
+// Punctuation only is treated the same as empty.
+$GLOBALS['__options']['chip_reference_prefix'] = '--';
+check( 'punctuation-only falls back too', chip_affiliatewp_reference_prefix() === $empty_fallback );
+
+// The fallback is stable, and references derived from it never start with a dash.
+check( 'the fallback is stable across calls', $empty_fallback === chip_affiliatewp_reference_prefix() );
+
+$ref = chip_affiliatewp_instruction_reference( 5, 1 );
+check( 'an unconfigured prefix still yields a usable reference', 0 !== strpos( $ref, '-' ) );
+check( 'the reference carries the site prefix', 0 === strpos( $ref, $empty_fallback ) );
+
+// Two different sites must not produce the same reference.
+add_filter( 'chip_affiliatewp_reference_prefix_fallback', function () { return 'ZZ'; } );
+check( 'the fallback is filterable', 'ZZ' === chip_affiliatewp_reference_prefix() );
+check( 'a filtered prefix changes the reference', 'ZZ-PO-5' === chip_affiliatewp_instruction_reference( 5, 1 ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
