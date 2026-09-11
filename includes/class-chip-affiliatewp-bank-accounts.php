@@ -327,6 +327,66 @@ function chip_affiliatewp_affiliate_bank_fields( $affiliate ) {
 add_action( 'affwp_edit_affiliate_end', 'chip_affiliatewp_affiliate_bank_fields' );
 
 /**
+ * Stores an affiliate's bank details after validation.
+ *
+ * Shared by the Edit Affiliate screen and the affiliate area form, so both
+ * entry points normalise identically: digits only, an uppercase bank code that
+ * must be one CHIP Send supports, and a dropped CHIP account cache when
+ * anything changed.
+ *
+ * @param int    $user_id   Affiliate's WordPress user ID.
+ * @param string $bank_code Bank code (validated by the caller or dropped here).
+ * @param string $number    Account number (normalised to digits here).
+ * @return bool Whether the stored details changed.
+ */
+function chip_affiliatewp_store_bank_details( $user_id, $bank_code, $number ) {
+	$user_id = absint( $user_id );
+
+	if ( ! $user_id ) {
+		return false;
+	}
+
+	$changed = false;
+
+	/*
+	 * Keep digits only. The field accepts the separators people write on paper
+	 * ("1234-567 890"), but storing them verbatim would make the same account
+	 * produce two different CHIP references. An empty result is stored as empty
+	 * so the affiliate is treated as not-ready rather than registered with a
+	 * blank account.
+	 */
+	$new_number = preg_replace( '/\D/', '', (string) $number );
+	$new_code   = strtoupper( trim( (string) $bank_code ) );
+
+	// Only banks CHIP Send can pay to; anything else would fail at the API.
+	if ( '' !== $new_code && ! array_key_exists( $new_code, chip_affiliatewp_bank_codes() ) ) {
+		$new_code = '';
+	}
+
+	if ( (string) get_user_meta( $user_id, 'payment_account_number', true ) !== $new_number ) {
+		$changed = true;
+	}
+
+	if ( (string) get_user_meta( $user_id, 'payment_bank_code', true ) !== $new_code ) {
+		$changed = true;
+	}
+
+	update_user_meta( $user_id, 'payment_account_number', $new_number );
+	update_user_meta( $user_id, 'payment_bank_code', $new_code );
+
+	/*
+	 * New details mean the cached CHIP Send account id no longer describes this
+	 * affiliate's account. Drop it so the next payout registers the new details
+	 * rather than paying the previous account.
+	 */
+	if ( $changed ) {
+		delete_user_meta( $user_id, 'chip_bank_account' );
+	}
+
+	return $changed;
+}
+
+/**
  * Saves the affiliate bank details from the Edit Affiliate screen.
  *
  * @param AffWP\Affiliate $affiliate Affiliate object.
@@ -339,48 +399,14 @@ function chip_affiliatewp_save_bank_details( $affiliate, $args, $data ) {
 		return;
 	}
 
-	$changed = false;
+	$bank_code = isset( $data['payment_bank_code'] )
+		? sanitize_text_field( $data['payment_bank_code'] )
+		: (string) get_user_meta( $affiliate->user_id, 'payment_bank_code', true );
+	$number    = isset( $data['payment_account_number'] )
+		? sanitize_text_field( $data['payment_account_number'] )
+		: (string) get_user_meta( $affiliate->user_id, 'payment_account_number', true );
 
-	if ( isset( $data['payment_account_number'] ) ) {
-		/*
-		 * Keep digits only. The field accepts the separators people write on
-		 * paper ("1234-567 890"), but storing them verbatim would make the
-		 * same account produce two different CHIP references. An empty result
-		 * is stored as empty so the affiliate is treated as not-ready rather
-		 * than registered with a blank account.
-		 */
-		$new_number = preg_replace( '/\D/', '', sanitize_text_field( $data['payment_account_number'] ) );
-
-		if ( (string) get_user_meta( $affiliate->user_id, 'payment_account_number', true ) !== $new_number ) {
-			$changed = true;
-		}
-
-		update_user_meta( $affiliate->user_id, 'payment_account_number', $new_number );
-	}
-
-	if ( isset( $data['payment_bank_code'] ) ) {
-		$new_code = strtoupper( sanitize_text_field( $data['payment_bank_code'] ) );
-
-		// Only banks CHIP Send can pay to; anything else would fail at the API.
-		if ( '' !== $new_code && ! array_key_exists( $new_code, chip_affiliatewp_bank_codes() ) ) {
-			$new_code = '';
-		}
-
-		if ( (string) get_user_meta( $affiliate->user_id, 'payment_bank_code', true ) !== $new_code ) {
-			$changed = true;
-		}
-
-		update_user_meta( $affiliate->user_id, 'payment_bank_code', $new_code );
-	}
-
-	/*
-	 * New details mean the cached CHIP Send account id no longer describes
-	 * this affiliate's account. Drop it so the next payout registers the new
-	 * details rather than paying the previous account.
-	 */
-	if ( $changed ) {
-		delete_user_meta( $affiliate->user_id, 'chip_bank_account' );
-	}
+	chip_affiliatewp_store_bank_details( $affiliate->user_id, $bank_code, $number );
 }
 add_action( 'affwp_pre_update_affiliate', 'chip_affiliatewp_save_bank_details', 10, 3 );
 

@@ -335,6 +335,19 @@ function wp_safe_redirect( $url ) {
 	$GLOBALS['__redirected'] = $url;
 }
 
+function is_user_logged_in() {
+	return ! empty( $GLOBALS['__logged_in'] );
+}
+
+function wp_redirect( $url, $status = 302 ) {
+	$GLOBALS['__redirected_to'] = $url;
+	return true;
+}
+
+function home_url( $path = '' ) {
+	return 'http://example.test/' . ltrim( $path, '/' );
+}
+
 function wp_get_referer() {
 	return '';
 }
@@ -2590,6 +2603,126 @@ check( 'code does not save through a Commissions filter', false === strpos( $adm
 
 // Setup instructions must name a screen that exists in the settings tree.
 check( 'readme setup step exists', false !== strpos( $readme, '== Installation ==' ) );
+
+echo "\n== Test 53: affiliate self-service bank form ==\n";
+// The save handler ends with a redirect + exit; disable it so the harness
+// keeps running after each submission.
+add_filter( 'chip_affiliatewp_bank_save_redirect', function () { return false; } );
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']      = 1;
+$GLOBALS['__options']['chip_test_mode']    = 1;
+$GLOBALS['__affiliates_map'][4]            = 12;
+$GLOBALS['__users'][12]                    = new Fake_User( 12, 'self@test.dev' );
+$GLOBALS['__logged_in']                    = true;
+$GLOBALS['__current_affiliate_id']         = 4;
+
+// The section is relevant only when the affiliate is actually paid via CHIP.
+$GLOBALS['__affiliate_meta'][4]['payout_method_pick'] = 'chip';
+check( 'section shows for a chip affiliate', chip_affiliatewp_affiliate_section_is_relevant( 4 ) );
+
+$GLOBALS['__affiliate_meta'][4]['payout_method_pick'] = 'paypal';
+check( 'section hidden for a paypal affiliate', ! chip_affiliatewp_affiliate_section_is_relevant( 4 ) );
+
+$GLOBALS['__affiliate_meta'][4]['payout_method_pick'] = 'chip';
+$GLOBALS['__options']['chip_payouts'] = 0;
+check( 'section hidden when the method is off', ! chip_affiliatewp_affiliate_section_is_relevant( 4 ) );
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+// A forged bank code is rejected even though the select only offers valid ones.
+$GLOBALS['__current_user_can'] = true;
+$_POST = array(
+	'chip_affiliatewp_action'    => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'          => 'EVILBANK',
+	'payment_account_number'     => '1234567890',
+);
+chip_affiliatewp_handle_affiliate_bank_save();
+
+$stored_code = (string) get_user_meta( 12, 'payment_bank_code', true );
+check( 'unsupported bank code is refused', '' === $stored_code );
+
+// Missing fields are refused.
+$_POST = array(
+	'chip_affiliatewp_action'    => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'          => '',
+	'payment_account_number'     => '',
+);
+chip_affiliatewp_handle_affiliate_bank_save();
+check( 'empty submission writes nothing', '' === (string) get_user_meta( 12, 'payment_account_number', true ) );
+
+// A too-short number is refused.
+$_POST = array(
+	'chip_affiliatewp_action'    => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'          => 'MBBEMYKL',
+	'payment_account_number'     => '123',
+);
+chip_affiliatewp_handle_affiliate_bank_save();
+check( 'too-short account number is refused', '' === (string) get_user_meta( 12, 'payment_account_number', true ) );
+
+// A valid submission stores normalised details.
+$_POST = array(
+	'chip_affiliatewp_action'    => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'          => 'mbbemykl',
+	'payment_account_number'     => '1234-567 890',
+);
+chip_affiliatewp_handle_affiliate_bank_save();
+
+check( 'valid submission stores digits only', '1234567890' === (string) get_user_meta( 12, 'payment_account_number', true ) );
+check( 'valid submission uppercases the bank code', 'MBBEMYKL' === (string) get_user_meta( 12, 'payment_bank_code', true ) );
+
+// A bad nonce is ignored entirely.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliates_map'][4]       = 12;
+$GLOBALS['__users'][12]               = new Fake_User( 12, 'self@test.dev' );
+$GLOBALS['__usable_method']           = 'chip';
+
+$_POST = array(
+	'chip_affiliatewp_action'    => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'bad-nonce',
+	'payment_bank_code'          => 'MBBEMYKL',
+	'payment_account_number'     => '1234567890',
+);
+chip_affiliatewp_handle_affiliate_bank_save();
+check( 'bad nonce writes nothing', '' === (string) get_user_meta( 12, 'payment_account_number', true ) );
+
+// Changing details drops the cached CHIP account so the new one is registered.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliates_map'][4]       = 12;
+$GLOBALS['__users'][12]               = new Fake_User( 12, 'self@test.dev' );
+$GLOBALS['__usable_method']           = 'chip';
+
+update_user_meta( 12, 'payment_account_number', '9999999999' );
+update_user_meta( 12, 'payment_bank_code', 'CIBBMYKL' );
+update_user_meta( 12, 'chip_bank_account', array( 'id' => 999 ) );
+
+$_POST = array(
+	'chip_affiliatewp_action'    => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'          => 'MBBEMYKL',
+	'payment_account_number'     => '1234567890',
+);
+chip_affiliatewp_handle_affiliate_bank_save();
+
+check( 'changed details drop the cached CHIP account', array() === get_user_meta( 12, 'chip_bank_account', true ) || '' === get_user_meta( 12, 'chip_bank_account', true ) );
+
+// Saving the same details again must not drop the cache.
+update_user_meta( 12, 'chip_bank_account', array( 'id' => 1000 ) );
+$_POST = array(
+	'chip_affiliatewp_action'    => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'          => 'MBBEMYKL',
+	'payment_account_number'     => '1234567890',
+);
+chip_affiliatewp_handle_affiliate_bank_save();
+check( 'unchanged details keep the cached CHIP account', 1000 === (int) ( get_user_meta( 12, 'chip_bank_account', true )['id'] ?? 0 ) );
+
+$_POST = array();
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

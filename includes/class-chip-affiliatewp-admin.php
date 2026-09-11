@@ -110,7 +110,11 @@ function chip_affiliatewp_affiliate_dashboard_notice() {
 		$notice = array(
 			'variant' => 'warning',
 			'heading' => __( 'Add your bank details to get paid', 'chip-for-affiliatewp' ),
-			'body'    => __( 'Your commissions are paid straight to your Malaysian bank account. Add your bank account details in your payout settings so we can send your next payout.', 'chip-for-affiliatewp' ),
+			'body'    => sprintf(
+				/* translators: %s: URL of the affiliate area Settings tab. */
+				__( 'Your commissions are paid straight to your Malaysian bank account. Add your bank account details on the <a href="%s">Settings</a> tab so we can send your next payout.', 'chip-for-affiliatewp' ),
+				esc_url( function_exists( 'affwp_get_affiliate_area_page_url' ) ? affwp_get_affiliate_area_page_url( 'settings' ) : '' )
+			),
 		);
 	} else {
 		$notice = array(
@@ -119,8 +123,8 @@ function chip_affiliatewp_affiliate_dashboard_notice() {
 			'body'    => sprintf(
 				/* translators: 1: bank name, 2: bank account number. */
 				__( 'Your commissions are sent to %1$s %2$s. Bank account verification can take a little while; you will be paid as soon as it completes.', 'chip-for-affiliatewp' ),
-				$details['bank_name'],
-				$details['account_number']
+				esc_html( $details['bank_name'] ),
+				esc_html( $details['account_number'] )
 			),
 		);
 	}

@@ -429,10 +429,12 @@ function chip_affiliatewp_recount_batch_for_payout( $payout_id ) {
  * The payout's referrals are released back to unpaid so the payout can be
  * retried after whatever the problem was has been fixed.
  *
- * @param int    $payout_id  Payout ID.
- * @param string $reason     Human-readable failure reason.
- * @param string $error_code Optional. Machine-readable error code used for
- *                           failure classification. Default empty string.
+ * @param int         $payout_id  Payout ID.
+ * @param string      $reason     Human-readable failure reason.
+ * @param string      $error_code Optional. Machine-readable error code used for
+ *                                failure classification. Default empty string.
+ * @param int|null    $http_status Optional. HTTP status from the API response,
+ *                                when the failure came from one. Default null.
  * @return WP_Error
  */
 function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $http_status = null ) {
