@@ -354,6 +354,65 @@ function chip_affiliatewp_handle_convert_balance() {
 add_action( 'admin_init', 'chip_affiliatewp_handle_convert_balance' );
 
 /**
+ * Handles a webhook reset request from the Webhook card.
+ *
+ * Removes this site's CHIP Send webhook and clears the stored record so the
+ * next save registers a fresh one. Other webhooks in the merchant's CHIP
+ * account are left alone.
+ *
+ * @return void
+ */
+function chip_affiliatewp_handle_reset_webhook() {
+	if ( ! isset( $_POST['chip_affiliatewp_action'] ) || 'reset_webhook' !== sanitize_key( wp_unslash( $_POST['chip_affiliatewp_action'] ) ) ) {
+		return;
+	}
+
+	if ( ! isset( $_POST['chip_affiliatewp_reset_nonce'] ) ) {
+		return;
+	}
+
+	$nonce = sanitize_text_field( wp_unslash( $_POST['chip_affiliatewp_reset_nonce'] ) );
+
+	if ( ! wp_verify_nonce( $nonce, 'chip_affiliatewp_reset_webhook' ) ) {
+		return;
+	}
+
+	if ( ! current_user_can( 'manage_payouts' ) ) {
+		wp_die( esc_html__( 'You do not have permission to reset the webhook.', 'chip-for-affiliatewp' ) );
+	}
+
+	$mode   = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
+	$result = chip_affiliatewp_reset_webhooks( $mode );
+
+	if ( is_wp_error( $result ) ) {
+		chip_affiliatewp_add_admin_notice( 'error', $result->get_error_message() );
+	} elseif ( ! empty( $result['failed'] ) ) {
+		chip_affiliatewp_add_admin_notice( 'error', implode( ' ', $result['failed'] ) );
+	} else {
+		chip_affiliatewp_add_admin_notice(
+			'success',
+			sprintf(
+				/* translators: 1: number of webhooks removed, 2: "test" or "live". */
+				_n(
+					'Removed %1$d %2$s webhook. Save your credentials to register it again.',
+					'Removed %1$d %2$s webhooks. Save your credentials to register one again.',
+					(int) $result['deleted'],
+					'chip-for-affiliatewp'
+				),
+				(int) $result['deleted'],
+				$mode
+			)
+		);
+	}
+
+	if ( apply_filters( 'chip_affiliatewp_reset_webhook_redirect', true ) ) {
+		wp_safe_redirect( wp_get_referer() ? wp_get_referer() : admin_url() );
+		exit;
+	}
+}
+add_action( 'admin_init', 'chip_affiliatewp_handle_reset_webhook' );
+
+/**
  * Renders the CHIP Send settings panel inside its Payouts-tab card.
  *
  * Uses the native AffiliateWP UI components so the panel matches the
@@ -625,6 +684,28 @@ function chip_affiliatewp_render_settings_panel() {
 					)
 				);
 				?>
+					<?php if ( $configured ) : ?>
+						<form method="post" class="mt-4" onsubmit="return confirm('<?php echo esc_js( __( "Remove this site's CHIP Send webhook and register it again on the next save?", 'chip-for-affiliatewp' ) ); ?>');">
+							<?php wp_nonce_field( 'chip_affiliatewp_reset_webhook', 'chip_affiliatewp_reset_nonce' ); ?>
+							<input type="hidden" name="chip_affiliatewp_action" value="reset_webhook" />
+							<?php
+							if ( function_exists( 'affwp_button' ) ) {
+								affwp_button(
+									array(
+										'type'  => 'submit',
+										'text'  => __( 'Reset webhook', 'chip-for-affiliatewp' ),
+										'style' => 'secondary',
+									)
+								);
+							} else {
+								submit_button( __( 'Reset webhook', 'chip-for-affiliatewp' ), 'secondary', '', false );
+							}
+							?>
+							<p class="mt-2 text-xs text-gray-600">
+								<?php esc_html_e( "Deletes this site's CHIP Send webhook so it can be registered again. Other webhooks in your CHIP account are not touched.", 'chip-for-affiliatewp' ); ?>
+							</p>
+						</form>
+					<?php endif; ?>
 				</div>
 			</div>
 			<?php

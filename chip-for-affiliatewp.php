@@ -79,6 +79,7 @@ require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-account.ph
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-bank-accounts.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-payouts.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-webhooks.php';
+require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-webhook-reset.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-admin.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-failures.php';
 
