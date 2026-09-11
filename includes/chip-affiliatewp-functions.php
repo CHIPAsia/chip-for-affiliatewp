@@ -43,6 +43,37 @@ function chip_affiliatewp_format_money( $amount, $currency = 'MYR' ) {
 }
 
 /**
+ * Parses a stored UTC timestamp into a Unix epoch.
+ *
+ * Timestamps are written with gmdate(), so they are UTC. strtotime() would
+ * interpret them in the site's local timezone, which skews every comparison
+ * that reads them back — on a UTC+8 site the ten-minute requery cooldown looked
+ * like it had already elapsed, so the cooldown never applied at all. Anchor the
+ * parse to UTC instead.
+ *
+ * @param mixed $value Stored timestamp (Y-m-d H:i:s).
+ * @return int Epoch seconds, or 0 when unparseable.
+ */
+function chip_affiliatewp_parse_utc( $value ) {
+	$value = trim( (string) $value );
+
+	if ( '' === $value ) {
+		return 0;
+	}
+
+	$date = DateTimeImmutable::createFromFormat( 'Y-m-d H:i:s', $value, new DateTimeZone( 'UTC' ) );
+
+	if ( false === $date ) {
+		// Fall back to a UTC-anchored strtotime for any other stored shape.
+		$epoch = strtotime( $value . ' UTC' );
+
+		return false === $epoch ? 0 : $epoch;
+	}
+
+	return $date->getTimestamp();
+}
+
+/**
  * Multibyte-safe substring.
  *
  * @param string $text  Input text.

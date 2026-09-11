@@ -695,7 +695,7 @@ function chip_affiliatewp_sweep_processing_payouts() {
 
 		// Respect the per-payout backoff when a recent check already happened.
 		$data    = chip_affiliatewp_payout_data( $payout );
-		$against = strtotime( (string) chip_affiliatewp_array_value( $data, 'last_checked', '' ) );
+		$against = chip_affiliatewp_parse_utc( chip_affiliatewp_array_value( $data, 'last_checked', '' ) );
 
 		if ( $against && ( time() - $against ) < $cooldown ) {
 			continue;

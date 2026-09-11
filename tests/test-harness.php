@@ -1822,6 +1822,44 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code'
 chip_affiliatewp_submit_payout( $payout_id );
 check( 'payable payout keeps its full amount', '3.00' === (string) affwp_get_payout( $payout_id )->amount );
 
+echo "\n== Test 38: stored UTC timestamps parse independently of the site timezone ==\n";
+
+// A timestamp written by gmdate() must read back as that same instant no matter
+// what the site's local timezone is. strtotime() would shift it by the offset,
+// which broke the requery cooldown on non-UTC sites.
+$original_tz = date_default_timezone_get();
+
+$stamp = gmdate( 'Y-m-d H:i:s' );
+$expected = strtotime( $stamp . ' UTC' );
+
+foreach ( array( 'UTC', 'Asia/Kuala_Lumpur', 'America/New_York', 'Pacific/Auckland' ) as $tz ) {
+	date_default_timezone_set( $tz );
+
+	$parsed = chip_affiliatewp_parse_utc( $stamp );
+
+	check( "UTC timestamp parses identically under {$tz}", $expected === $parsed );
+}
+
+date_default_timezone_set( $original_tz );
+
+// The cooldown must hold on a UTC+8 site: a just-checked payout is skipped.
+date_default_timezone_set( 'Asia/Kuala_Lumpur' );
+$just_now = gmdate( 'Y-m-d H:i:s' );
+$elapsed  = time() - chip_affiliatewp_parse_utc( $just_now );
+check( 'cooldown sees a fresh check as fresh on a UTC+8 site', $elapsed < 10 * MINUTE_IN_SECONDS );
+check( 'cooldown sees a fresh check as non-negative', $elapsed >= 0 );
+
+// A ten-minute-old stamp must be past the cooldown.
+$old = gmdate( 'Y-m-d H:i:s', time() - 11 * MINUTE_IN_SECONDS );
+$elapsed_old = time() - chip_affiliatewp_parse_utc( $old );
+check( 'cooldown expires on schedule on a UTC+8 site', $elapsed_old >= 10 * MINUTE_IN_SECONDS );
+
+date_default_timezone_set( $original_tz );
+
+// Defensive: unparseable input yields 0 rather than a bogus epoch.
+check( 'empty timestamp yields 0', 0 === chip_affiliatewp_parse_utc( '' ) );
+check( 'garbage timestamp yields 0', 0 === chip_affiliatewp_parse_utc( 'not-a-date' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
