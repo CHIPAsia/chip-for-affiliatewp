@@ -167,6 +167,67 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	$reference    = chip_affiliatewp_instruction_reference( $payout_id );
 	$referral_ids = chip_affiliatewp_payout_referral_ids( $payout );
 
+	/*
+	 * Re-check eligibility immediately before the money moves. A payout row
+	 * keeps the referral list captured when the batch was built, and a referral
+	 * can be revoked in between — a refund integration (WooCommerce, EDD, RCP)
+	 * pulling back a commission, or an admin marking it unpaid. Paying here
+	 * would send money the merchant has already reversed and, because the
+	 * referral is no longer unpaid, nothing downstream would notice.
+	 *
+	 * Only a referral still awaiting payment is payable. Anything else is
+	 * dropped; if that leaves nothing, the payout fails and the referrals are
+	 * released rather than partially paid.
+	 */
+	$payable_ids = array();
+
+	foreach ( $referral_ids as $referral_id ) {
+		$referral = affwp_get_referral( $referral_id );
+
+		if ( $referral && 'unpaid' === $referral->status ) {
+			$payable_ids[] = $referral_id;
+		}
+	}
+
+	if ( empty( $payable_ids ) ) {
+		return chip_affiliatewp_fail_payout( $payout_id, __( 'None of the referrals in this payout are awaiting payment any more, so nothing was sent.', 'chip-for-affiliatewp' ), 'chip_referrals_no_longer_payable' );
+	}
+
+	if ( count( $payable_ids ) !== count( $referral_ids ) ) {
+		/*
+		 * Part of the payout was revoked. Recompute the amount from what is
+		 * still payable so the affiliate is not overpaid, and record the
+		 * reduction so the merchant can see why the figure differs from the
+		 * batch preview.
+		 */
+		$amount = 0.0;
+
+		foreach ( $payable_ids as $referral_id ) {
+			$referral = affwp_get_referral( $referral_id );
+			$amount  += (float) $referral->amount;
+		}
+
+		if ( $amount <= 0 ) {
+			return chip_affiliatewp_fail_payout( $payout_id, __( 'The referrals left in this payout have no payable amount.', 'chip-for-affiliatewp' ), 'chip_invalid_amount' );
+		}
+
+		$referral_ids = $payable_ids;
+
+		affiliate_wp()->affiliates->payouts->update(
+			$payout_id,
+			array(
+				'amount'    => chip_affiliatewp_format_amount( $amount ),
+				'referrals' => implode( ',', $referral_ids ),
+			),
+			'',
+			'payout'
+		);
+
+		// The in-memory row still holds the pre-reduction figure.
+		$payout->amount    = chip_affiliatewp_format_amount( $amount );
+		$payout->referrals = implode( ',', $referral_ids );
+	}
+
 	$body = array(
 		'bank_account_id' => (int) $bank_account['id'],
 		'amount'          => chip_affiliatewp_format_amount( $payout->amount ),

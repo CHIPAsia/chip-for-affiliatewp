@@ -122,6 +122,8 @@ TRANSLATIONS = {
     'Add your bank details to get paid': 'Tambah butiran bank anda untuk dibayar',
     'Balance': 'Baki',
     'Amount to convert': 'Jumlah untuk ditukar',
+    'None of the referrals in this payout are awaiting payment any more, so nothing was sent.': 'Tiada lagi rujukan dalam pembayaran ini yang menunggu pembayaran, jadi tiada apa dihantar.',
+    'The referrals left in this payout have no payable amount.': 'Rujukan yang tinggal dalam pembayaran ini tiada jumlah yang boleh dibayar.',
     'CHIP Send for AffiliateWP needs AffiliateWP to be installed and active. Payouts stay disabled until it is.': 'CHIP Send untuk AffiliateWP memerlukan AffiliateWP dipasang dan aktif. Pembayaran kekal dilumpuhkan sehingga ia dipasang.',
     'Request conversion': 'Mohon penukaran',
     'This asks CHIP to convert part of your settlement balance into payout budget. Approvers receive an email and approve there — nothing moves until they do.': 'Ini meminta CHIP menukar sebahagian baki penyelesaian anda kepada bajet pembayaran. Pelulus menerima e-mel dan meluluskan di sana — tiada apa bergerak sehingga mereka luluskan.',

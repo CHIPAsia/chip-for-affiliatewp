@@ -1751,6 +1751,77 @@ chip_affiliatewp_apply_instruction(
 $stored = json_decode( affwp_get_payout( $payout_id )->description, true );
 check( 'forged receipt URL is not stored', empty( $stored['receipt_url'] ) );
 
+echo "\n== Test 37: revoked referrals are not paid ==\n";
+reset_state();
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'test-key';
+$GLOBALS['__options']['chip_test_secret_key'] = 'test-secret';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// Every referral revoked -> nothing is sent.
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 50, 51 ),
+		'amount'        => '10.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][50] = new Fake_Referral( 50, 3, '5.00', 'paid', $payout_id );
+$GLOBALS['__referral_rows'][51] = new Fake_Referral( 51, 3, '5.00', 'paid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$result = chip_affiliatewp_submit_payout( $payout_id );
+check( 'all-revoked payout fails', is_wp_error( $result ) );
+check( 'all-revoked payout sent no instruction', array() === $GLOBALS['__http_queue'] );
+check( 'all-revoked payout records the reason', false !== strpos( $result->get_error_message(), 'awaiting payment' ) );
+
+// One of two revoked -> amount is reduced to what is still payable.
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 60, 61 ),
+		'amount'        => '10.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][60] = new Fake_Referral( 60, 3, '4.00', 'unpaid', $payout_id );
+$GLOBALS['__referral_rows'][61] = new Fake_Referral( 61, 3, '6.00', 'paid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9900, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+
+$sent_body = null;
+foreach ( $GLOBALS['__http_log'] as $hook ) {
+	if ( false !== strpos( $hook['url'], '/send/send_instructions' ) && 'POST' === $hook['method'] ) {
+		$sent_body = is_string( $hook['body'] ) ? json_decode( $hook['body'], true ) : $hook['body'];
+	}
+}
+check( 'partial payout sends the reduced amount', is_array( $sent_body ) && '4.00' === $sent_body['amount'] );
+check( 'partial payout records only the payable referral', '60' === (string) affwp_get_payout( $payout_id )->referrals );
+
+// A fully payable payout is untouched.
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 70 ),
+		'amount'        => '3.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][70] = new Fake_Referral( 70, 3, '3.00', 'unpaid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9901, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+check( 'payable payout keeps its full amount', '3.00' === (string) affwp_get_payout( $payout_id )->amount );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
