@@ -77,6 +77,18 @@ if ( function_exists( 'affwp_get_affiliate' ) && function_exists( 'affwp_get_aff
 			update_option( 'affwp_settings', $chip_affwp_settings );
 		}
 	}
+
+	/*
+	 * The "let affiliates choose" toggle adds this method to AffiliateWP's
+	 * hidden-methods option. Left behind, it would keep CHIP hidden from
+	 * affiliates on a later reinstall, when the setting no longer exists to
+	 * turn it back on.
+	 */
+	$chip_hidden = get_option( 'affwp_hidden_affiliate_payout_methods', array() );
+
+	if ( is_array( $chip_hidden ) && in_array( 'chip', $chip_hidden, true ) ) {
+		update_option( 'affwp_hidden_affiliate_payout_methods', array_values( array_diff( $chip_hidden, array( 'chip' ) ) ) );
+	}
 }
 
 foreach ( $chip_option_names as $chip_option_name ) {
