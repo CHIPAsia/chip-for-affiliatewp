@@ -163,16 +163,41 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 	$data['poll_count']     = 0;
 	$data['mode']           = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
 
+	// The instruction was accepted, so any earlier failure no longer applies.
+	unset( $data['error'] );
+
+	$update = array(
+		'description'          => wp_json_encode( $data ),
+		'service_id'           => (int) $response['id'],
+		'service_invoice_link' => $data['receipt_url'],
+	);
+
+	/*
+	 * A resubmission after a failure must move the payout back into
+	 * processing. Without this the row stays 'failed' even though CHIP has
+	 * accepted the instruction, so the payout list lies until the webhook
+	 * or the sweep happens to resolve it. Never downgrade an already-paid
+	 * payout (a duplicate-reference adoption can land here).
+	 */
+	if ( 'paid' !== $payout->status ) {
+		$update['status'] = 'processing';
+	}
+
 	affiliate_wp()->affiliates->payouts->update(
 		$payout_id,
-		array(
-			'description'          => wp_json_encode( $data ),
-			'service_id'           => (int) $response['id'],
-			'service_invoice_link' => $data['receipt_url'],
-		),
+		$update,
 		'',
 		'payout'
 	);
+
+	// Keep the referral state consistent with an in-flight payout.
+	foreach ( $referral_ids as $referral_id ) {
+		$referral = affwp_get_referral( $referral_id );
+
+		if ( $referral && 'paid' !== $referral->status ) {
+			affwp_set_referral_status( $referral_id, 'unpaid' );
+		}
+	}
 
 	// The instruction was accepted for processing; initial webhook may lag, so schedule a check.
 	chip_affiliatewp_schedule_check( $payout_id, 120 );
@@ -274,6 +299,15 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	$data = chip_affiliatewp_payout_data( $payout );
 	$data['state']        = $state;
 	$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
+
+	/*
+	 * Only a terminal state supersedes an earlier failure note. An in-flight
+	 * delivery keeps the note so the admin can still see why the payout was
+	 * retried in the first place.
+	 */
+	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) ) {
+		unset( $data['error'] );
+	}
 
 	if ( ! empty( $instruction['id'] ) ) {
 		$data['instruction_id'] = (int) $instruction['id'];

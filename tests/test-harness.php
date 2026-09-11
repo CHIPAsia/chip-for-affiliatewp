@@ -1135,6 +1135,100 @@ check(
 		&& 'failed' === affiliate_wp()->affiliates->payouts->get_item( $fail2 )->status
 );
 
+echo "\n== Test 25: a successful resubmission clears the failure and returns to processing ==\n";
+reset_state();
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = (object) array( 'ID' => 7, 'user_email' => 'aff3@example.test' );
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '1234567890';
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
+
+$retry_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 16 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'failed',
+	)
+);
+$GLOBALS['__referral_rows'][16] = new Fake_Referral( 16, 3, '2.00', 'unpaid', $retry_payout );
+
+// Record an earlier failure note, as the fail path would have.
+chip_affiliatewp_update_payout_data(
+	$retry_payout,
+	array( 'error' => 'CHIP Send API error (HTTP 422): bad description' )
+);
+
+// CHIP accepts the retried submission this time.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 8001, 'state' => 'received' ) );
+
+$submit_result = chip_affiliatewp_submit_payout( $retry_payout );
+$retry_row    = affiliate_wp()->affiliates->payouts->get_item( $retry_payout );
+$retry_data   = chip_affiliatewp_payout_data( $retry_row );
+
+check( 'resubmission succeeds', true === $submit_result );
+check( 'payout returns to processing', 'processing' === $retry_row->status );
+check( 'instruction id recorded', 8001 === (int) $retry_row->service_id );
+check( 'stale failure note cleared', false === isset( $retry_data['error'] ) );
+check( 'referral held unpaid while in flight', 'unpaid' === $GLOBALS['__referral_rows'][16]->status );
+
+// A completed delivery then clears the note as well.
+chip_affiliatewp_apply_instruction( $retry_payout, array( 'id' => 8001, 'state' => 'completed' ) );
+$healed = affiliate_wp()->affiliates->payouts->get_item( $retry_payout );
+check( 'completed delivery pays the retried payout', 'paid' === $healed->status );
+check( 'error note still absent after healing', false === isset( chip_affiliatewp_payout_data( $healed )['error'] ) );
+
+echo "\n== Test 26: an in-flight delivery keeps the failure note visible ==\n";
+$note_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 17 ),
+		'amount'        => '3.00',
+		'payout_method' => 'chip',
+		'status'        => 'failed',
+	)
+);
+$GLOBALS['__referral_rows'][17] = new Fake_Referral( 17, 3, '3.00', 'unpaid', $note_payout );
+chip_affiliatewp_update_payout_data( $note_payout, array( 'error' => 'previous failure', 'instruction_id' => 8002 ) );
+chip_affiliatewp_apply_instruction( $note_payout, array( 'id' => 8002, 'state' => 'executing' ) );
+$note_row = affiliate_wp()->affiliates->payouts->get_item( $note_payout );
+check( 'in-flight delivery does not clear the note', 'previous failure' === ( chip_affiliatewp_payout_data( $note_row )['error'] ?? '' ) );
+
+echo "\n== Test 27: description sanitizer is applied to the submitted payload ==\n";
+reset_state();
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = (object) array( 'ID' => 7, 'user_email' => 'aff3@example.test' );
+$GLOBALS['__user_meta'][7]['payment_bank_code']       = 'MBBEMYKL';
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '1234567890';
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
+
+$desc_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 18 ),
+		'amount'        => '1.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][18] = new Fake_Referral( 18, 3, '1.00', 'unpaid', $desc_payout );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 8003, 'state' => 'received' ) );
+
+chip_affiliatewp_submit_payout( $desc_payout );
+$sent = json_decode( $GLOBALS['__http_log'][ count( $GLOBALS['__http_log'] ) - 1 ]['body'], true );
+check( 'no hash reaches the API', false === strpos( (string) ( $sent['description'] ?? '' ), '#' ) );
+check( 'description present', '' !== (string) ( $sent['description'] ?? '' ) );
+check( 'description within 140 chars', 140 >= strlen( (string) ( $sent['description'] ?? '' ) ) );
+
 echo "\n== Test 24: requery only uses valid payout statuses (unpaid is a referral status) ==\n";
 reset_state();
 $GLOBALS['__options']['chip_test_mode']     = 1;
