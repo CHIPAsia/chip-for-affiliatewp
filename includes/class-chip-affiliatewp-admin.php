@@ -394,8 +394,8 @@ function chip_affiliatewp_handle_reset_webhook() {
 			sprintf(
 				/* translators: 1: number of webhooks removed, 2: "test" or "live". */
 				_n(
-					'Removed %1$d %2$s webhook. Save your credentials to register it again.',
-					'Removed %1$d %2$s webhooks. Save your credentials to register one again.',
+					'Removed %1$d %2$s webhook and registered it again.',
+					'Removed %1$d %2$s webhooks and registered one again.',
 					(int) $result['deleted'],
 					'chip-for-affiliatewp'
 				),

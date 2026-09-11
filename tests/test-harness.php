@@ -203,6 +203,11 @@ function wp_remote_request( $url, $args ) {
 
 	foreach ( $GLOBALS['__http_queue'] as $idx => $entry ) {
 		if ( false !== strpos( $url, $entry['match'] ) ) {
+			// Optional method constraint: "/webhooks" is a prefix of
+			// "/webhooks/123", so a list mock would otherwise swallow a DELETE.
+			if ( ! empty( $entry['method'] ) && strtoupper( (string) $entry['method'] ) !== strtoupper( (string) ( $args['method'] ?? 'GET' ) ) ) {
+				continue;
+			}
 			// Optional host constraint: only match when the URL hits the named host.
 			if ( ! empty( $entry['url_host'] ) && false === strpos( $url, $entry['url_host'] ) ) {
 				continue;
@@ -2265,7 +2270,7 @@ echo "\n== Test 47: webhook reset removes only this plugin's webhooks ==\n";
 reset_state();
 
 $GLOBALS['__options']['chip_test_mode']        = 1;
-$GLOBALS['__options']['chip_webhook_id_test']  = 'wh_ours_recorded';
+$GLOBALS['__options']['chip_webhook_id_test']  = '9101';
 $GLOBALS['__options']['chip_webhook_key_test'] = 'OUR_KEY';
 
 // Pin the per-site secret first: it is generated on first use, so deriving the
@@ -2276,43 +2281,33 @@ $our_url = chip_affiliatewp_webhook_url();
 // The account holds: our recorded webhook, another entry pointing at our URL,
 // a same-named entry from an old site URL, and a merchant's own integration.
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array(
-	'match' => '/webhooks',
-	'code'  => 200,
-	'body'  => array(
-		'results' => array(
-			array( 'id' => 'wh_ours_recorded', 'name' => 'AffiliateWP Payouts', 'callback_url' => $our_url ),
-			array( 'id' => 'wh_our_url', 'name' => 'Something else', 'callback_url' => $our_url ),
-			array( 'id' => 'wh_stale_name', 'name' => 'AffiliateWP Payouts', 'callback_url' => 'https://old-site.example/webhook' ),
-			array( 'id' => 'wh_merchant_own', 'name' => 'My Shop Orders', 'callback_url' => 'https://my-shop.example/hook' ),
-		),
+$account = array(
+	'results' => array(
+		array( 'id' => 9101, 'name' => 'AffiliateWP Payouts', 'callback_url' => $our_url ),
+		array( 'id' => 9102, 'name' => 'Something else', 'callback_url' => $our_url ),
+		array( 'id' => 9103, 'name' => 'AffiliateWP Payouts', 'callback_url' => 'https://old-site.example/webhook' ),
+		array( 'id' => 9104, 'name' => 'My Shop Orders', 'callback_url' => 'https://my-shop.example/hook' ),
 	),
 );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => $account );
 
 $found = chip_affiliatewp_find_own_webhooks( 'test' );
 
-check( 'recorded webhook is ours', in_array( 'wh_ours_recorded', $found['ids'], true ) );
-check( 'webhook pointing at our URL is ours', in_array( 'wh_our_url', $found['ids'], true ) );
-check( 'stale same-named webhook is ours', in_array( 'wh_stale_name', $found['ids'], true ) );
-check( "merchant's own webhook is NOT ours", ! in_array( 'wh_merchant_own', $found['ids'], true ) );
+check( 'recorded webhook is ours', in_array( '9101', array_map( 'strval', $found['ids'] ), true ) );
+check( 'webhook pointing at our URL is ours', in_array( '9102', array_map( 'strval', $found['ids'] ), true ) );
+check( 'stale same-named webhook is ours', in_array( '9103', array_map( 'strval', $found['ids'] ), true ) );
+check( "merchant's own webhook is NOT ours", ! in_array( '9104', array_map( 'strval', $found['ids'] ), true ) );
 
 // Reset deletes exactly our three and clears the record.
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array(
-	'match' => '/webhooks',
-	'code'  => 200,
-	'body'  => array(
-		'results' => array(
-			array( 'id' => 'wh_ours_recorded', 'name' => 'AffiliateWP Payouts', 'callback_url' => $our_url ),
-			array( 'id' => 'wh_our_url', 'name' => 'Something else', 'callback_url' => $our_url ),
-			array( 'id' => 'wh_stale_name', 'name' => 'AffiliateWP Payouts', 'callback_url' => 'https://old-site.example/webhook' ),
-			array( 'id' => 'wh_merchant_own', 'name' => 'My Shop Orders', 'callback_url' => 'https://my-shop.example/hook' ),
-		),
-	),
-);
-$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/wh_ours_recorded', 'code' => 200, 'body' => array( 'ok' => true ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/wh_our_url', 'code' => 200, 'body' => array( 'ok' => true ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/wh_stale_name', 'code' => 200, 'body' => array( 'ok' => true ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => $account );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9101', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9102', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9103', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
+// Re-registration: an empty list, then the create. The reachability probe is
+// cached in a transient, so no probe request is made on this path.
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9200, 'public_key' => 'NEW_KEY' ) );
 
 $result = chip_affiliatewp_reset_webhooks( 'test' );
 
@@ -2325,21 +2320,24 @@ foreach ( $GLOBALS['__http_log'] as $call ) {
 		$deleted[] = basename( $call['url'] );
 	}
 }
-check( 'reset never deleted the merchant webhook', ! in_array( 'wh_merchant_own', $deleted, true ) );
-check( 'reset deleted our recorded webhook', in_array( 'wh_ours_recorded', $deleted, true ) );
+check( 'reset never deleted the merchant webhook', ! in_array( '9104', $deleted, true ) );
+check( 'reset deleted our recorded webhook', in_array( '9101', $deleted, true ) );
 
 // The stored record is cleared so the next save re-registers.
-check( 'stored webhook id is cleared', '' === (string) $GLOBALS['__options']['chip_webhook_id_test'] );
-check( 'stored webhook key is cleared', '' === (string) $GLOBALS['__options']['chip_webhook_key_test'] );
-check( 'mode is no longer reported configured', ! chip_affiliatewp_webhook_configured() );
+// The reset re-registers, so the record holds the NEW webhook, not the old one.
+check( 'stored webhook id now points at the new webhook', '9200' === (string) $GLOBALS['__options']['chip_webhook_id_test'] );
+check( 'stored webhook key is refreshed', 'NEW_KEY' === (string) $GLOBALS['__options']['chip_webhook_key_test'] );
+check( 'mode is configured again after the reset', chip_affiliatewp_webhook_configured() );
 
 // A 404 on delete counts as already gone, not a failure.
 reset_state();
 $GLOBALS['__options']['chip_test_mode']       = 1;
-$GLOBALS['__options']['chip_webhook_id_test'] = 'wh_gone';
+$GLOBALS['__options']['chip_webhook_id_test'] = '9300';
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'code' => 200, 'body' => array( 'results' => array() ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/wh_gone', 'code' => 404, 'body' => array( 'message' => 'Not found' ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9300', 'method' => 'DELETE', 'code' => 404, 'body' => array( 'message' => 'Not found' ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9201, 'public_key' => 'NEW_KEY_2' ) );
 $gone = chip_affiliatewp_reset_webhooks( 'test' );
 check( 'already-deleted webhook counts as removed', 1 === (int) $gone['deleted'] );
 check( 'already-deleted webhook is not a failure', array() === $gone['failed'] );

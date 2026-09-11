@@ -153,7 +153,7 @@ function chip_affiliatewp_reset_webhooks( $mode = null ) {
 		++$deleted;
 	}
 
-	// Forget what we recorded, so the next save registers from scratch.
+	// Forget what we recorded so registration starts from a clean slate.
 	$keys = chip_affiliatewp_webhook_option_keys( $mode );
 
 	affiliate_wp()->settings->set(
@@ -168,8 +168,25 @@ function chip_affiliatewp_reset_webhooks( $mode = null ) {
 	// A fresh registration should not reuse a stale reachability verdict.
 	delete_transient( 'chip_affiliatewp_webhook_reachable' );
 
+	/*
+	 * Register again straight away, so the button is a true reset rather than
+	 * "delete now, save later". The old webhook is already gone, so discovery
+	 * cannot find it and a new one is created. A failure here is reported but
+	 * does not undo the deletion.
+	 */
+	$rebuilt = chip_affiliatewp_ensure_webhook( true );
+
+	if ( is_wp_error( $rebuilt ) ) {
+		$failed[] = sprintf(
+			/* translators: %s: error message */
+			__( 'The webhook was removed but could not be registered again: %s', 'chip-for-affiliatewp' ),
+			$rebuilt->get_error_message()
+		);
+	}
+
 	return array(
 		'deleted' => $deleted,
 		'failed'  => $failed,
+		'rebuilt' => ! is_wp_error( $rebuilt ),
 	);
 }
