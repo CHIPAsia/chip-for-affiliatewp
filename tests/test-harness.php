@@ -263,6 +263,20 @@ function _n( $single, $plural, $number, $domain = '' ) {
 	return 1 === (int) $number ? $single : $plural;
 }
 
+function esc_url_raw( $url ) {
+	$url = trim( (string) $url );
+
+	if ( '' === $url || preg_match( '/^\s*javascript:/i', $url ) ) {
+		return '';
+	}
+
+	return $url;
+}
+
+function wp_parse_url( $url, $component = -1 ) {
+	return parse_url( $url, $component );
+}
+
 function wp_nonce_field( $action = '', $name = '_wpnonce', $echo = true ) {
 	return '';
 }
@@ -937,7 +951,7 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 	)
 );
 $GLOBALS['__referral_rows'][31] = new Fake_Referral( 31, 3, '80.00', 'unpaid', $payout_id );
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/905', 'code' => 200, 'body' => array( 'id' => 905, 'state' => 'completed', 'receipt_url' => 'https://x.test/r' ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/905', 'code' => 200, 'body' => array( 'id' => 905, 'state' => 'completed', 'receipt_url' => 'https://www.chip-in.asia/receipts/send/def456' ) );
 chip_affiliatewp_check_payout_status( $payout_id, false );
 check( 'requery marked paid', 'paid' === affwp_get_payout( $payout_id )->status );
 check( 'referral paid via requery', 'paid' === $GLOBALS['__referral_rows'][31]->status );
@@ -1691,6 +1705,51 @@ check( 'notice renders', false !== strpos( $rendered, 'Conversion requested.' ) 
 check( 'notice is cleared after rendering', false === get_transient( 'chip_affiliatewp_notices_' . get_current_user_id() ) );
 
 $_POST = array();
+
+echo "\n== Test 36: receipt URLs are restricted to CHIP hosts ==\n";
+
+check( 'apex host accepted', 'https://chip-in.asia/receipts/send/a' === chip_affiliatewp_safe_receipt_url( 'https://chip-in.asia/receipts/send/a' ) );
+check( 'www subdomain accepted', 'https://www.chip-in.asia/receipts/send/a' === chip_affiliatewp_safe_receipt_url( 'https://www.chip-in.asia/receipts/send/a' ) );
+check( 'staging subdomain accepted', 'https://staging.chip-in.asia/receipts/send/a' === chip_affiliatewp_safe_receipt_url( 'https://staging.chip-in.asia/receipts/send/a' ) );
+
+check( 'javascript: rejected', '' === chip_affiliatewp_safe_receipt_url( 'javascript:alert(1)' ) );
+check( 'data: rejected', '' === chip_affiliatewp_safe_receipt_url( 'data:text/html,<script>alert(1)</script>' ) );
+check( 'foreign host rejected', '' === chip_affiliatewp_safe_receipt_url( 'https://evil.example.com/receipts/send/a' ) );
+check( 'lookalike host rejected', '' === chip_affiliatewp_safe_receipt_url( 'https://chip-in.asia.evil.com/x' ) );
+check( 'relative path rejected', '' === chip_affiliatewp_safe_receipt_url( '/receipts/send/a' ) );
+check( 'empty stays empty', '' === chip_affiliatewp_safe_receipt_url( '' ) );
+
+// A forged receipt in a webhook payload must not reach the payout record.
+reset_state();
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'test-key';
+$GLOBALS['__options']['chip_test_secret_key'] = 'test-secret';
+$GLOBALS['__affiliates_map'][2] = 5;
+$GLOBALS['__users'][5] = (object) array( 'user_email' => 'a@example.com' );
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 2,
+		'referrals'     => array( 40 ),
+		'amount'        => '5.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'service_id'    => 9001,
+		'description'   => wp_json_encode( array( 'instruction_id' => 9001, 'state' => 'executing' ) ),
+	)
+);
+$GLOBALS['__referral_rows'][40] = new Fake_Referral( 40, 2, '5.00', 'processing', $payout_id );
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'          => 9001,
+		'state'       => 'completed',
+		'reference'   => 'XT-PO-' . $payout_id,
+		'receipt_url' => 'https://evil.example.com/steal',
+	)
+);
+$stored = json_decode( affwp_get_payout( $payout_id )->description, true );
+check( 'forged receipt URL is not stored', empty( $stored['receipt_url'] ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

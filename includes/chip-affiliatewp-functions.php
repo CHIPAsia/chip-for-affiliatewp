@@ -58,6 +58,55 @@ function chip_affiliatewp_substr( $text, $limit ) {
 }
 
 /**
+ * Validates a receipt URL before it is stored or linked to.
+ *
+ * The URL arrives in a signed webhook, so a forged payload is already rejected
+ * upstream — but the value ends up in an href, and a signature key is a single
+ * point of failure. Accept only an absolute http(s) URL on a chip-in.asia host
+ * and drop anything else, so a compromised or misconfigured sender cannot turn
+ * the payout drawer into a javascript: link.
+ *
+ * @param mixed $url Candidate URL.
+ * @return string Sanitized URL, or an empty string when it is not acceptable.
+ */
+function chip_affiliatewp_safe_receipt_url( $url ) {
+	$url = trim( (string) $url );
+
+	if ( '' === $url ) {
+		return '';
+	}
+
+	$url = esc_url_raw( $url );
+
+	if ( '' === $url ) {
+		return '';
+	}
+
+	$host = wp_parse_url( $url, PHP_URL_HOST );
+
+	if ( ! is_string( $host ) || '' === $host ) {
+		return '';
+	}
+
+	$host = strtolower( $host );
+
+	// CHIP serves receipts from its own domains (apex or any subdomain).
+	$is_chip_host = ( 'chip-in.asia' === $host ) || ( '.chip-in.asia' === substr( $host, -13 ) );
+
+	if ( ! $is_chip_host ) {
+		return '';
+	}
+
+	$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
+
+	if ( 'https' !== $scheme && 'http' !== $scheme ) {
+		return '';
+	}
+
+	return $url;
+}
+
+/**
  * Sanitizes a description for the CHIP Send API.
  *
  * CHIP Send rejects any character outside a fixed allow-list:
