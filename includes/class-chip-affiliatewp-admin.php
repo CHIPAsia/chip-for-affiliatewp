@@ -548,6 +548,65 @@ function chip_affiliatewp_render_settings_panel() {
 			<?php
 			unset( $configured );
 	}
+
+		// Balance and budget allocation card.
+	if ( $enabled && chip_affiliatewp_has_credentials() && function_exists( 'affwp_callout' ) ) {
+		$summary = chip_affiliatewp_get_account_summary( $test_mode ? 'test' : 'live' );
+		?>
+			<div class="overflow-hidden bg-white rounded-lg border border-gray-200">
+				<div class="p-6">
+					<div class="mb-4">
+						<h4 class="flex items-center text-base font-medium text-gray-900">
+						<?php esc_html_e( 'Balance', 'chip-for-affiliatewp' ); ?>
+							<span class="px-2 py-1 ml-2 text-xs text-gray-600 bg-gray-50 rounded-md border border-gray-200">
+							<?php echo esc_html( $test_mode ? __( 'Test Mode', 'chip-for-affiliatewp' ) : __( 'Live Mode', 'chip-for-affiliatewp' ) ); ?>
+							</span>
+						</h4>
+					</div>
+				<?php if ( is_wp_error( $summary ) || ! empty( $summary['error'] ) ) : ?>
+						<?php
+						affwp_callout(
+							array(
+								'tone'    => 'warning',
+								'heading' => __( 'Balance unavailable', 'chip-for-affiliatewp' ),
+								'content' => is_wp_error( $summary )
+									? $summary->get_error_message()
+									: (string) $summary['error'],
+							)
+						);
+						?>
+					<?php else : ?>
+						<dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+							<div class="p-4 rounded-lg border border-gray-200">
+								<dt class="text-sm text-gray-600"><?php esc_html_e( 'Available for payouts', 'chip-for-affiliatewp' ); ?></dt>
+								<dd class="mt-1 text-2xl font-semibold text-gray-900">
+									<?php echo esc_html( chip_affiliatewp_format_money( $summary['current_balance'], $summary['currency'] ) ); ?>
+								</dd>
+							</div>
+							<div class="p-4 rounded-lg border border-gray-200">
+								<dt class="text-sm text-gray-600"><?php esc_html_e( 'Available to convert', 'chip-for-affiliatewp' ); ?></dt>
+								<dd class="mt-1 text-2xl font-semibold text-gray-900">
+									<?php echo esc_html( chip_affiliatewp_format_money( $summary['convertible'], $summary['currency'] ) ); ?>
+								</dd>
+							</div>
+						</dl>
+						<?php if ( $summary['convertible'] > 0 ) : ?>
+							<p class="mt-4 text-sm text-gray-600">
+								<?php
+								printf(
+									/* translators: %d: number of approvals required. */
+									esc_html( _n( 'Converting balance into a payout budget needs %d approval.', 'Converting balance into a payout budget needs %d approvals.', (int) $summary['approvals_required'], 'chip-for-affiliatewp' ) ),
+									(int) $summary['approvals_required']
+								);
+								?>
+							</p>
+						<?php endif; ?>
+					<?php endif; ?>
+				</div>
+			</div>
+			<?php
+			unset( $summary );
+	}
 	?>
 	</div>
 	<?php

@@ -39,6 +39,7 @@ add_action( 'init', 'chip_affiliatewp_load_textdomain' );
 // Include plugin modules.
 require_once CHIP_AFFILIATEWP_PATH . 'includes/chip-affiliatewp-functions.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-api.php';
+require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-account.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-bank-accounts.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-payouts.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-webhooks.php';

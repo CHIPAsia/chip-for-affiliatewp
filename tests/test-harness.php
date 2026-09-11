@@ -251,6 +251,11 @@ function set_transient( $key, $value, $expiry = 0 ) {
 	return true;
 }
 
+function delete_transient( $key ) {
+	unset( $GLOBALS['__transients'][ $key ] );
+	return true;
+}
+
 $GLOBALS['__options_store'] = array();
 
 function get_option( $name, $default = false ) {
@@ -1505,6 +1510,67 @@ $GLOBALS['__user_meta'][7]['chip_bank_account'] = array();
 chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
 $GLOBALS['__user_meta'][7]['payment_account_number'] = '1234-567 890';
 check( 'separators in the account number keep the fingerprint stable', null !== chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
+
+echo "\n== Test 34: account balance is parsed and cached ==\n";
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'test-key';
+$GLOBALS['__options']['chip_test_secret_key']  = 'test-secret';
+$GLOBALS['__transients'] = array();
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match' => '/send/accounts',
+	'code'  => 200,
+	'body'  => array(
+		'results' => array(
+			array(
+				'current_balance'                     => 100.5,
+				'convertible_balance_from_statement'  => 1000,
+				'currency'                            => 'myr',
+				'settlement_convert_approvals_count'  => 2,
+			),
+		),
+	),
+);
+
+$summary = chip_affiliatewp_get_account_summary( 'test' );
+check( 'current balance parsed', 100.5 === $summary['current_balance'] );
+check( 'convertible balance parsed', 1000.0 === $summary['convertible'] );
+check( 'currency upper-cased', 'MYR' === $summary['currency'] );
+check( 'approvals parsed', 2 === (int) $summary['approvals_required'] );
+
+// Second read is served from the transient: nothing queued, still correct.
+$GLOBALS['__http_queue'] = array();
+$again = chip_affiliatewp_get_account_summary( 'test' );
+check( 'second read is cached', 100.5 === $again['current_balance'] );
+check( 'second read made no HTTP request', array() === $GLOBALS['__http_queue'] );
+
+// A forced read bypasses the cache.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match' => '/send/accounts',
+	'code'  => 200,
+	'body'  => array( 'results' => array( array( 'current_balance' => 7, 'currency' => 'MYR' ) ) ),
+);
+$forced = chip_affiliatewp_get_account_summary( 'test', true );
+check( 'forced read re-requests', 7.0 === $forced['current_balance'] );
+
+// Requesting an allocation clears the cached balance.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_limits', 'code' => 200, 'body' => array( 'ok' => true ) );
+chip_affiliatewp_request_budget_allocation( 500, 'test' );
+check( 'allocation clears the cached balance', false === get_transient( 'chip_affiliatewp_account_test' ) );
+
+// Invalid amounts are rejected before any request is made.
+$GLOBALS['__http_queue'] = array();
+check( 'zero allocation rejected', is_wp_error( chip_affiliatewp_request_budget_allocation( 0, 'test' ) ) );
+check( 'negative allocation rejected', is_wp_error( chip_affiliatewp_request_budget_allocation( -5, 'test' ) ) );
+check( 'invalid allocation made no request', array() === $GLOBALS['__http_queue'] );
+
+// Formatting never returns an empty string.
+check( 'money formats with the currency code', false !== strpos( chip_affiliatewp_format_money( 1234.5, 'MYR' ), '1,234.50' ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

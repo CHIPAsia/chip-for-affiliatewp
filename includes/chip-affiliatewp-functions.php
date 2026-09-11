@@ -22,6 +22,27 @@ function chip_affiliatewp_array_value( $data, $key, $default = '' ) { // phpcs:i
 }
 
 /**
+ * Formats an amount for display with its currency code.
+ *
+ * Falls back to a plain number-plus-code string when AffiliateWP's currency
+ * helper is unavailable, so the balance card never renders an empty value.
+ *
+ * @param float  $amount   Amount to format.
+ * @param string $currency Currency code.
+ * @return string
+ */
+function chip_affiliatewp_format_money( $amount, $currency = 'MYR' ) {
+	$currency  = strtoupper( (string) $currency );
+	$formatted = number_format( (float) $amount, 2, '.', ',' );
+
+	if ( function_exists( 'affwp_currency_filter' ) ) {
+		return html_entity_decode( affwp_currency_filter( $formatted, $currency ), ENT_QUOTES, 'UTF-8' );
+	}
+
+	return $currency . ' ' . $formatted;
+}
+
+/**
  * Multibyte-safe substring.
  *
  * @param string $text  Input text.
