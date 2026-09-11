@@ -287,6 +287,73 @@ function chip_affiliatewp_ui_input( $args ) {
 }
 
 /**
+ * Handles a budget-allocation request from the Balance card.
+ *
+ * Starts a conversion workflow: CHIP emails the configured approvers, who
+ * approve there. Nothing moves until every approver has signed off, so this
+ * handler only validates the request and reports what CHIP said.
+ *
+ * @return void
+ */
+function chip_affiliatewp_handle_convert_balance() {
+	if ( ! isset( $_POST['chip_affiliatewp_action'] ) || 'convert_balance' !== sanitize_key( wp_unslash( $_POST['chip_affiliatewp_action'] ) ) ) {
+		return;
+	}
+
+	if ( ! isset( $_POST['chip_affiliatewp_convert_nonce'] ) ) {
+		return;
+	}
+
+	$nonce = sanitize_text_field( wp_unslash( $_POST['chip_affiliatewp_convert_nonce'] ) );
+
+	if ( ! wp_verify_nonce( $nonce, 'chip_affiliatewp_convert_balance' ) ) {
+		return;
+	}
+
+	if ( ! current_user_can( 'manage_payouts' ) ) {
+		wp_die( esc_html__( 'You do not have permission to convert balance.', 'chip-for-affiliatewp' ) );
+	}
+
+	$amount = isset( $_POST['chip_convert_amount'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['chip_convert_amount'] ) ) : 0;
+	$mode   = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
+
+	$result = chip_affiliatewp_request_budget_allocation( $amount, $mode );
+
+	if ( is_wp_error( $result ) ) {
+		chip_affiliatewp_add_admin_notice( 'error', $result->get_error_message() );
+	} else {
+		$approvals = (int) chip_affiliatewp_array_value( $result, 'approvals_required', 0 );
+
+		chip_affiliatewp_add_admin_notice(
+			'success',
+			$approvals > 0
+				? sprintf(
+					/* translators: %d: number of approvers. */
+					_n( 'Conversion requested. %d approver has been emailed to approve it.', 'Conversion requested. %d approvers have been emailed to approve it.', $approvals, 'chip-for-affiliatewp' ),
+					$approvals
+				)
+				: __( 'Conversion requested. The new budget appears once CHIP processes it.', 'chip-for-affiliatewp' )
+		);
+	}
+
+	/**
+	 * Filters whether the conversion request redirects back after handling.
+	 *
+	 * Redirecting (with an exit) is the right behaviour for a form post, but
+	 * it makes the handler impossible to exercise in a test. Integrators that
+	 * embed the panel can also suppress it.
+	 *
+	 * @param bool $redirect Whether to redirect.
+	 */
+	if ( apply_filters( 'chip_affiliatewp_convert_balance_redirect', true ) ) {
+		// Redirect so a refresh does not resubmit the request.
+		wp_safe_redirect( wp_get_referer() ? wp_get_referer() : admin_url() );
+		exit;
+	}
+}
+add_action( 'admin_init', 'chip_affiliatewp_handle_convert_balance' );
+
+/**
  * Renders the CHIP Send settings panel inside its Payouts-tab card.
  *
  * Uses the native AffiliateWP UI components so the panel matches the
@@ -600,6 +667,56 @@ function chip_affiliatewp_render_settings_panel() {
 								);
 								?>
 							</p>
+
+							<form method="post" class="flex flex-wrap items-end gap-3 mt-4">
+								<?php wp_nonce_field( 'chip_affiliatewp_convert_balance', 'chip_affiliatewp_convert_nonce' ); ?>
+								<input type="hidden" name="chip_affiliatewp_action" value="convert_balance" />
+								<div>
+									<label for="chip-convert-amount" class="block mb-1 text-sm text-gray-700">
+										<?php esc_html_e( 'Amount to convert', 'chip-for-affiliatewp' ); ?>
+									</label>
+									<?php
+									if ( function_exists( 'affwp_input' ) ) {
+										affwp_input(
+											array(
+												'name'  => 'chip_convert_amount',
+												'id'    => 'chip-convert-amount',
+												'type'  => 'number',
+												'value' => '',
+												'placeholder' => number_format( $summary['convertible'], 2, '.', '' ),
+												'attributes' => array(
+													'step' => '0.01',
+													'min'  => '0.01',
+													'max'  => number_format( $summary['convertible'], 2, '.', '' ),
+												),
+											)
+										);
+									} else {
+										printf(
+											'<input type="number" step="0.01" min="0.01" max="%s" id="chip-convert-amount" name="chip_convert_amount" placeholder="%s" class="regular-text" />',
+											esc_attr( number_format( $summary['convertible'], 2, '.', '' ) ),
+											esc_attr( number_format( $summary['convertible'], 2, '.', '' ) )
+										);
+									}
+									?>
+								</div>
+								<?php
+								if ( function_exists( 'affwp_button' ) ) {
+									affwp_button(
+										array(
+											'type'  => 'submit',
+											'text'  => __( 'Request conversion', 'chip-for-affiliatewp' ),
+											'style' => 'secondary',
+										)
+									);
+								} else {
+									submit_button( __( 'Request conversion', 'chip-for-affiliatewp' ), 'secondary', '', false );
+								}
+								?>
+								<p class="w-full text-xs text-gray-600">
+									<?php esc_html_e( 'This asks CHIP to convert part of your settlement balance into payout budget. Approvers receive an email and approve there — nothing moves until they do.', 'chip-for-affiliatewp' ); ?>
+								</p>
+							</form>
 						<?php endif; ?>
 					<?php endif; ?>
 				</div>
@@ -1040,6 +1157,70 @@ function chip_affiliatewp_webhook_setup_notices() {
 
 	return $notices;
 }
+
+/**
+ * Queues a one-time admin notice for the current user.
+ *
+ * Stored per user so the notice survives the redirect that follows a
+ * form submission, and shown once.
+ *
+ * @param string $type    Notice type: "success" or "error".
+ * @param string $message Message to display.
+ * @return void
+ */
+function chip_affiliatewp_add_admin_notice( $type, $message ) {
+	$user_id = get_current_user_id();
+
+	if ( ! $user_id ) {
+		return;
+	}
+
+	$notices = get_transient( 'chip_affiliatewp_notices_' . $user_id );
+
+	if ( ! is_array( $notices ) ) {
+		$notices = array();
+	}
+
+	$notices[] = array(
+		'type'    => 'error' === $type ? 'error' : 'success',
+		'message' => (string) $message,
+	);
+
+	set_transient( 'chip_affiliatewp_notices_' . $user_id, $notices, 5 * MINUTE_IN_SECONDS );
+}
+
+/**
+ * Renders and clears the queued admin notices for the current user.
+ *
+ * @return void
+ */
+function chip_affiliatewp_render_queued_notices() {
+	$user_id = get_current_user_id();
+
+	if ( ! $user_id ) {
+		return;
+	}
+
+	$key     = 'chip_affiliatewp_notices_' . $user_id;
+	$notices = get_transient( $key );
+
+	if ( ! is_array( $notices ) || empty( $notices ) ) {
+		return;
+	}
+
+	delete_transient( $key );
+
+	foreach ( $notices as $notice ) {
+		$type = 'error' === chip_affiliatewp_array_value( $notice, 'type' ) ? 'error' : 'success';
+
+		printf(
+			'<div class="notice notice-%s is-dismissible"><p>%s</p></div>',
+			esc_attr( $type ),
+			esc_html( (string) chip_affiliatewp_array_value( $notice, 'message' ) )
+		);
+	}
+}
+add_action( 'admin_notices', 'chip_affiliatewp_render_queued_notices' );
 
 /**
  * Renders one-time setup notices on AffiliateWP admin screens.

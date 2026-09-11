@@ -251,6 +251,51 @@ function set_transient( $key, $value, $expiry = 0 ) {
 	return true;
 }
 
+$GLOBALS['__current_user_can'] = true;
+$GLOBALS['__die_message']      = '';
+$GLOBALS['__redirected']       = '';
+
+function wp_verify_nonce( $nonce, $action = '' ) {
+	return 'good-nonce' === $nonce ? 1 : false;
+}
+
+function _n( $single, $plural, $number, $domain = '' ) {
+	return 1 === (int) $number ? $single : $plural;
+}
+
+function wp_nonce_field( $action = '', $name = '_wpnonce', $echo = true ) {
+	return '';
+}
+
+function current_user_can( $cap ) {
+	return ! empty( $GLOBALS['__current_user_can'] );
+}
+
+function get_current_user_id() {
+	return 1;
+}
+
+function wp_die( $message = '' ) {
+	$GLOBALS['__die_message'] = is_string( $message ) ? $message : '';
+	throw new Exception( 'wp_die' );
+}
+
+function wp_safe_redirect( $url ) {
+	$GLOBALS['__redirected'] = $url;
+}
+
+function wp_get_referer() {
+	return '';
+}
+
+function admin_url( $path = '' ) {
+	return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+}
+
+function submit_button( $text = '', $type = 'primary', $name = '', $wrap = true ) {
+	echo '<button type="submit">' . esc_html( $text ) . '</button>';
+}
+
 function delete_transient( $key ) {
 	unset( $GLOBALS['__transients'][ $key ] );
 	return true;
@@ -264,10 +309,6 @@ function get_option( $name, $default = false ) {
 
 function update_option( $name, $value ) {
 	$GLOBALS['__options_store'][ $name ] = $value;
-	return true;
-}
-
-function current_user_can( $cap ) {
 	return true;
 }
 
@@ -1577,6 +1618,79 @@ check( 'invalid allocation made no request', array() === $GLOBALS['__http_queue'
 
 // Formatting never returns an empty string.
 check( 'money formats with the currency code', false !== strpos( chip_affiliatewp_format_money( 1234.5, 'MYR' ), '1,234.50' ) );
+
+echo "\n== Test 35: conversion handler validates before calling CHIP ==\n";
+reset_state();
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'test-key';
+$GLOBALS['__options']['chip_test_secret_key'] = 'test-secret';
+$GLOBALS['__transients'] = array();
+$GLOBALS['__current_user_can'] = true;
+
+// No action posted -> nothing happens, no request.
+$GLOBALS['__http_queue'] = array();
+$_POST = array();
+chip_affiliatewp_handle_convert_balance();
+check( 'no action means no request', array() === $GLOBALS['__http_queue'] );
+
+// Action but a bad nonce -> still nothing.
+$GLOBALS['__http_queue'] = array();
+$_POST = array(
+	'chip_affiliatewp_action'       => 'convert_balance',
+	'chip_affiliatewp_convert_nonce' => 'not-a-valid-nonce',
+	'chip_convert_amount'           => '100',
+);
+chip_affiliatewp_handle_convert_balance();
+check( 'bad nonce means no request', array() === $GLOBALS['__http_queue'] );
+
+// Action + good nonce but no capability -> dies before any request.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__current_user_can'] = false;
+$_POST = array(
+	'chip_affiliatewp_action'        => 'convert_balance',
+	'chip_affiliatewp_convert_nonce' => 'good-nonce',
+	'chip_convert_amount'            => '100',
+);
+$GLOBALS['__die_message'] = '';
+try {
+	chip_affiliatewp_handle_convert_balance();
+} catch ( Exception $e ) {
+	// wp_die() stops the request; expected here.
+}
+check( 'missing capability blocks the request', array() === $GLOBALS['__http_queue'] );
+check( 'missing capability explains itself', false !== strpos( $GLOBALS['__die_message'], 'permission' ) );
+
+// Valid request reaches CHIP and queues a success notice.
+$GLOBALS['__current_user_can'] = true;
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match' => '/send/send_limits',
+	'code'  => 200,
+	'body'  => array( 'id' => 9, 'status' => 'pending', 'approvals_required' => 2 ),
+);
+$GLOBALS['__transients'] = array();
+add_filter( 'chip_affiliatewp_convert_balance_redirect', function () { return false; } );
+$_POST = array(
+	'chip_affiliatewp_action'        => 'convert_balance',
+	'chip_affiliatewp_convert_nonce' => 'good-nonce',
+	'chip_convert_amount'            => '250.50',
+);
+chip_affiliatewp_handle_convert_balance();
+check( 'valid request consumes the queued CHIP response', 0 === count( $GLOBALS['__http_queue'] ) );
+check( 'valid request queues a success notice', is_array( get_transient( 'chip_affiliatewp_notices_' . get_current_user_id() ) ) );
+
+// Notices round-trip: queued, then rendered once and cleared.
+$GLOBALS['__transients'] = array();
+chip_affiliatewp_add_admin_notice( 'success', 'Conversion requested.' );
+check( 'notice is queued', is_array( get_transient( 'chip_affiliatewp_notices_' . get_current_user_id() ) ) );
+ob_start();
+chip_affiliatewp_render_queued_notices();
+$rendered = ob_get_clean();
+check( 'notice renders', false !== strpos( $rendered, 'Conversion requested.' ) );
+check( 'notice is cleared after rendering', false === get_transient( 'chip_affiliatewp_notices_' . get_current_user_id() ) );
+
+$_POST = array();
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
