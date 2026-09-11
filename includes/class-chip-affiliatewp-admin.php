@@ -317,6 +317,36 @@ function chip_affiliatewp_handle_convert_balance() {
 	$amount = isset( $_POST['chip_convert_amount'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['chip_convert_amount'] ) ) : 0;
 	$mode   = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
 
+	/*
+	 * The form's max attribute is client-side only, so re-check the ceiling
+	 * here. A request above the convertible balance is rejected by CHIP with a
+	 * generic message; catching it first gives the merchant a real reason.
+	 */
+	$summary = chip_affiliatewp_get_account_summary( $mode );
+
+	if ( ! is_wp_error( $summary ) && empty( $summary['error'] ) ) {
+		$convertible = (float) chip_affiliatewp_array_value( $summary, 'convertible', 0 );
+
+		if ( $convertible > 0 && $amount > $convertible ) {
+			chip_affiliatewp_add_admin_notice(
+				'error',
+				sprintf(
+					/* translators: 1: requested amount, 2: amount available to convert */
+					__( 'You asked to convert %1$s but only %2$s is available to convert.', 'chip-for-affiliatewp' ),
+					chip_affiliatewp_format_money( $amount ),
+					chip_affiliatewp_format_money( $convertible )
+				)
+			);
+
+			if ( apply_filters( 'chip_affiliatewp_convert_balance_redirect', true ) ) {
+				wp_safe_redirect( wp_get_referer() ? wp_get_referer() : admin_url() );
+				exit;
+			}
+
+			return;
+		}
+	}
+
 	$result = chip_affiliatewp_request_budget_allocation( $amount, $mode );
 
 	if ( is_wp_error( $result ) ) {

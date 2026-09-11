@@ -2410,6 +2410,62 @@ $transient_shown = (string) affwp_get_payout( $transient_id )->description;
 check( 'transient failure has no settings hint', false === strpos( $transient_shown, 'Settings' ) );
 check( 'transient failure is classified transient', 'transient' === ( $GLOBALS['__payout_rows'][ $transient_id ]->failure_class ?? '' ) );
 
+echo "\n== Test 49: convert refuses an amount above the convertible balance ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__options']['chip_payouts']         = 1;
+
+// The account summary is cached, so seed the cache the handler will read.
+set_transient( 'chip_affiliatewp_account_test', array( 'current_balance' => 100.0, 'convertible' => 50.0, 'currency' => 'MYR', 'approvals_required' => 1, 'error' => null ), 300 );
+
+$GLOBALS['__http_queue'] = array();
+$_POST = array(
+	'chip_affiliatewp_action'        => 'convert_balance',
+	'chip_affiliatewp_convert_nonce' => 'good-nonce',
+	'chip_convert_amount'            => '500',
+);
+$GLOBALS['__current_user_can'] = true;
+
+chip_affiliatewp_handle_convert_balance();
+
+check( 'over-limit convert makes no API call', array() === $GLOBALS['__http_log'] );
+
+ob_start();
+chip_affiliatewp_render_queued_notices();
+$rendered = ob_get_clean();
+check( 'over-limit convert explains the real reason', false !== strpos( $rendered, 'available to convert' ) );
+check( 'over-limit convert names both amounts', false !== strpos( $rendered, '500' ) && false !== strpos( $rendered, '50' ) );
+
+// An amount within the limit proceeds to the API.
+reset_state();
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__options']['chip_payouts']         = 1;
+set_transient( 'chip_affiliatewp_account_test', array( 'current_balance' => 100.0, 'convertible' => 50.0, 'currency' => 'MYR', 'approvals_required' => 1, 'error' => null ), 300 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_limits', 'code' => 200, 'body' => array( 'id' => 1, 'approvals_required' => 1 ) );
+$_POST = array(
+	'chip_affiliatewp_action'        => 'convert_balance',
+	'chip_affiliatewp_convert_nonce' => 'good-nonce',
+	'chip_convert_amount'            => '25',
+);
+$GLOBALS['__current_user_can'] = true;
+
+chip_affiliatewp_handle_convert_balance();
+
+$posted = 0;
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( false !== strpos( $call['url'], '/send/send_limits' ) ) {
+		++$posted;
+	}
+}
+check( 'within-limit convert reaches the API', 1 === $posted );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

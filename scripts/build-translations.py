@@ -120,6 +120,7 @@ TRANSLATIONS = {
     'Add your bank details to get paid': 'Tambah butiran bank anda untuk dibayar',
     'Balance': 'Baki',
     'Amount to convert': 'Jumlah untuk ditukar',
+    'You asked to convert %1$s but only %2$s is available to convert.': 'Anda meminta tukar %1$s tetapi hanya %2$s tersedia untuk ditukar.',
     'Add your CHIP Send API key and secret under Settings → Payouts → CHIP Send.': 'Tambah kunci API dan rahsia CHIP Send anda di Settings → Payouts → CHIP Send.',
     'Check the API key and secret under Settings → Payouts → CHIP Send, and confirm the key is still active in your CHIP account.': 'Semak kunci API dan rahsia di Settings → Payouts → CHIP Send, dan pastikan kunci itu masih aktif dalam akaun CHIP anda.',
     "Check the affiliate's bank account details, and contact CHIP support with this message if they look correct.": 'Semak butiran akaun bank affiliate, dan hubungi sokongan CHIP dengan mesej ini jika butirannya betul.',
