@@ -565,7 +565,7 @@ function chip_affiliatewp_render_settings_panel() {
 									'id'          => 'chip-reference-prefix',
 									'name'        => 'affwp_settings[chip_reference_prefix]',
 									'value'       => (string) chip_affiliatewp_reference_prefix(),
-									'placeholder' => __( '34', 'chip-for-affiliatewp' ),
+									'placeholder' => '34',
 									'maxlength'   => 2,
 									'width'       => 'narrow',
 								)

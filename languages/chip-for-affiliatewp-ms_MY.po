@@ -18,11 +18,7 @@ msgstr ""
 msgid "%s: bank details"
 msgstr "%s: butiran bank"
 
-#: includes/class-chip-affiliatewp-admin.php:568
-msgid "34"
-msgstr "34"
-
-#: includes/class-chip-affiliatewp-payouts.php:771
+#: includes/class-chip-affiliatewp-payouts.php:803
 msgid ""
 "A payment cannot be processed for this referral since it is not marked as "
 "Unpaid."
@@ -80,7 +76,7 @@ msgid "Bank Code"
 msgstr "Kod Bank"
 
 #: includes/class-chip-affiliatewp-payouts.php:153
-#: includes/class-chip-affiliatewp-payouts.php:795
+#: includes/class-chip-affiliatewp-payouts.php:827
 msgid "Bank account is not verified yet (status: %s)."
 msgstr "Akaun bank belum disahkan (status: %s)."
 
@@ -134,7 +130,7 @@ msgid "CHIP Send did not return a bank account ID."
 msgstr "CHIP Send tidak memulangkan ID akaun bank."
 
 #: includes/class-chip-affiliatewp-payouts.php:207
-#: includes/class-chip-affiliatewp-payouts.php:843
+#: includes/class-chip-affiliatewp-payouts.php:875
 msgid "CHIP Send did not return a send instruction ID."
 msgstr "CHIP Send tidak memulangkan ID arahan penghantaran."
 
@@ -186,7 +182,7 @@ msgstr ""
 "Webhook CHIP Send belum disediakan (%1$s). Pembayaran tetap berfungsi — "
 "status disemak setiap jam — tetapi pengesahan lebih pantas dengan webhook."
 
-#: includes/class-chip-affiliatewp-payouts.php:813
+#: includes/class-chip-affiliatewp-payouts.php:845
 msgid "Commission for referral No.%d"
 msgstr "Komisen untuk rujukan No.%d"
 
@@ -288,7 +284,7 @@ msgstr ""
 "pengesahan lebih pantas dengan webhook. Simpan kredensial anda untuk "
 "mendaftarkannya secara automatik."
 
-#: includes/class-chip-affiliatewp-payouts.php:696
+#: includes/class-chip-affiliatewp-payouts.php:728
 msgid ""
 "Please enable CHIP Send and add your API credentials before attempting to "
 "process payments."
@@ -297,7 +293,7 @@ msgstr ""
 "memproses pembayaran."
 
 #: includes/class-chip-affiliatewp-payouts.php:78
-#: includes/class-chip-affiliatewp-payouts.php:783
+#: includes/class-chip-affiliatewp-payouts.php:815
 msgid ""
 "Please enter your CHIP Send API credentials in AffiliateWP → Settings → "
 "Payouts → CHIP Send before attempting to process payments."
@@ -369,7 +365,7 @@ msgstr "Kunci awam webhook yang dikonfigurasi tidak sah."
 msgid "The payload is missing a send instruction ID or state."
 msgstr "Muatan tiada ID atau keadaan arahan penghantaran (send instruction)."
 
-#: includes/class-chip-affiliatewp-payouts.php:873
+#: includes/class-chip-affiliatewp-payouts.php:905
 msgid ""
 "The payout record could not be created. The referral may already have an "
 "active payout."
@@ -382,7 +378,7 @@ msgstr ""
 msgid "The specified payout does not exist."
 msgstr "Pembayaran yang dinyatakan tidak wujud."
 
-#: includes/class-chip-affiliatewp-payouts.php:767
+#: includes/class-chip-affiliatewp-payouts.php:799
 msgid "The specified referral does not exist."
 msgstr "Rujukan yang dinyatakan tidak wujud."
 
@@ -400,11 +396,11 @@ msgstr ""
 msgid "The webhook URL is not publicly reachable from this site."
 msgstr "URL webhook tidak dapat dicapai secara awam dari laman ini."
 
-#: includes/class-chip-affiliatewp-payouts.php:779
+#: includes/class-chip-affiliatewp-payouts.php:811
 msgid "There is no affiliate connected to this referral."
 msgstr "Tiada afiliasi dikaitkan dengan rujukan ini."
 
-#: includes/class-chip-affiliatewp-payouts.php:806
+#: includes/class-chip-affiliatewp-payouts.php:838
 msgid "This affiliate account does not have a payment email."
 msgstr "Akaun afiliasi ini tiada e-mel pembayaran."
 
@@ -444,7 +440,7 @@ msgstr ""
 msgid "This payout is not a CHIP Send payout."
 msgstr "Pembayaran ini bukan pembayaran CHIP Send."
 
-#: includes/class-chip-affiliatewp-payouts.php:775
+#: includes/class-chip-affiliatewp-payouts.php:807
 msgid ""
 "This referral is already attached to a payout. Resolve that payout to pay it"
 " again."
@@ -484,7 +480,7 @@ msgstr ""
 msgid "You do not have permission to convert balance."
 msgstr "Anda tiada kebenaran untuk menukar baki."
 
-#: includes/class-chip-affiliatewp-payouts.php:692
+#: includes/class-chip-affiliatewp-payouts.php:724
 msgid "You do not have permission to process payouts."
 msgstr "Anda tiada kebenaran untuk memproses pembayaran."
 

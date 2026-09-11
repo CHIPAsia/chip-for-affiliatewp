@@ -6,7 +6,9 @@
  * Author: CHIP IN SDN BHD
  * Author URI: https://chip-in.asia
  * Requires PHP: 7.1
- * Requires at least: 5.8
+ * Requires at least: 7.1
+ * Text Domain: chip-for-affiliatewp
+ * Domain Path: /languages
  *
  * Copyright: © 2024-2026 CHIP
  * License: GNU General Public License v3.0
@@ -26,15 +28,13 @@ define( 'CHIP_AFFILIATEWP_BASENAME', plugin_basename( CHIP_AFFILIATEWP_FILE ) );
 define( 'CHIP_AFFILIATEWP_URL', plugin_dir_url( CHIP_AFFILIATEWP_FILE ) );
 define( 'CHIP_AFFILIATEWP_PATH', plugin_dir_path( CHIP_AFFILIATEWP_FILE ) );
 
-/**
- * Loads the plugin text domain for translations.
- *
- * @return void
+/*
+ * Translations load just in time from the `Text Domain` and `Domain Path`
+ * plugin headers (WordPress 4.6+), which also covers language packs installed
+ * from translate.wordpress.org. Calling load_plugin_textdomain() on top of that
+ * is discouraged, so the plugin declares the headers and does not load the
+ * domain itself.
  */
-function chip_affiliatewp_load_textdomain() {
-	load_plugin_textdomain( 'chip-for-affiliatewp', false, dirname( CHIP_AFFILIATEWP_BASENAME ) . '/languages' );
-}
-add_action( 'init', 'chip_affiliatewp_load_textdomain' );
 
 // Include plugin modules.
 require_once CHIP_AFFILIATEWP_PATH . 'includes/chip-affiliatewp-functions.php';
