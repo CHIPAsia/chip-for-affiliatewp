@@ -307,9 +307,23 @@ class Fake_AffiliateWP {
 
 class Fake_Affiliates_Container {
 	public $payouts;
+	public $payout_batches;
 
 	public function __construct() {
-		$this->payouts = new Fake_Payouts_DB();
+		$this->payouts        = new Fake_Payouts_DB();
+		$this->payout_batches = new Fake_Payout_Batches_DB();
+	}
+}
+
+/**
+ * Records batch recounts so the harness can assert the roll-up is refreshed
+ * whenever a payout reaches a terminal state.
+ */
+class Fake_Payout_Batches_DB {
+	public function recount( $batch_id ) {
+		$GLOBALS['__batch_recounts'][] = (int) $batch_id;
+
+		return true;
 	}
 }
 
@@ -627,6 +641,7 @@ function reset_state() {
 	$GLOBALS['__transients']     = array();
 	$GLOBALS['__probe_calls']    = array();
 	$GLOBALS['__probe_response'] = null;
+	$GLOBALS['__batch_recounts']  = array();
 
 	$GLOBALS['__options']['chip_payouts']     = 1;
 	$GLOBALS['__options']['chip_test_mode']   = 1;
@@ -1228,6 +1243,87 @@ $sent = json_decode( $GLOBALS['__http_log'][ count( $GLOBALS['__http_log'] ) - 1
 check( 'no hash reaches the API', false === strpos( (string) ( $sent['description'] ?? '' ), '#' ) );
 check( 'description present', '' !== (string) ( $sent['description'] ?? '' ) );
 check( 'description within 140 chars', 140 >= strlen( (string) ( $sent['description'] ?? '' ) ) );
+
+echo "\n== Test 28: a terminal payout recounts its batch roll-up ==\n";
+reset_state();
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = (object) array( 'ID' => 7, 'user_email' => 'aff3@example.test' );
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '1234567890';
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
+
+$batch_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 19 ),
+		'amount'        => '4.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+affiliate_wp()->affiliates->payouts->update( $batch_payout, array( 'batch_id' => 77 ), '', 'payout' );
+$GLOBALS['__referral_rows'][19] = new Fake_Referral( 19, 3, '4.00', 'unpaid', $batch_payout );
+
+// Completed delivery must recount the batch so it can leave processing.
+chip_affiliatewp_apply_instruction( $batch_payout, array( 'id' => 9001, 'state' => 'completed' ) );
+check( 'completed payout recounts its batch', in_array( 77, $GLOBALS['__batch_recounts'], true ) );
+check( 'payout is paid', 'paid' === affiliate_wp()->affiliates->payouts->get_item( $batch_payout )->status );
+
+// A rejected instruction is terminal too.
+$GLOBALS['__batch_recounts'] = array();
+$reject_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 20 ),
+		'amount'        => '5.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+affiliate_wp()->affiliates->payouts->update( $reject_payout, array( 'batch_id' => 78 ), '', 'payout' );
+$GLOBALS['__referral_rows'][20] = new Fake_Referral( 20, 3, '5.00', 'unpaid', $reject_payout );
+chip_affiliatewp_apply_instruction( $reject_payout, array( 'id' => 9002, 'state' => 'rejected', 'rejection_reason' => 'bank closed' ) );
+check( 'rejected payout recounts its batch', in_array( 78, $GLOBALS['__batch_recounts'], true ) );
+
+// In-flight delivery must NOT recount (the batch is still legitimately processing).
+$GLOBALS['__batch_recounts'] = array();
+$GLOBALS['__referral_rows'][21] = new Fake_Referral( 21, 3, '6.00', 'unpaid', 0 );
+$inflight_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 21 ),
+		'amount'        => '6.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+affiliate_wp()->affiliates->payouts->update( $inflight_payout, array( 'batch_id' => 79 ), '', 'payout' );
+$GLOBALS['__referral_rows'][21] = new Fake_Referral( 21, 3, '6.00', 'unpaid', $inflight_payout );
+chip_affiliatewp_apply_instruction( $inflight_payout, array( 'id' => 9003, 'state' => 'executing' ) );
+check( 'in-flight payout does not recount', ! in_array( 79, $GLOBALS['__batch_recounts'], true ) );
+
+// A payout with no batch must not blow up.
+$GLOBALS['__batch_recounts'] = array();
+$no_batch_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 22 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][22] = new Fake_Referral( 22, 3, '7.00', 'unpaid', $no_batch_payout );
+chip_affiliatewp_recount_batch_for_payout( $no_batch_payout );
+check( 'no batch_id means no recount, no error', array() === $GLOBALS['__batch_recounts'] );
+
+// An unknown payout id is a no-op rather than a fatal.
+chip_affiliatewp_recount_batch_for_payout( 999999 );
+check( 'unknown payout id is a safe no-op', array() === $GLOBALS['__batch_recounts'] );
 
 echo "\n== Test 24: requery only uses valid payout statuses (unpaid is a referral status) ==\n";
 reset_state();

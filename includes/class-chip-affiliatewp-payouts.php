@@ -206,6 +206,32 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 }
 
 /**
+ * Recounts the payout batch a payout belongs to.
+ *
+ * AffiliateWP derives a batch's roll-up status from its payouts: the batch
+ * leaves `processing` only when its last payout reaches a terminal state. The
+ * bundled methods call this whenever one of their payouts changes state, so
+ * the batch panel does not sit on a stale "Processing" label after every
+ * payout has actually landed.
+ *
+ * @param int $payout_id Payout ID.
+ * @return void
+ */
+function chip_affiliatewp_recount_batch_for_payout( $payout_id ) {
+	$payout = affwp_get_payout( $payout_id );
+
+	if ( ! $payout || empty( $payout->batch_id ) ) {
+		return;
+	}
+
+	if ( ! isset( affiliate_wp()->affiliates->payout_batches ) ) {
+		return;
+	}
+
+	affiliate_wp()->affiliates->payout_batches->recount( absint( $payout->batch_id ) );
+}
+
+/**
  * Marks a CHIP payout as failed, recording the reason.
  *
  * The payout's referrals are released back to unpaid so the payout can be
@@ -236,6 +262,10 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason ) {
 		foreach ( chip_affiliatewp_payout_referral_ids( $payout ) as $referral_id ) {
 			affwp_set_referral_status( $referral_id, 'unpaid' );
 		}
+
+		// A failure is terminal for the batch roll-up: recount so the batch can
+		// settle instead of staying on "Processing" behind a dead payout.
+		chip_affiliatewp_recount_batch_for_payout( $payout_id );
 	}
 
 	return new WP_Error( 'chip_payout_failed', $reason );
@@ -340,6 +370,9 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 			foreach ( chip_affiliatewp_payout_referral_ids( $payout ) as $referral_id ) {
 				affwp_set_referral_status( $referral_id, 'paid' );
 			}
+
+			// Terminal for the batch roll-up: let the batch leave processing.
+			chip_affiliatewp_recount_batch_for_payout( $payout_id );
 
 			return true;
 

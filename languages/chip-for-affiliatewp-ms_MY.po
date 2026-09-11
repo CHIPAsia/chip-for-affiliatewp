@@ -22,7 +22,7 @@ msgstr "%s: butiran bank"
 msgid "34"
 msgstr "34"
 
-#: includes/class-chip-affiliatewp-payouts.php:587
+#: includes/class-chip-affiliatewp-payouts.php:620
 msgid ""
 "A payment cannot be processed for this referral since it is not marked as "
 "Unpaid."
@@ -56,7 +56,7 @@ msgid "Bank Code"
 msgstr "Kod Bank"
 
 #: includes/class-chip-affiliatewp-payouts.php:100
-#: includes/class-chip-affiliatewp-payouts.php:611
+#: includes/class-chip-affiliatewp-payouts.php:644
 msgid "Bank account is not verified yet (status: %s)."
 msgstr "Akaun bank belum disahkan (status: %s)."
 
@@ -110,7 +110,7 @@ msgid "CHIP Send did not return a bank account ID."
 msgstr "CHIP Send tidak memulangkan ID akaun bank."
 
 #: includes/class-chip-affiliatewp-payouts.php:154
-#: includes/class-chip-affiliatewp-payouts.php:659
+#: includes/class-chip-affiliatewp-payouts.php:692
 msgid "CHIP Send did not return a send instruction ID."
 msgstr "CHIP Send tidak memulangkan ID arahan penghantaran."
 
@@ -118,7 +118,7 @@ msgstr "CHIP Send tidak memulangkan ID arahan penghantaran."
 msgid "CHIP Send did not return a webhook ID."
 msgstr "CHIP Send tidak memulangkan ID webhook."
 
-#: includes/class-chip-affiliatewp-payouts.php:351
+#: includes/class-chip-affiliatewp-payouts.php:384
 msgid "CHIP Send instruction %1$s. %2$s"
 msgstr "Arahan penghantaran CHIP Send %1$s. %2$s"
 
@@ -154,7 +154,7 @@ msgstr ""
 "Webhook CHIP Send belum disediakan (%1$s). Pembayaran tetap berfungsi — "
 "status disemak setiap jam — tetapi pengesahan lebih pantas dengan webhook."
 
-#: includes/class-chip-affiliatewp-payouts.php:629
+#: includes/class-chip-affiliatewp-payouts.php:662
 msgid "Commission for referral No.%d"
 msgstr "Komisen untuk rujukan No.%d"
 
@@ -248,7 +248,7 @@ msgstr ""
 "mendaftarkannya secara automatik."
 
 #: includes/class-chip-affiliatewp-payouts.php:78
-#: includes/class-chip-affiliatewp-payouts.php:599
+#: includes/class-chip-affiliatewp-payouts.php:632
 msgid ""
 "Please enter your CHIP Send API credentials in AffiliateWP → Settings → "
 "Commissions → CHIP Send before attempting to process payments."
@@ -314,7 +314,7 @@ msgstr "Kunci awam webhook yang dikonfigurasi tidak sah."
 msgid "The payload is missing a send instruction ID or state."
 msgstr "Muatan tiada ID atau keadaan arahan penghantaran (send instruction)."
 
-#: includes/class-chip-affiliatewp-payouts.php:689
+#: includes/class-chip-affiliatewp-payouts.php:722
 msgid ""
 "The payout record could not be created. The referral may already have an "
 "active payout."
@@ -326,7 +326,7 @@ msgstr ""
 msgid "The specified payout does not exist."
 msgstr "Pembayaran yang dinyatakan tidak wujud."
 
-#: includes/class-chip-affiliatewp-payouts.php:583
+#: includes/class-chip-affiliatewp-payouts.php:616
 msgid "The specified referral does not exist."
 msgstr "Rujukan yang dinyatakan tidak wujud."
 
@@ -344,11 +344,11 @@ msgstr ""
 msgid "The webhook URL is not publicly reachable from this site."
 msgstr "URL webhook tidak dapat dicapai secara awam dari laman ini."
 
-#: includes/class-chip-affiliatewp-payouts.php:595
+#: includes/class-chip-affiliatewp-payouts.php:628
 msgid "There is no affiliate connected to this referral."
 msgstr "Tiada afiliasi dikaitkan dengan rujukan ini."
 
-#: includes/class-chip-affiliatewp-payouts.php:622
+#: includes/class-chip-affiliatewp-payouts.php:655
 msgid "This affiliate account does not have a payment email."
 msgstr "Akaun afiliasi ini tiada e-mel pembayaran."
 
@@ -378,7 +378,7 @@ msgstr "Afiliasi ini tiada e-mel pembayaran disimpan."
 msgid "This payout is not a CHIP Send payout."
 msgstr "Pembayaran ini bukan pembayaran CHIP Send."
 
-#: includes/class-chip-affiliatewp-payouts.php:591
+#: includes/class-chip-affiliatewp-payouts.php:624
 msgid ""
 "This referral is already attached to a payout. Resolve that payout to pay it"
 " again."
