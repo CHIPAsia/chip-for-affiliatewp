@@ -342,7 +342,14 @@ function chip_affiliatewp_save_bank_details( $affiliate, $args, $data ) {
 	$changed = false;
 
 	if ( isset( $data['payment_account_number'] ) ) {
-		$new_number = sanitize_text_field( $data['payment_account_number'] );
+		/*
+		 * Keep digits only. The field accepts the separators people write on
+		 * paper ("1234-567 890"), but storing them verbatim would make the
+		 * same account produce two different CHIP references. An empty result
+		 * is stored as empty so the affiliate is treated as not-ready rather
+		 * than registered with a blank account.
+		 */
+		$new_number = preg_replace( '/\D/', '', sanitize_text_field( $data['payment_account_number'] ) );
 
 		if ( (string) get_user_meta( $affiliate->user_id, 'payment_account_number', true ) !== $new_number ) {
 			$changed = true;
@@ -352,7 +359,12 @@ function chip_affiliatewp_save_bank_details( $affiliate, $args, $data ) {
 	}
 
 	if ( isset( $data['payment_bank_code'] ) ) {
-		$new_code = sanitize_text_field( $data['payment_bank_code'] );
+		$new_code = strtoupper( sanitize_text_field( $data['payment_bank_code'] ) );
+
+		// Only banks CHIP Send can pay to; anything else would fail at the API.
+		if ( '' !== $new_code && ! array_key_exists( $new_code, chip_affiliatewp_bank_codes() ) ) {
+			$new_code = '';
+		}
 
 		if ( (string) get_user_meta( $affiliate->user_id, 'payment_bank_code', true ) !== $new_code ) {
 			$changed = true;

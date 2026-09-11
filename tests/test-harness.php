@@ -122,6 +122,11 @@ function sanitize_text_field( $value ) {
 	return trim( strip_tags( (string) $value ) );
 }
 
+function delete_user_meta( $user_id, $key, $value = '' ) {
+	unset( $GLOBALS['__user_meta'][ (int) $user_id ][ $key ] );
+	return true;
+}
+
 function wp_strip_all_tags( $value ) {
 	return trim( strip_tags( (string) $value ) );
 }
@@ -1937,6 +1942,37 @@ check( 'MYR store payout proceeds', 9500 === (int) chip_affiliatewp_payout_data(
 // Currency lookup is case-insensitive.
 $GLOBALS['__options']['currency'] = 'myr';
 check( 'lower-case currency still accepted', 'MYR' === chip_affiliatewp_currency() );
+
+echo "\n== Test 41: bank details are normalized and validated on save ==\n";
+reset_state();
+
+$affiliate = (object) array( 'user_id' => 7 );
+
+// Separators are stripped so the same account always yields one CHIP reference.
+chip_affiliatewp_save_bank_details( $affiliate, array(), array( 'payment_account_number' => '1234-567 890' ) );
+check( 'account number keeps digits only', '1234567890' === get_user_meta( 7, 'payment_account_number', true ) );
+
+// Bank code is upper-cased.
+chip_affiliatewp_save_bank_details( $affiliate, array(), array( 'payment_bank_code' => 'mbbemykl' ) );
+check( 'bank code is upper-cased', 'MBBEMYKL' === get_user_meta( 7, 'payment_bank_code', true ) );
+
+// A bank CHIP cannot pay is discarded rather than stored.
+chip_affiliatewp_save_bank_details( $affiliate, array(), array( 'payment_bank_code' => 'NOTAREALBANK' ) );
+check( 'unknown bank code is not stored', '' === get_user_meta( 7, 'payment_bank_code', true ) );
+
+// A non-numeric account number stores empty, so the affiliate reads as not-ready.
+chip_affiliatewp_save_bank_details( $affiliate, array(), array( 'payment_account_number' => 'abc' ) );
+check( 'non-numeric account number stores empty', '' === get_user_meta( 7, 'payment_account_number', true ) );
+
+// Changing details clears the cached CHIP account id.
+$GLOBALS['__user_meta'][7]['chip_bank_account'] = array( 'id' => 4242, 'status' => 'verified' );
+chip_affiliatewp_save_bank_details( $affiliate, array(), array( 'payment_account_number' => '9999999999' ) );
+check( 'changed details clear the cached account', ! isset( $GLOBALS['__user_meta'][7]['chip_bank_account'] ) );
+
+// Re-saving identical details does not disturb the cache.
+$GLOBALS['__user_meta'][7]['chip_bank_account'] = array( 'id' => 4242, 'status' => 'verified' );
+chip_affiliatewp_save_bank_details( $affiliate, array(), array( 'payment_account_number' => '9999999999' ) );
+check( 'unchanged details keep the cached account', isset( $GLOBALS['__user_meta'][7]['chip_bank_account'] ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
