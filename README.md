@@ -27,7 +27,7 @@ Pay your affiliates' commissions as [CHIP Send](https://docs.chip-in.asia/chip-s
 
 ## Configuration
 
-Go to **AffiliateWP → Settings → Commissions → CHIP Send Payment Method**:
+Go to **AffiliateWP → Settings → Payouts → CHIP Send**:
 
 | Setting | Description |
 |---------|-------------|

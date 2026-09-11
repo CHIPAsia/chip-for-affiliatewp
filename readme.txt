@@ -34,7 +34,7 @@ All Malaysian banks and e-wallets supported by CHIP Send FPX payouts, including 
 
 1. Install [AffiliateWP](https://affiliatewp.com/) and activate it (2.33 or newer recommended).
 2. Upload the plugin zip via **Plugins → Add New → Upload Plugin** and activate.
-3. Go to **AffiliateWP → Settings → Commissions → CHIP Send Payment Method**:
+3. Go to **AffiliateWP → Settings → Payouts → CHIP Send**:
    * Tick **CHIP Send** to enable the payout method.
    * Tick **CHIP Send Test Mode** and fill in the Test API Key and Test Secret Key while evaluating; switch to the Live keys when going live.
 4. Ensure each affiliate has bank details set before paying them.
