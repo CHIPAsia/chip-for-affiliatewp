@@ -1325,6 +1325,61 @@ check( 'no batch_id means no recount, no error', array() === $GLOBALS['__batch_r
 chip_affiliatewp_recount_batch_for_payout( 999999 );
 check( 'unknown payout id is a safe no-op', array() === $GLOBALS['__batch_recounts'] );
 
+echo "\n== Test 29: enable-state and per-affiliate readiness filters ==\n";
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = (object) array( 'ID' => 7, 'user_email' => 'aff3@example.test' );
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '1234567890';
+
+// Method disabled -> not enabled even with credentials present.
+$GLOBALS['__options']['chip_payouts'] = 0;
+check( 'disabled method reports not enabled', false === chip_affiliatewp_is_payout_method_enabled( true, 'chip' ) );
+
+// Enabled but no credentials -> still not enabled.
+$GLOBALS['__options']['chip_payouts'] = 1;
+unset( $GLOBALS['__options']['chip_test_api_key'], $GLOBALS['__options']['chip_test_secret_key'] );
+check( 'missing credentials reports not enabled', false === chip_affiliatewp_is_payout_method_enabled( true, 'chip' ) );
+
+// Enabled with credentials -> enabled.
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+check( 'enabled with credentials reports enabled', true === chip_affiliatewp_is_payout_method_enabled( true, 'chip' ) );
+
+// Other methods are untouched by our filter.
+check( 'other methods pass through unchanged', true === chip_affiliatewp_is_payout_method_enabled( true, 'stripe' ) );
+check( 'other methods keep a false unchanged', false === chip_affiliatewp_is_payout_method_enabled( false, 'paypal' ) );
+
+// Readiness: affiliate with bank details is ready.
+check( 'affiliate with bank details is ready', true === chip_affiliatewp_payout_method_is_affiliate_ready( false, 'chip', 3 ) );
+
+// Readiness: affiliate without bank details is not ready.
+$GLOBALS['__affiliates_map'][4] = 8;
+$GLOBALS['__users'][8] = (object) array( 'ID' => 8, 'user_email' => 'aff4@example.test' );
+check( 'affiliate without bank details is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( false, 'chip', 4 ) );
+
+// Readiness: disabled method blocks readiness.
+$GLOBALS['__options']['chip_payouts'] = 0;
+check( 'disabled method blocks affiliate readiness', false === chip_affiliatewp_payout_method_is_affiliate_ready( false, 'chip', 3 ) );
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+// Readiness: other methods pass through.
+check( 'other methods keep readiness unchanged', true === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'stripe', 3 ) );
+
+echo "\n== Test 30: the native integration points are registered ==\n";
+check( 'legacy bulk entry point has a listener', ! empty( $GLOBALS['__actions']['affwp_process_payout_chip'] ) );
+check( 'enable-state filter is registered', ! empty( $GLOBALS['__filters']['affwp_is_payout_method_enabled'] ) );
+check( 'affiliate-readiness filter is registered', ! empty( $GLOBALS['__filters']['affwp_payout_method_is_affiliate_ready'] ) );
+check( 'batch completion action is registered', ! empty( $GLOBALS['__actions']['affwp_batch_generate_payouts_completed'] ) );
+check( 'payment-method card action is registered', ! empty( $GLOBALS['__actions']['affwp_register_payment_methods'] ) );
+check( 'preview note action is registered', ! empty( $GLOBALS['__actions']['affwp_preview_payout_note_chip'] ) );
+check( 'affiliate table filter is registered', ! empty( $GLOBALS['__filters']['affwp_affiliate_table_payout_method'] ) );
+check( 'preflight filter is registered', ! empty( $GLOBALS['__filters']['affwp_preflight_payout_status'] ) );
+check( 'single referral handler filter is registered', ! empty( $GLOBALS['__filters']['affwp_single_referral_payout_handlers'] ) );
+check( 'payouts settings sanitize filter is registered', ! empty( $GLOBALS['__filters']['affwp_settings_payouts_sanitize'] ) );
+check( 'batch initial status filter is registered', ! empty( $GLOBALS['__filters']['affwp_batch_payout_initial_status'] ) );
+
 echo "\n== Test 24: requery only uses valid payout statuses (unpaid is a referral status) ==\n";
 reset_state();
 $GLOBALS['__options']['chip_test_mode']     = 1;

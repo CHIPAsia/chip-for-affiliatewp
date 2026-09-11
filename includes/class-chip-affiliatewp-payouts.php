@@ -590,6 +590,81 @@ function chip_affiliatewp_process_generated_batch( $batch_id ) {
 add_action( 'chip_affiliatewp_submit_payout_action', 'chip_affiliatewp_run_scheduled_submission' );
 
 /**
+ * Handles the legacy "pay everyone via CHIP Send" entry point.
+ *
+ * AffiliateWP exposes two batch entry points. The current one submits
+ * `payout_methods[]` (plural) and always routes through the async batch
+ * processor. The legacy one submits a singular `payout_method` and instead
+ * fires `affwp_process_payout_{method}` for the method to handle. Without a
+ * listener here, that entry point (method-specific links and custom
+ * integrations) creates nothing at all — the button appears to do nothing.
+ *
+ * The work itself is delegated to the core batch processor so CHIP payouts are
+ * built, counted, and finalized exactly like every other method's; our
+ * submission step hooks the batch completion action.
+ *
+ * @param string   $start          Referrals start date.
+ * @param string   $end            Referrals end date.
+ * @param string   $minimum        Minimum payout amount.
+ * @param int|bool $affiliate_id   Affiliate ID, or false for all affiliates.
+ * @param string   $payout_method  Payout method key.
+ * @param bool     $bypass_holding Whether to bypass the holding period.
+ * @return void
+ */
+function chip_affiliatewp_process_bulk_payout( $start, $end, $minimum, $affiliate_id, $payout_method, $bypass_holding ) {
+	if ( ! current_user_can( 'manage_payouts' ) ) {
+		wp_die( esc_html__( 'You do not have permission to process payouts.', 'chip-for-affiliatewp' ) );
+	}
+
+	if ( ! chip_affiliatewp_is_payout_method_enabled( true, 'chip' ) ) {
+		wp_die( esc_html__( 'Please enable CHIP Send and add your API credentials before attempting to process payments.', 'chip-for-affiliatewp' ) );
+	}
+
+	if ( ! class_exists( '\AffWP\Payouts\Batch_Payout_Processor' ) ) {
+		require_once AFFILIATEWP_PLUGIN_DIR . 'includes/payouts/class-batch-payout-processor.php';
+	}
+
+	/*
+	 * The legacy payload is singular, but the processor speaks the plural
+	 * filter form. Map it across so the batch is built and dispatched through
+	 * the same path as the current form.
+	 */
+	$data = array(
+		'user_name'      => $affiliate_id ? affwp_get_affiliate_username( (int) $affiliate_id ) : '',
+		'from'           => $start,
+		'to'             => $end,
+		'minimum'        => $minimum,
+		'bypass_holding' => (int) $bypass_holding,
+		'payout_method'  => 'chip',
+	);
+
+	$result = \AffWP\Payouts\Batch_Payout_Processor::enqueue_async_batch( $data );
+
+	if ( is_wp_error( $result ) ) {
+		wp_safe_redirect(
+			affwp_admin_url(
+				'payouts',
+				array( 'affwp_notice' => 'payout_batch_empty' )
+			)
+		);
+		exit;
+	}
+
+	wp_safe_redirect(
+		affwp_admin_url(
+			'payouts',
+			array(
+				'tab'          => 'batches',
+				'batch_id'     => (int) $result,
+				'affwp_notice' => 'batch_submitted',
+			)
+		)
+	);
+	exit;
+}
+add_action( 'affwp_process_payout_chip', 'chip_affiliatewp_process_bulk_payout', 10, 6 );
+
+/**
  * Runs a scheduled single-payout submission.
  *
  * @param int $payout_id Payout ID.

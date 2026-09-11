@@ -25,6 +25,61 @@ function chip_affiliatewp_register_payout_method( $payout_methods ) {
 add_filter( 'affwp_payout_methods', 'chip_affiliatewp_register_payout_method' );
 
 /**
+ * Reports whether CHIP Send is currently enabled.
+ *
+ * Registering the method only adds it to the registry; AffiliateWP treats a
+ * registered method as enabled. The bundled methods answer this filter with
+ * their own enable setting plus a credentials check, so unchecking the method
+ * (or clearing its keys) removes it from the affiliate picker, the admin
+ * assignment dropdown, and every "usable method" resolution.
+ *
+ * @param bool   $enabled       Whether the method is enabled.
+ * @param string $payout_method Payout method key.
+ * @return bool
+ */
+function chip_affiliatewp_is_payout_method_enabled( $enabled, $payout_method ) {
+	if ( 'chip' !== $payout_method ) {
+		return $enabled;
+	}
+
+	return (bool) affiliate_wp()->settings->get( 'chip_payouts' ) && chip_affiliatewp_has_credentials();
+}
+add_filter( 'affwp_is_payout_method_enabled', 'chip_affiliatewp_is_payout_method_enabled', 10, 2 );
+
+/**
+ * Reports whether a specific affiliate can be paid through CHIP Send.
+ *
+ * Mirrors the bundled methods: an affiliate is ready only when the method is
+ * enabled and that affiliate has bank details on file. This drives the
+ * ready/blocked split in the Payouts preview and the affiliate list.
+ *
+ * Deliberately local: this filter runs once per affiliate while building the
+ * preview, so it must not call the CHIP API. Whether the bank account is
+ * actually verified is resolved at submission time, where a rejection fails
+ * the payout safely and releases its referrals.
+ *
+ * @param bool       $ready        Whether the affiliate is ready.
+ * @param string     $method       Payout method key.
+ * @param int        $affiliate_id Affiliate ID.
+ * @param mixed|null $payout       Payout row when the check is per-payout.
+ * @return bool
+ */
+function chip_affiliatewp_payout_method_is_affiliate_ready( $ready, $method, $affiliate_id, $payout = null ) {
+	if ( 'chip' !== $method ) {
+		return $ready;
+	}
+
+	if ( ! chip_affiliatewp_is_payout_method_enabled( true, 'chip' ) ) {
+		return false;
+	}
+
+	$details = chip_affiliatewp_get_bank_details( $affiliate_id );
+
+	return '' !== $details['account_number'] && '' !== $details['bank_code'];
+}
+add_filter( 'affwp_payout_method_is_affiliate_ready', 'chip_affiliatewp_payout_method_is_affiliate_ready', 10, 4 );
+
+/**
  * Registers CHIP Send as a payment-method card on the Payouts tab.
  *
  * AffiliateWP 2.29+ renders each payout provider from the
