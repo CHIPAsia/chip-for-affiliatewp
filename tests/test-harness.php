@@ -1505,6 +1505,12 @@ chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verifi
 $GLOBALS['__user_meta'][7]['chip_bank_account']['deleted_at'] = '2026-01-01T00:00:00Z';
 check( 'deleted account is not reused', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
 
+// A rejected account is not reused either.
+$GLOBALS['__user_meta'][7]['chip_bank_account'] = array();
+chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__user_meta'][7]['chip_bank_account']['status'] = 'rejected';
+check( 'rejected account is not reused', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
+
 // Details are sanitized: separators do not defeat the fingerprint.
 $GLOBALS['__user_meta'][7]['chip_bank_account'] = array();
 chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );

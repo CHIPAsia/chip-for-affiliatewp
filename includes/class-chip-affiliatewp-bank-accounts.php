@@ -157,8 +157,20 @@ function chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference ) {
 		return null;
 	}
 
-	// A deleted or rejected account must never be reused.
+	// A deleted account must never be reused.
 	if ( ! empty( $record['deleted_at'] ) ) {
+		return null;
+	}
+
+	/*
+	 * A rejected account is equally unusable: CHIP will not accept a payout to
+	 * it, so the caller must go through a fresh registration (and surface the
+	 * rejection) rather than silently reusing the id. The reference is derived
+	 * from the details, so unchanged details reuse the same reference — the
+	 * lookup then returns the rejected record and the payout fails with the
+	 * rejection reason, which is what the affiliate needs to see.
+	 */
+	if ( 'rejected' === (string) chip_affiliatewp_array_value( $record, 'status' ) ) {
 		return null;
 	}
 
