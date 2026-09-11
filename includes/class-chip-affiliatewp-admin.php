@@ -196,23 +196,51 @@ function chip_affiliatewp_render_settings_panel() {
 		</div>
 
 		<?php
-		// Native "Let affiliates choose CHIP Send" toggle row, identical to the
-		// bundled methods. Falls back to a plain toggle on older releases.
-		if ( method_exists( 'AffiliateWP_Admin_Payouts_Tab', 'render_affiliate_selectable_field' ) ) {
-			AffiliateWP_Admin_Payouts_Tab::render_affiliate_selectable_field( 'chip' );
-		} elseif ( function_exists( 'affwp_toggle' ) ) {
-			printf( '<input type="hidden" name="affwp_settings[chip_affiliate_selectable]" value="0" />' );
-			affwp_toggle(
-				array(
-					'name'    => 'affwp_settings[chip_affiliate_selectable]',
-					'label'   => __( 'Let affiliates choose CHIP Send', 'chip-for-affiliatewp' ),
-					'checked' => ! in_array( 'chip', (array) get_option( 'affwp_hidden_affiliate_payout_methods', array() ), true ),
-					'size'    => 'sm',
-					'color'   => 'blue',
-				)
-			);
-		}
+		/*
+		 * The core "Let affiliates choose <method>" row is deliberately not used
+		 * here: AffiliateWP saves that toggle through a hardcoded key list that
+		 * covers only its bundled methods, so a third-party method's toggle would
+		 * silently revert on save. The affiliate picker still honours
+		 * `affwp_hidden_affiliate_payout_methods`, so CHIP is offered to affiliates
+		 * by default and can be hidden per site through the filter below.
+		 */
+		$chip_affiliates_can_choose = ! in_array(
+			'chip',
+			(array) get_option( 'affwp_hidden_affiliate_payout_methods', array() ),
+			true
+		);
+		?>
 
+		<?php if ( function_exists( 'affwp_toggle' ) ) : ?>
+			<div class="mb-6 overflow-hidden bg-white rounded-lg border border-gray-200">
+				<div class="flex gap-6 justify-between items-center p-5">
+					<div class="flex-1 min-w-0">
+						<span class="block mb-1 text-base font-medium text-gray-900">
+							<?php esc_html_e( 'Let affiliates choose CHIP Send', 'chip-for-affiliatewp' ); ?>
+						</span>
+						<p class="text-sm text-gray-600">
+							<?php esc_html_e( "CHIP Send appears in each affiliate's payout method options. When off, it is hidden there, but you can still assign it to specific affiliates on the Edit Affiliate screen.", 'chip-for-affiliatewp' ); ?>
+						</p>
+					</div>
+					<div class="shrink-0">
+						<?php
+						printf( '<input type="hidden" name="affwp_settings[chip_affiliate_selectable]" value="0" />' );
+						affwp_toggle(
+							array(
+								'name'    => 'affwp_settings[chip_affiliate_selectable]',
+								'label'   => __( 'Let affiliates choose CHIP Send', 'chip-for-affiliatewp' ),
+								'checked' => $chip_affiliates_can_choose,
+								'size'    => 'sm',
+								'color'   => 'blue',
+							)
+						);
+						?>
+					</div>
+				</div>
+			</div>
+		<?php endif; ?>
+
+		<?php
 		// Master switch. Lives in the panel because the card row renders
 		// toggles only for AffiliateWP's bundled method ids.
 		if ( function_exists( 'affwp_toggle' ) ) {
@@ -700,6 +728,34 @@ function chip_affiliatewp_sanitize_settings( $input ) {
 		'chip_send_recipient_receipt',
 		'chip_webhook_public_key',
 	);
+
+	/*
+	 * "Let affiliates choose CHIP Send" persists to the canonical
+	 * `affwp_hidden_affiliate_payout_methods` option rather than to
+	 * affwp_settings: the affiliate picker and the per-affiliate override both
+	 * read that option, and AffiliateWP's own save handler only tracks its
+	 * bundled method keys. Read $_POST (not $input) because WordPress runs this
+	 * filter more than once per save and feeds each run's output back as $input.
+	 */
+	if ( isset( $_POST['affwp_settings'] ) && is_array( $_POST['affwp_settings'] ) ) {
+		$posted = wp_unslash( $_POST['affwp_settings'] );
+
+		if ( array_key_exists( 'chip_affiliate_selectable', $posted ) ) {
+			$hidden = get_option( 'affwp_hidden_affiliate_payout_methods', array() );
+			$hidden = is_array( $hidden ) ? $hidden : array();
+
+			if ( ! empty( $posted['chip_affiliate_selectable'] ) ) {
+				$hidden = array_values( array_diff( $hidden, array( 'chip' ) ) );
+			} elseif ( ! in_array( 'chip', $hidden, true ) ) {
+				$hidden[] = 'chip';
+			}
+
+			update_option( 'affwp_hidden_affiliate_payout_methods', array_values( $hidden ) );
+		}
+	}
+
+	// The toggle key itself must never land in affwp_settings.
+	unset( $input['chip_affiliate_selectable'] );
 
 	foreach ( $chip_keys as $key ) {
 		if ( ! isset( $input[ $key ] ) ) {

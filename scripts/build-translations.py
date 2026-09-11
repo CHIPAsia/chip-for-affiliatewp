@@ -115,6 +115,7 @@ TRANSLATIONS = {
     'Test Mode routes every payout through CHIP test credentials and never moves real money.': 'Mod Ujian menghantar setiap pembayaran melalui kelayakan ujian CHIP dan tidak sekali-kali memindahkan wang sebenar.',
     'When off, CHIP Send is hidden from affiliates and no payouts are submitted to CHIP.': 'Apabila dimatikan, CHIP Send disembunyikan daripada afiliasi dan tiada pembayaran dihantar ke CHIP.',
     'Let affiliates choose CHIP Send': 'Benarkan afiliasi memilih CHIP Send',
+    "CHIP Send appears in each affiliate's payout method options. When off, it is hidden there, but you can still assign it to specific affiliates on the Edit Affiliate screen.": 'CHIP Send muncul dalam pilihan kaedah pembayaran setiap afiliasi. Apabila dimatikan, ia disembunyikan di situ, tetapi anda masih boleh menetapkannya kepada afiliasi tertentu pada skrin Edit Affiliate.',
     'Enter your live CHIP Send API key': 'Masukkan kunci API CHIP Send live anda',
     'Enter your live CHIP Send secret key': 'Masukkan kunci rahsia CHIP Send live anda',
     'Enter your CHIP Send test API key': 'Masukkan kunci API ujian CHIP Send anda',
