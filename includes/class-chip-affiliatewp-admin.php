@@ -25,6 +25,268 @@ function chip_affiliatewp_register_payout_method( $payout_methods ) {
 add_filter( 'affwp_payout_methods', 'chip_affiliatewp_register_payout_method' );
 
 /**
+ * Registers CHIP Send as a payment-method card on the Payouts tab.
+ *
+ * AffiliateWP 2.29+ renders each payout provider from the
+ * AffiliateWP_Payment_Methods registry, populated on the
+ * `affwp_register_payment_methods` action. Registering here makes CHIP Send
+ * appear exactly like the bundled Stripe / PayPal cards — same status badge,
+ * same Configure button, same collapsible settings panel.
+ *
+ * The card status mirrors the state a merchant can act on:
+ * - active          → method enabled and credentials present
+ * - setup_required  → enabled but credentials missing
+ * - available       → not enabled yet
+ *
+ * @return void
+ */
+function chip_affiliatewp_register_payment_method_card() {
+	if ( ! class_exists( 'AffiliateWP_Payment_Methods' ) ) {
+		return;
+	}
+
+	$enabled   = (bool) affiliate_wp()->settings->get( 'chip_payouts' );
+	$has_creds = chip_affiliatewp_has_credentials();
+	$test_mode = (bool) affiliate_wp()->settings->get( 'chip_test_mode' );
+
+	/*
+	 * Card status follows the same vocabulary as the bundled methods:
+	 * 'active' shows the mode badge, 'setup_required' keeps the Configure
+	 * button available while the method is off or unconfigured. The core
+	 * badge lookup only knows the bundled method ids, so 'setup_required'
+	 * renders without a misleading badge for this method.
+	 */
+	$status = ( $enabled && $has_creds ) ? 'active' : 'setup_required';
+
+	$config = array(
+		'name'              => __( 'CHIP Send', 'chip-for-affiliatewp' ),
+		'description'       => __( 'Pay affiliate commissions straight to Malaysian bank accounts', 'chip-for-affiliatewp' ),
+		'icon'              => CHIP_AFFILIATEWP_URL . 'assets/logo.svg',
+		'status'            => $status,
+		'type'              => 'addon',
+		'settings_callback' => 'chip_affiliatewp_render_settings_panel',
+		'has_new_settings'  => true,
+	);
+
+	if ( 'active' === $status ) {
+		$config['status_label'] = $test_mode
+			? __( 'Test Mode', 'chip-for-affiliatewp' )
+			: __( 'Live Mode', 'chip-for-affiliatewp' );
+	}
+
+	AffiliateWP_Payment_Methods::register( 'chip', $config );
+}
+add_action( 'affwp_register_payment_methods', 'chip_affiliatewp_register_payment_method_card' );
+
+/**
+ * Renders a labelled field using the native AffiliateWP input component.
+ *
+ * Falls back to plain markup when the component library is unavailable
+ * (older AffiliateWP releases), so the panel still renders correctly.
+ *
+ * @param array $args {
+ *     @type string $name   Input name attribute.
+ *     @type string $label  Visible field label.
+ *     @type string $desc   Optional help text.
+ *     @type string $value  Current value.
+ *     @type bool   $secret Credential-style input hints.
+ *     @type string $width  'full' | 'narrow' | 'auto'.
+ * }
+ * @return void
+ */
+function chip_affiliatewp_ui_input( $args ) {
+	$args = wp_parse_args(
+		$args,
+		array(
+			'name'   => '',
+			'label'  => '',
+			'desc'   => '',
+			'value'  => '',
+			'secret' => false,
+			'width'  => 'full',
+		)
+	);
+
+	if ( function_exists( 'affwp_input' ) ) {
+		if ( '' !== $args['label'] ) {
+			printf(
+				'<label for="%1$s" class="block mb-1 text-sm font-medium text-gray-900">%2$s</label>',
+				esc_attr( $args['name'] ),
+				esc_html( $args['label'] )
+			);
+		}
+
+		affwp_input(
+			array(
+				'name'   => $args['name'],
+				'value'  => $args['value'],
+				'type'   => 'text',
+				'secret' => (bool) $args['secret'],
+				'width'  => $args['width'],
+			)
+		);
+
+		if ( '' !== $args['desc'] ) {
+			printf( '<p class="mt-1 text-xs text-gray-600">%s</p>', esc_html( $args['desc'] ) );
+		}
+
+		return;
+	}
+
+	printf(
+		'<table class="form-table"><tr><th scope="row"><label for="%1$s">%2$s</label></th><td>'
+			. '<input type="%3$s" id="%1$s" name="%1$s" value="%4$s" class="regular-text" />'
+			. '%5$s</td></tr></table>',
+		esc_attr( $args['name'] ),
+		esc_html( $args['label'] ),
+		$args['secret'] ? 'password' : 'text',
+		esc_attr( $args['value'] ),
+		'' !== $args['desc'] ? '<p class="description">' . esc_html( $args['desc'] ) . '</p>' : ''
+	);
+}
+
+/**
+ * Renders the CHIP Send settings panel inside its Payouts-tab card.
+ *
+ * Uses the native AffiliateWP UI components so the panel matches the
+ * Stripe / PayPal panels. Fields post as `affwp_settings[...]` inside the
+ * Payouts tab form and are stored by the standard settings save path.
+ *
+ * The enable toggle lives here rather than on the card row: the card template
+ * renders toggles only for its bundled method ids, so a third-party method
+ * exposes its on/off switch inside its own settings panel.
+ *
+ * @return void
+ */
+function chip_affiliatewp_render_settings_panel() {
+	$enabled   = (bool) affiliate_wp()->settings->get( 'chip_payouts' );
+	$test_mode = (bool) affiliate_wp()->settings->get( 'chip_test_mode' );
+
+	if ( function_exists( 'affwp_toggle' ) ) {
+		/*
+		 * Hidden 0-value companion: an unchecked checkbox posts nothing, and
+		 * the Payouts tab has no declared settings array, so the generic
+		 * sanitizer never coerces checkbox values. The explicit 0 keeps the
+		 * toggle switchable back off.
+		 */
+		printf( '<input type="hidden" name="affwp_settings[chip_payouts]" value="0" />' );
+		affwp_toggle(
+			array(
+				'name'    => 'affwp_settings[chip_payouts]',
+				'label'   => __( 'Enable CHIP Send', 'chip-for-affiliatewp' ),
+				'checked' => $enabled,
+				'color'   => 'blue',
+			)
+		);
+	}
+
+	$input = 'chip_affiliatewp_ui_input';
+	$input(
+		array(
+			'name'  => 'affwp_settings[chip_live_api_key]',
+			'label' => __( 'Live API Key', 'chip-for-affiliatewp' ),
+			'desc'  => __( 'Found in the CHIP portal under Control → Settings → Applications.', 'chip-for-affiliatewp' ),
+			'value' => (string) affiliate_wp()->settings->get( 'chip_live_api_key' ),
+		)
+	);
+
+	$input(
+		array(
+			'name'   => 'affwp_settings[chip_live_secret_key]',
+			'label'  => __( 'Live Secret Key', 'chip-for-affiliatewp' ),
+			'desc'   => __( 'Used only for signing requests on your server; it is never sent to CHIP.', 'chip-for-affiliatewp' ),
+			'value'  => (string) affiliate_wp()->settings->get( 'chip_live_secret_key' ),
+			'secret' => true,
+		)
+	);
+
+	$input(
+		array(
+			'name'  => 'affwp_settings[chip_test_api_key]',
+			'label' => __( 'Test API Key', 'chip-for-affiliatewp' ),
+			'value' => (string) affiliate_wp()->settings->get( 'chip_test_api_key' ),
+		)
+	);
+
+	$input(
+		array(
+			'name'   => 'affwp_settings[chip_test_secret_key]',
+			'label'  => __( 'Test Secret Key', 'chip-for-affiliatewp' ),
+			'value'  => (string) affiliate_wp()->settings->get( 'chip_test_secret_key' ),
+			'secret' => true,
+		)
+	);
+
+	$input(
+		array(
+			'name'  => 'affwp_settings[chip_reference_prefix]',
+			'label' => __( 'Reference Prefix', 'chip-for-affiliatewp' ),
+			'desc'  => __( 'Two characters used to prefix CHIP Send references.', 'chip-for-affiliatewp' ),
+			'value' => (string) chip_affiliatewp_reference_prefix(),
+			'width' => 'narrow',
+		)
+	);
+
+	if ( function_exists( 'affwp_toggle' ) ) {
+		/*
+		 * Hidden 0-value companions: an unchecked checkbox posts nothing, and
+		 * the settings sanitizer only coerces values for keys it knows about,
+		 * so the explicit 0 keeps the toggle switchable back off.
+		 */
+		printf( '<input type="hidden" name="affwp_settings[chip_test_mode]" value="0" />' );
+		affwp_toggle(
+			array(
+				'name'    => 'affwp_settings[chip_test_mode]',
+				'label'   => __( 'Test Mode', 'chip-for-affiliatewp' ),
+				'checked' => $test_mode,
+				'color'   => 'blue',
+			)
+		);
+
+		printf( '<input type="hidden" name="affwp_settings[chip_send_recipient_receipt]" value="0" />' );
+		affwp_toggle(
+			array(
+				'name'    => 'affwp_settings[chip_send_recipient_receipt]',
+				'label'   => __( 'Email the affiliate a CHIP receipt on every payout', 'chip-for-affiliatewp' ),
+				'checked' => (bool) affiliate_wp()->settings->get( 'chip_send_recipient_receipt' ),
+				'color'   => 'blue',
+			)
+		);
+	}
+
+	if ( function_exists( 'affwp_callout' ) ) {
+		$webhook_url = chip_affiliatewp_webhook_url();
+		$configured  = chip_affiliatewp_webhook_configured();
+
+		affwp_callout(
+			array(
+				'tone'    => $configured ? 'info' : 'warning',
+				'heading' => $configured
+					? __( 'Webhook connected', 'chip-for-affiliatewp' )
+					: __( 'Webhook not set up yet', 'chip-for-affiliatewp' ),
+				'content' => $configured
+					? __( 'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key.', 'chip-for-affiliatewp' )
+					: __( 'Payouts still settle — statuses are requeried hourly — but confirmations arrive faster with the webhook. Save your credentials to register it automatically.', 'chip-for-affiliatewp' ),
+			)
+		);
+
+		if ( function_exists( 'affwp_copy_button' ) ) {
+			affwp_copy_button(
+				array(
+					'content'     => $webhook_url,
+					'button_text' => __( 'Copy webhook URL', 'chip-for-affiliatewp' ),
+					'variant'     => 'secondary',
+				)
+			);
+		}
+
+		unset( $webhook_url, $configured );
+	}
+
+	unset( $enabled, $test_mode );
+}
+
+/**
  * Forces a "processing" initial status for CHIP batch payouts.
  *
  * CHIP Send instructions settle asynchronously; referrals must stay unpaid
@@ -80,127 +342,66 @@ add_action( 'chip_affiliatewp_check_payout_status', 'chip_affiliatewp_run_schedu
 add_action( 'chip_affiliatewp_hourly_sweep', 'chip_affiliatewp_sweep_processing_payouts' );
 
 /**
- * Adds the CHIP Send settings to the Commissions tab.
+ * Registers the CHIP Send settings so the save path sanitizes them by type.
  *
- * @param array $settings Commissions settings.
+ * The Payouts tab renders custom card content rather than a generic settings
+ * list, so there is no `affwp_settings_payouts` array in core to extend. The
+ * keys are declared here anyway — through the standard
+ * `affwp_settings_payouts_sanitize` filter the tab applies — so text fields
+ * get `sanitize_text_field` treatment and the plugin reads predictable shapes.
+ *
+ * @param array $input Submitted Payouts-tab settings.
  * @return array
  */
-function chip_affiliatewp_register_settings( $settings ) {
-	$settings['chip_payouts'] = array(
-		'name' => __( 'CHIP Send', 'chip-for-affiliatewp' ),
-		'desc' => __( 'Enable the CHIP Send payout method.', 'chip-for-affiliatewp' ),
-		'type' => 'checkbox',
+function chip_affiliatewp_sanitize_settings( $input ) {
+	if ( ! is_array( $input ) ) {
+		return $input;
+	}
+
+	$chip_keys = array(
+		'chip_payouts',
+		'chip_test_mode',
+		'chip_live_api_key',
+		'chip_live_secret_key',
+		'chip_test_api_key',
+		'chip_test_secret_key',
+		'chip_reference_prefix',
+		'chip_send_recipient_receipt',
+		'chip_webhook_public_key',
 	);
 
-	$settings['chip_test_mode'] = array(
-		'name' => __( 'CHIP Send Test Mode', 'chip-for-affiliatewp' ),
-		'desc' => __( 'Use the CHIP Send staging environment.', 'chip-for-affiliatewp' ),
-		'type' => 'checkbox',
-	);
+	foreach ( $chip_keys as $key ) {
+		if ( ! isset( $input[ $key ] ) ) {
+			continue;
+		}
 
-	$settings['chip_live_api_key'] = array(
-		'name' => __( 'Live API Key', 'chip-for-affiliatewp' ),
-		'desc' => __( 'The CHIP Send live API key.', 'chip-for-affiliatewp' ),
-		'type' => 'text',
-	);
+		if ( in_array( $key, array( 'chip_payouts', 'chip_test_mode', 'chip_send_recipient_receipt' ), true ) ) {
+			$input[ $key ] = ! empty( $input[ $key ] ) ? 1 : 0;
 
-	$settings['chip_live_secret_key'] = array(
-		'name' => __( 'Live Secret Key', 'chip-for-affiliatewp' ),
-		'desc' => __( 'The CHIP Send live secret key. Used only for signing; it is never sent to CHIP.', 'chip-for-affiliatewp' ),
-		'type' => 'password',
-	);
+			continue;
+		}
 
-	$settings['chip_test_api_key'] = array(
-		'name' => __( 'Test API Key', 'chip-for-affiliatewp' ),
-		'desc' => __( 'The CHIP Send test API key.', 'chip-for-affiliatewp' ),
-		'type' => 'text',
-	);
+		if ( 'chip_webhook_public_key' === $key ) {
+			$input[ $key ] = trim( (string) $input[ $key ] );
 
-	$settings['chip_test_secret_key'] = array(
-		'name' => __( 'Test Secret Key', 'chip-for-affiliatewp' ),
-		'desc' => __( 'The CHIP Send test secret key. Used only for signing; it is never sent to CHIP.', 'chip-for-affiliatewp' ),
-		'type' => 'password',
-	);
+			continue;
+		}
 
-	$settings['chip_reference_prefix'] = array(
-		'name' => __( 'Reference Prefix', 'chip-for-affiliatewp' ),
-		'desc' => __( 'Two characters used to prefix CHIP Send references.', 'chip-for-affiliatewp' ),
-		'type' => 'text',
-	);
+		if ( 'chip_reference_prefix' === $key ) {
+			$prefix = strtoupper( preg_replace( '/[^A-Za-z0-9]/', '', (string) $input[ $key ] ) );
 
-	$settings['chip_send_recipient_receipt'] = array(
-		'name' => __( 'Send Recipient Receipt', 'chip-for-affiliatewp' ),
-		'desc' => __( 'Email a CHIP receipt to the affiliate on every payout.', 'chip-for-affiliatewp' ),
-		'type' => 'checkbox',
-	);
+			$input[ $key ] = substr( $prefix, 0, 2 );
 
-	$settings['chip_webhook_public_key'] = array(
-		'name' => __( 'Webhook Public Key', 'chip-for-affiliatewp' ),
-		'desc' => __( 'PEM public key of the CHIP Send webhook used to verify inbound deliveries. Register the webhook URL shown below in the CHIP portal.', 'chip-for-affiliatewp' ),
-		'type' => 'textarea',
-	);
+			continue;
+		}
 
-	return $settings;
+		// Credentials: plain text, never re-encoded.
+		$input[ $key ] = sanitize_text_field( (string) $input[ $key ] );
+	}
+
+	return $input;
 }
-add_filter( 'affwp_settings_commissions', 'chip_affiliatewp_register_settings' );
-
-/**
- * Registers the CHIP Send settings section on the Commissions tab.
- *
- * @return void
- */
-function chip_affiliatewp_register_settings_section() {
-	affiliate_wp()->settings->register_section(
-		'commissions',
-		'chip_send',
-		__( 'CHIP Send Payment Method', 'chip-for-affiliatewp' ),
-		apply_filters(
-			'affiliatewp_register_section_chip_send',
-			array(
-				'chip_payouts',
-				'chip_test_mode',
-				'chip_live_api_key',
-				'chip_live_secret_key',
-				'chip_test_api_key',
-				'chip_test_secret_key',
-				'chip_reference_prefix',
-				'chip_send_recipient_receipt',
-				'chip_webhook_public_key',
-			)
-		),
-		''
-	);
-}
-add_action( 'affiliatewp_after_register_admin_sections', 'chip_affiliatewp_register_settings_section' );
-
-/**
- * Renders the webhook URL beneath the Webhook Public Key setting.
- *
- * @param array $args Setting field args.
- * @return void
- */
-function chip_affiliatewp_settings_webhook_url( $args ) {
-	unset( $args );
-	?>
-	<table class="form-table">
-		<tr>
-			<th scope="row">
-				<label><?php esc_html_e( 'Webhook URL', 'chip-for-affiliatewp' ); ?></label>
-			</th>
-			<td>
-				<code><?php echo esc_html( chip_affiliatewp_webhook_url() ); ?></code>
-				<p class="description">
-					<?php esc_html_e( 'Register this URL as a CHIP Send webhook (event hooks: send_instruction_status). Paste the webhook public key from the CHIP portal into the Webhook Public Key field above.', 'chip-for-affiliatewp' ); ?>
-				</p>
-				<p class="description">
-					<?php esc_html_e( 'Missing a webhook delivery is not fatal: payouts left in processing are requeried hourly from the CHIP Send API.', 'chip-for-affiliatewp' ); ?>
-				</p>
-			</td>
-		</tr>
-	</table>
-	<?php
-}
-add_action( 'affwp_after_setting_field_chip_webhook_public_key', 'chip_affiliatewp_settings_webhook_url' );
+add_filter( 'affwp_settings_payouts_sanitize', 'chip_affiliatewp_sanitize_settings' );
 
 /**
  * Auto-registers the CHIP Send webhook after settings are saved.
