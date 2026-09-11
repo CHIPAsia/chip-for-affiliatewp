@@ -3770,6 +3770,93 @@ add_filter( 'chip_affiliatewp_reference_prefix_fallback', function () { return '
 check( 'the fallback is filterable', 'ZZ' === chip_affiliatewp_reference_prefix() );
 check( 'a filtered prefix changes the reference', 'ZZ-PO-5' === chip_affiliatewp_instruction_reference( 5, 1 ) );
 
+echo "\n== Test 65: an affiliate can only ever write their own bank details ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__affiliates_map'][3]         = 7;
+$GLOBALS['__affiliates_map'][4]         = 12;
+$GLOBALS['__users'][7]                  = new Fake_User( 7, 'self@test.dev' );
+$GLOBALS['__users'][12]                 = new Fake_User( 12, 'other@test.dev' );
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['__affiliate_meta'][4]['payout_method_pick'] = 'chip';
+$GLOBALS['__logged_in']                 = true;
+$GLOBALS['__current_affiliate_id']      = 3;
+
+add_filter( 'chip_affiliatewp_bank_save_redirect', function () { return false; } );
+
+// A forged affiliate_id in the request must be ignored.
+$_POST = array(
+	'chip_affiliatewp_action'     => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'           => 'MBBEMYKL',
+	'payment_account_number'      => '1111222233',
+	'affiliate_id'                => 4,
+);
+
+chip_affiliatewp_handle_affiliate_bank_save();
+
+check( 'the posting affiliate gets the details', '1111222233' === (string) get_user_meta( 7, 'payment_account_number', true ) );
+check( 'a forged affiliate_id is ignored', '' === (string) get_user_meta( 12, 'payment_account_number', true ) );
+
+// Without a logged-in user nothing is written at all.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliates_map'][3]       = 7;
+$GLOBALS['__users'][7]                = new Fake_User( 7, 'self@test.dev' );
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['__logged_in']               = false;
+$GLOBALS['__current_affiliate_id']    = 3;
+
+$_POST = array(
+	'chip_affiliatewp_action'     => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'           => 'MBBEMYKL',
+	'payment_account_number'      => '4444555566',
+);
+
+chip_affiliatewp_handle_affiliate_bank_save();
+check( 'a logged-out request writes nothing', '' === (string) get_user_meta( 7, 'payment_account_number', true ) );
+
+// An affiliate whose method is not CHIP cannot write through this form.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliates_map'][3]       = 7;
+$GLOBALS['__users'][7]                = new Fake_User( 7, 'self@test.dev' );
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'paypal';
+$GLOBALS['__logged_in']               = true;
+$GLOBALS['__current_affiliate_id']    = 3;
+
+$_POST = array(
+	'chip_affiliatewp_action'     => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'           => 'MBBEMYKL',
+	'payment_account_number'      => '7777888899',
+);
+
+chip_affiliatewp_handle_affiliate_bank_save();
+check( 'a non-CHIP affiliate writes nothing', '' === (string) get_user_meta( 7, 'payment_account_number', true ) );
+
+// An affiliate with no affiliate record cannot write either.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__users'][7]                = new Fake_User( 7, 'self@test.dev' );
+$GLOBALS['__logged_in']               = true;
+$GLOBALS['__current_affiliate_id']    = 0;
+
+$_POST = array(
+	'chip_affiliatewp_action'     => 'save_bank_details',
+	'chip_affiliatewp_bank_nonce' => 'good-nonce',
+	'payment_bank_code'           => 'MBBEMYKL',
+	'payment_account_number'      => '9999000011',
+);
+
+chip_affiliatewp_handle_affiliate_bank_save();
+check( 'a user with no affiliate record writes nothing', '' === (string) get_user_meta( 7, 'payment_account_number', true ) );
+
+$_POST = array();
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
