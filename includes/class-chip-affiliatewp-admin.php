@@ -64,7 +64,7 @@ add_filter( 'affwp_is_payout_method_enabled', 'chip_affiliatewp_is_payout_method
  * @param mixed|null $payout       Payout row when the check is per-payout.
  * @return bool
  */
-function chip_affiliatewp_payout_method_is_affiliate_ready( $ready, $method, $affiliate_id, $payout = null ) {
+function chip_affiliatewp_payout_method_is_affiliate_ready( $ready, $method, $affiliate_id, $payout = null ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- $payout is part of the AffiliateWP filter signature.
 	if ( 'chip' !== $method ) {
 		return $ready;
 	}
@@ -116,8 +116,8 @@ function chip_affiliatewp_affiliate_dashboard_notice() {
 		$notice = array(
 			'variant' => 'info',
 			'heading' => __( 'Payouts go to your bank account', 'chip-for-affiliatewp' ),
-			/* translators: 1: bank name, 2: masked account number */
 			'body'    => sprintf(
+				/* translators: 1: bank name, 2: masked account number. */
 				__( 'Your commissions are sent to %1$s %2$s. Bank account verification can take a little while; you will be paid as soon as it completes.', 'chip-for-affiliatewp' ),
 				$details['bank_name'],
 				$details['account_number']
@@ -204,12 +204,14 @@ add_action( 'affwp_register_payment_methods', 'chip_affiliatewp_register_payment
  * (older AffiliateWP releases), so the panel still renders correctly.
  *
  * @param array $args {
+ *     Field arguments.
+ *
  *     @type string $name   Input name attribute.
  *     @type string $label  Visible field label.
- *     @type string $desc   Optional help text.
+ *     @type string $desc   Optional. Help text shown beneath the field.
  *     @type string $value  Current value.
- *     @type bool   $secret Credential-style input hints.
- *     @type string $width  'full' | 'narrow' | 'auto'.
+ *     @type bool   $secret Whether this is a credential-style input.
+ *     @type string $width  One of 'full', 'narrow', or 'auto'.
  * }
  * @return void
  */
@@ -269,8 +271,14 @@ function chip_affiliatewp_ui_input( $args ) {
 		name="<?php echo esc_attr( $args['name'] ); ?>"
 		value="<?php echo esc_attr( $args['value'] ); ?>"
 		class="<?php echo esc_attr( $classes ); ?>"
-		<?php if ( '' !== $args['placeholder'] ) : ?>placeholder="<?php echo esc_attr( $args['placeholder'] ); ?>"<?php endif; ?>
-		<?php if ( $args['maxlength'] > 0 ) : ?>maxlength="<?php echo (int) $args['maxlength']; ?>"<?php endif; ?>
+		<?php
+		if ( '' !== $args['placeholder'] ) :
+			?>
+			placeholder="<?php echo esc_attr( $args['placeholder'] ); ?>"<?php endif; ?>
+		<?php
+		if ( $args['maxlength'] > 0 ) :
+			?>
+			maxlength="<?php echo (int) $args['maxlength']; ?>"<?php endif; ?>
 	/>
 	<?php
 	if ( '' !== $args['desc'] ) {
@@ -430,41 +438,41 @@ function chip_affiliatewp_render_settings_panel() {
 		);
 
 		// Mode + reference settings card.
-		if ( function_exists( 'affwp_toggle' ) ) {
-			?>
+	if ( function_exists( 'affwp_toggle' ) ) {
+		?>
 			<div class="mb-6 overflow-hidden bg-white rounded-lg border border-gray-200">
 				<div class="p-6">
 					<div class="mb-4">
 						<h4 class="text-base font-medium text-gray-900">
-							<?php esc_html_e( 'Mode', 'chip-for-affiliatewp' ); ?>
+						<?php esc_html_e( 'Mode', 'chip-for-affiliatewp' ); ?>
 						</h4>
 						<p class="mt-1 text-sm text-gray-600">
-							<?php esc_html_e( 'Test Mode routes every payout through CHIP test credentials and never moves real money.', 'chip-for-affiliatewp' ); ?>
+						<?php esc_html_e( 'Test Mode routes every payout through CHIP test credentials and never moves real money.', 'chip-for-affiliatewp' ); ?>
 						</p>
 					</div>
 
 					<div class="space-y-4">
 						<div class="flex gap-6 justify-between items-center">
 							<span class="text-sm font-medium text-gray-700">
-								<?php esc_html_e( 'Test Mode', 'chip-for-affiliatewp' ); ?>
+							<?php esc_html_e( 'Test Mode', 'chip-for-affiliatewp' ); ?>
 							</span>
-							<?php
-							printf( '<input type="hidden" name="affwp_settings[chip_test_mode]" value="0" />' );
-							affwp_toggle(
-								array(
-									'name'    => 'affwp_settings[chip_test_mode]',
-									'label'   => __( 'Test Mode', 'chip-for-affiliatewp' ),
-									'checked' => $test_mode,
-									'size'    => 'sm',
-									'color'   => 'blue',
-								)
-							);
-							?>
+						<?php
+						printf( '<input type="hidden" name="affwp_settings[chip_test_mode]" value="0" />' );
+						affwp_toggle(
+							array(
+								'name'    => 'affwp_settings[chip_test_mode]',
+								'label'   => __( 'Test Mode', 'chip-for-affiliatewp' ),
+								'checked' => $test_mode,
+								'size'    => 'sm',
+								'color'   => 'blue',
+							)
+						);
+						?>
 						</div>
 
 						<div class="flex gap-6 justify-between items-center">
 							<span class="text-sm font-medium text-gray-700">
-								<?php esc_html_e( 'Email the affiliate a CHIP receipt on every payout', 'chip-for-affiliatewp' ); ?>
+							<?php esc_html_e( 'Email the affiliate a CHIP receipt on every payout', 'chip-for-affiliatewp' ); ?>
 							</span>
 							<?php
 							printf( '<input type="hidden" name="affwp_settings[chip_send_recipient_receipt]" value="0" />' );
@@ -482,7 +490,7 @@ function chip_affiliatewp_render_settings_panel() {
 
 						<div class="pt-4 mt-4 border-t border-gray-200">
 							<label for="chip-reference-prefix" class="block mb-1 text-sm font-medium text-gray-700">
-								<?php esc_html_e( 'Reference Prefix', 'chip-for-affiliatewp' ); ?>
+							<?php esc_html_e( 'Reference Prefix', 'chip-for-affiliatewp' ); ?>
 							</label>
 							<?php
 							chip_affiliatewp_ui_input(
@@ -497,50 +505,50 @@ function chip_affiliatewp_render_settings_panel() {
 							);
 							?>
 							<p class="mt-2 text-sm text-gray-600">
-								<?php esc_html_e( 'Two characters used to prefix CHIP Send references.', 'chip-for-affiliatewp' ); ?>
+							<?php esc_html_e( 'Two characters used to prefix CHIP Send references.', 'chip-for-affiliatewp' ); ?>
 							</p>
 						</div>
 					</div>
 				</div>
 			</div>
 			<?php
-		}
+	}
 
 		// Webhook status card.
-		if ( function_exists( 'affwp_callout' ) ) {
-			$configured = chip_affiliatewp_webhook_configured();
-			?>
+	if ( function_exists( 'affwp_callout' ) ) {
+		$configured = chip_affiliatewp_webhook_configured();
+		?>
 			<div class="overflow-hidden bg-white rounded-lg border border-gray-200">
 				<div class="p-6">
 					<div class="mb-4">
 						<h4 class="flex items-center text-base font-medium text-gray-900">
-							<?php esc_html_e( 'Webhook', 'chip-for-affiliatewp' ); ?>
-							<?php if ( $configured ) : ?>
+						<?php esc_html_e( 'Webhook', 'chip-for-affiliatewp' ); ?>
+						<?php if ( $configured ) : ?>
 								<span class="px-2 py-1 ml-2 text-xs text-green-700 bg-green-50 rounded-md border border-green-200">
 									<?php esc_html_e( 'Connected', 'chip-for-affiliatewp' ); ?>
 								</span>
 							<?php endif; ?>
 						</h4>
 					</div>
-					<?php
-					affwp_callout(
-						array(
-							'tone'    => $configured ? 'info' : 'warning',
-							'heading' => $configured
-								? __( 'Webhook connected', 'chip-for-affiliatewp' )
-								: __( 'Webhook not set up yet', 'chip-for-affiliatewp' ),
-							'content' => $configured
-								? __( 'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key. Registration is automatic — nothing to configure here.', 'chip-for-affiliatewp' )
-								: __( 'Payouts still settle — statuses are requeried hourly — but confirmations arrive faster with the webhook. Save your credentials to register it automatically.', 'chip-for-affiliatewp' ),
-						)
-					);
-					?>
+				<?php
+				affwp_callout(
+					array(
+						'tone'    => $configured ? 'info' : 'warning',
+						'heading' => $configured
+							? __( 'Webhook connected', 'chip-for-affiliatewp' )
+							: __( 'Webhook not set up yet', 'chip-for-affiliatewp' ),
+						'content' => $configured
+							? __( 'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key. Registration is automatic — nothing to configure here.', 'chip-for-affiliatewp' )
+							: __( 'Payouts still settle — statuses are requeried hourly — but confirmations arrive faster with the webhook. Save your credentials to register it automatically.', 'chip-for-affiliatewp' ),
+					)
+				);
+				?>
 				</div>
 			</div>
 			<?php
 			unset( $configured );
-		}
-		?>
+	}
+	?>
 	</div>
 	<?php
 	unset( $enabled, $test_mode, $live_key, $live_secret, $test_key, $test_secret, $has_live, $has_test );
@@ -844,9 +852,15 @@ function chip_affiliatewp_sanitize_settings( $input ) {
 	 * read that option, and AffiliateWP's own save handler only tracks its
 	 * bundled method keys. Read $_POST (not $input) because WordPress runs this
 	 * filter more than once per save and feeds each run's output back as $input.
+	 *
+	 * Nonce: this filter only ever runs inside AffiliateWP's settings save,
+	 * which has already verified the `affwp_settings` nonce and capability
+	 * before dispatching. phpcs cannot see across that boundary.
 	 */
+	// phpcs:disable WordPress.Security.NonceVerification.Missing -- verified by the settings save handler.
 	if ( isset( $_POST['affwp_settings'] ) && is_array( $_POST['affwp_settings'] ) ) {
-		$posted = wp_unslash( $_POST['affwp_settings'] );
+		$posted = wp_unslash( $_POST['affwp_settings'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only array_key_exists/is_empty reads below; the value is coerced to a boolean.
+		$posted = is_array( $posted ) ? $posted : array();
 
 		if ( array_key_exists( 'chip_affiliate_selectable', $posted ) ) {
 			$hidden = get_option( 'affwp_hidden_affiliate_payout_methods', array() );
@@ -861,6 +875,7 @@ function chip_affiliatewp_sanitize_settings( $input ) {
 			update_option( 'affwp_hidden_affiliate_payout_methods', array_values( $hidden ) );
 		}
 	}
+	// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 	// The toggle key itself must never land in affwp_settings.
 	unset( $input['chip_affiliate_selectable'] );

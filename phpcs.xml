@@ -18,6 +18,20 @@
 	<exclude-pattern>/dist/*</exclude-pattern>
 	<exclude-pattern>/tests/*</exclude-pattern>
 
+	<!--
+		AffiliateWP registers these capabilities itself, so phpcs cannot see them
+		from this plugin.
+	-->
+	<rule ref="WordPress.WP.Capabilities">
+		<properties>
+			<property name="custom_capabilities" type="array">
+				<element value="manage_referrals"/>
+				<element value="manage_payouts"/>
+				<element value="manage_affiliates"/>
+			</property>
+		</properties>
+	</rule>
+
 	<!-- Use WordPress coding standards -->
 	<rule ref="WordPress">
 	</rule>

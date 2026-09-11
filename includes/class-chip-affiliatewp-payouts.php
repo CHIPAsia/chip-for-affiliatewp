@@ -103,7 +103,7 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 	$payment_email = affwp_get_affiliate_payment_email( $payout->affiliate_id );
 
 	if ( empty( $payment_email ) ) {
-		$user = get_userdata( affwp_get_affiliate_user_id( $payout->affiliate_id ) );
+		$user          = get_userdata( affwp_get_affiliate_user_id( $payout->affiliate_id ) );
 		$payment_email = is_a( $user, 'WP_User' ) ? $user->user_email : '';
 	}
 
@@ -111,7 +111,7 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 		return chip_affiliatewp_fail_payout( $payout_id, __( 'This affiliate has no payment email on file.', 'chip-for-affiliatewp' ), 'chip_no_email' );
 	}
 
-	$reference = chip_affiliatewp_instruction_reference( $payout_id );
+	$reference    = chip_affiliatewp_instruction_reference( $payout_id );
 	$referral_ids = chip_affiliatewp_payout_referral_ids( $payout );
 
 	$body = array(
@@ -237,14 +237,16 @@ function chip_affiliatewp_recount_batch_for_payout( $payout_id ) {
  * The payout's referrals are released back to unpaid so the payout can be
  * retried after whatever the problem was has been fixed.
  *
- * @param int    $payout_id Payout ID.
- * @param string $reason    Human-readable failure reason.
+ * @param int    $payout_id  Payout ID.
+ * @param string $reason     Human-readable failure reason.
+ * @param string $error_code Optional. Machine-readable error code used for
+ *                           failure classification. Default empty string.
  * @return WP_Error
  */
 function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '' ) {
 	$payout = affwp_get_payout( $payout_id );
 
-	$data = $payout ? chip_affiliatewp_payout_data( $payout ) : array();
+	$data                 = $payout ? chip_affiliatewp_payout_data( $payout ) : array();
 	$data['error']        = $reason;
 	$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
 
@@ -347,7 +349,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 		return true;
 	}
 
-	$data = chip_affiliatewp_payout_data( $payout );
+	$data                 = chip_affiliatewp_payout_data( $payout );
 	$data['state']        = $state;
 	$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
 
@@ -492,7 +494,7 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 	}
 
 	if ( is_wp_error( $response ) ) {
-		$data['poll_count'] = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );
+		$data['poll_count']   = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );
 		$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
 		chip_affiliatewp_update_payout_data( $payout_id, $data );
 
@@ -506,8 +508,8 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 	$reached_terminal = chip_affiliatewp_apply_instruction( $payout_id, $response );
 
 	if ( ! $reached_terminal ) {
-		$data     = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
-		$attempts = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );
+		$data                 = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+		$attempts             = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );
 		$data['poll_count']   = $attempts + 1;
 		$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
 		chip_affiliatewp_update_payout_data( $payout_id, $data );
@@ -728,7 +730,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		return new WP_Error( 'chip_missing_credentials', __( 'Please enter your CHIP Send API credentials in AffiliateWP → Settings → Payouts → CHIP Send before attempting to process payments.', 'chip-for-affiliatewp' ) );
 	}
 
-	$reference  = chip_affiliatewp_reference_prefix() . '-R-' . $referral_id;
+	$reference    = chip_affiliatewp_reference_prefix() . '-R-' . $referral_id;
 	$bank_account = chip_affiliatewp_ensure_bank_account( $referral->affiliate_id );
 
 	if ( is_wp_error( $bank_account ) ) {
@@ -743,7 +745,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	$payment_email = affwp_get_affiliate_payment_email( $referral->affiliate_id );
 
 	if ( empty( $payment_email ) ) {
-		$user = get_userdata( affwp_get_affiliate_user_id( $referral->affiliate_id ) );
+		$user          = get_userdata( affwp_get_affiliate_user_id( $referral->affiliate_id ) );
 		$payment_email = is_a( $user, 'WP_User' ) ? $user->user_email : '';
 	}
 
@@ -752,9 +754,9 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	}
 
 	$instruction_description = chip_affiliatewp_sanitize_description(
-		(string) $referral->description !== ''
+		'' !== (string) $referral->description
 			? (string) $referral->description
-			// translators: %d: Referral ID
+			/* translators: %d: Referral ID. */
 			: sprintf( __( 'Commission for referral No.%d', 'chip-for-affiliatewp' ), $referral_id )
 	);
 

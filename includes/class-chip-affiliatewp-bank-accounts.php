@@ -67,12 +67,16 @@ function chip_affiliatewp_reference_prefix() {
  * details produce a fresh reference instead of colliding with a rejected
  * registration.
  *
+ * Both this reference and the stored-account fingerprint normalize the same
+ * way (upper-cased bank code, digits-only account number) so that cosmetic
+ * differences — "1234-567 890" versus "1234567890" — resolve to one CHIP
+ * account rather than registering a second one for the same recipient.
+ *
  * @param int $affiliate_id Affiliate ID.
  * @return string
  */
 function chip_affiliatewp_bank_reference( $affiliate_id ) {
-	$details = chip_affiliatewp_get_bank_details( $affiliate_id );
-	$hash    = substr( md5( $details['bank_code'] . '|' . $details['account_number'] ), 0, 6 );
+	$hash = substr( chip_affiliatewp_bank_details_fingerprint( $affiliate_id ), 0, 6 );
 
 	return substr( chip_affiliatewp_reference_prefix() . '-AFF-' . $affiliate_id . '-' . $hash, 0, 40 );
 }
@@ -90,11 +94,23 @@ function chip_affiliatewp_instruction_reference( $payout_id ) {
 /**
  * Retrieves the affiliate's CHIP Send bank account registered under its stable reference.
  *
+ * Reads the stored account first: the id is stable for a given set of bank
+ * details, so the common path costs one user-meta read instead of an API call.
+ * The CHIP API is only consulted when nothing is stored, or when the stored
+ * record no longer matches the current details (a changed account number or
+ * bank invalidates the id — reusing it would pay the old account).
+ *
  * @param int $affiliate_id Affiliate ID.
  * @return array|null Bank account record, or null when none exists.
  */
 function chip_affiliatewp_get_bank_account( $affiliate_id ) {
 	$reference = chip_affiliatewp_bank_reference( $affiliate_id );
+
+	$stored = chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference );
+
+	if ( null !== $stored ) {
+		return $stored;
+	}
 
 	$response = chip_affiliatewp_request(
 		'GET',
@@ -113,11 +129,95 @@ function chip_affiliatewp_get_bank_account( $affiliate_id ) {
 
 	foreach ( $response['results'] as $account ) {
 		if ( isset( $account['reference'] ) && $reference === (string) $account['reference'] ) {
+			chip_affiliatewp_store_bank_account( $affiliate_id, $account );
+
 			return $account;
 		}
 	}
 
 	return null;
+}
+
+/**
+ * Returns the stored bank account record for an affiliate, when still valid.
+ *
+ * A stored record is only reused while its fingerprint matches the affiliate's
+ * current bank details. Anything else — changed details, a deleted account, a
+ * record written before fingerprints existed — falls through to a fresh lookup.
+ *
+ * @param int    $affiliate_id Affiliate ID.
+ * @param string $reference    Expected CHIP reference.
+ * @return array|null Stored record, or null when it must be re-fetched.
+ */
+function chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference ) {
+	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
+	$record  = get_user_meta( $user_id, 'chip_bank_account', true );
+
+	if ( ! is_array( $record ) || empty( $record['id'] ) ) {
+		return null;
+	}
+
+	// A deleted or rejected account must never be reused.
+	if ( ! empty( $record['deleted_at'] ) ) {
+		return null;
+	}
+
+	if ( (string) chip_affiliatewp_array_value( $record, 'reference' ) !== (string) $reference ) {
+		return null;
+	}
+
+	if ( (string) chip_affiliatewp_array_value( $record, 'fingerprint' ) !== chip_affiliatewp_bank_details_fingerprint( $affiliate_id ) ) {
+		return null;
+	}
+
+	return $record;
+}
+
+/**
+ * Stores a CHIP Send bank account record against the affiliate.
+ *
+ * @param int   $affiliate_id Affiliate ID.
+ * @param array $account      Bank account record returned by CHIP.
+ * @return void
+ */
+function chip_affiliatewp_store_bank_account( $affiliate_id, $account ) {
+	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
+
+	$account['fingerprint'] = chip_affiliatewp_bank_details_fingerprint( $affiliate_id );
+
+	update_user_meta( $user_id, 'chip_bank_account', $account );
+}
+
+/**
+ * Forgets the stored CHIP Send bank account for an affiliate.
+ *
+ * Called when the affiliate's details change so the next payout re-resolves
+ * against CHIP instead of paying a stale account.
+ *
+ * @param int $affiliate_id Affiliate ID.
+ * @return void
+ */
+function chip_affiliatewp_forget_bank_account( $affiliate_id ) {
+	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
+
+	if ( $user_id ) {
+		delete_user_meta( $user_id, 'chip_bank_account' );
+	}
+}
+
+/**
+ * Returns a stable fingerprint of the affiliate's current bank details.
+ *
+ * The account id is only valid for the details it was created from, so the
+ * fingerprint is what makes a stored id safe to reuse across payouts.
+ *
+ * @param int $affiliate_id Affiliate ID.
+ * @return string
+ */
+function chip_affiliatewp_bank_details_fingerprint( $affiliate_id ) {
+	$details = chip_affiliatewp_get_bank_details( $affiliate_id );
+
+	return md5( strtoupper( $details['bank_code'] ) . '|' . preg_replace( '/\D/', '', $details['account_number'] ) );
 }
 
 /**
@@ -165,6 +265,9 @@ function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
 	if ( empty( $response['id'] ) ) {
 		return new WP_Error( 'chip_invalid_bank_account', __( 'CHIP Send did not return a bank account ID.', 'chip-for-affiliatewp' ) );
 	}
+
+	// Cache the id so repeat payouts skip the lookup entirely.
+	chip_affiliatewp_store_bank_account( $affiliate_id, $response );
 
 	return $response;
 }
@@ -224,20 +327,35 @@ function chip_affiliatewp_save_bank_details( $affiliate, $args, $data ) {
 		return;
 	}
 
+	$changed = false;
+
 	if ( isset( $data['payment_account_number'] ) ) {
-		update_user_meta(
-			$affiliate->user_id,
-			'payment_account_number',
-			sanitize_text_field( $data['payment_account_number'] )
-		);
+		$new_number = sanitize_text_field( $data['payment_account_number'] );
+
+		if ( (string) get_user_meta( $affiliate->user_id, 'payment_account_number', true ) !== $new_number ) {
+			$changed = true;
+		}
+
+		update_user_meta( $affiliate->user_id, 'payment_account_number', $new_number );
 	}
 
 	if ( isset( $data['payment_bank_code'] ) ) {
-		update_user_meta(
-			$affiliate->user_id,
-			'payment_bank_code',
-			sanitize_text_field( $data['payment_bank_code'] )
-		);
+		$new_code = sanitize_text_field( $data['payment_bank_code'] );
+
+		if ( (string) get_user_meta( $affiliate->user_id, 'payment_bank_code', true ) !== $new_code ) {
+			$changed = true;
+		}
+
+		update_user_meta( $affiliate->user_id, 'payment_bank_code', $new_code );
+	}
+
+	/*
+	 * New details mean the cached CHIP Send account id no longer describes
+	 * this affiliate's account. Drop it so the next payout registers the new
+	 * details rather than paying the previous account.
+	 */
+	if ( $changed ) {
+		delete_user_meta( $affiliate->user_id, 'chip_bank_account' );
 	}
 }
 add_action( 'affwp_pre_update_affiliate', 'chip_affiliatewp_save_bank_details', 10, 3 );

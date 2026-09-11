@@ -122,6 +122,10 @@ function sanitize_text_field( $value ) {
 	return trim( strip_tags( (string) $value ) );
 }
 
+function wp_strip_all_tags( $value ) {
+	return trim( strip_tags( (string) $value ) );
+}
+
 function sanitize_key( $value ) {
 	return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $value ) );
 }
@@ -1459,6 +1463,48 @@ check( 'transient failure keeps the merchant copy', 'generic body' === chip_affi
 
 $payout_stub->description = wp_json_encode( array( 'failure_class' => 'affiliate_action_required' ) );
 check( 'other methods are untouched', 'generic body' === chip_affiliatewp_failure_email_body( 'generic body', $payout_stub, 'paypal', 'failed' ) );
+
+echo "\n== Test 33: bank-account id is cached and invalidated on detail change ==\n";
+reset_state();
+$GLOBALS['__options']['chip_payouts']     = 1;
+$GLOBALS['__options']['chip_test_mode']   = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'test-key';
+$GLOBALS['__options']['chip_test_secret_key'] = 'test-secret';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = (object) array( 'user_email' => 'aff@example.com' );
+$GLOBALS['__user_meta'][7] = array(
+	'payment_account_number' => '1234567890',
+	'payment_bank_code'      => 'MBBEMYKL',
+);
+
+// First resolve: nothing stored, so CHIP is asked once.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
+$account = chip_affiliatewp_get_bank_account( 3 );
+check( 'first lookup hits CHIP and returns the id', isset( $account['id'] ) && 4242 === (int) $account['id'] );
+check( 'account id is stored against the affiliate', 4242 === (int) $GLOBALS['__user_meta'][7]['chip_bank_account']['id'] );
+
+// Second resolve: stored and still valid, so no HTTP call is queued.
+$GLOBALS['__http_queue'] = array();
+$account = chip_affiliatewp_get_bank_account( 3 );
+check( 'second lookup is served from storage', isset( $account['id'] ) && 4242 === (int) $account['id'] );
+check( 'second lookup made no HTTP request', array() === $GLOBALS['__http_queue'] );
+
+// Changing the account number invalidates the stored record.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '9999999999';
+check( 'changed details invalidate the stored id', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
+
+// A deleted account is never reused even when the fingerprint matches.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '1234567890';
+chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__user_meta'][7]['chip_bank_account']['deleted_at'] = '2026-01-01T00:00:00Z';
+check( 'deleted account is not reused', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
+
+// Details are sanitized: separators do not defeat the fingerprint.
+$GLOBALS['__user_meta'][7]['chip_bank_account'] = array();
+chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '1234-567 890';
+check( 'separators in the account number keep the fingerprint stable', null !== chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

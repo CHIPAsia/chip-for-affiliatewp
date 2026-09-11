@@ -23,7 +23,7 @@ if ( defined( 'WP_PLUGIN_DIR' ) ) {
 	}
 }
 
-include WP_UNINSTALL_PLUGIN;
+require WP_UNINSTALL_PLUGIN;
 
 $chip_option_names = array();
 

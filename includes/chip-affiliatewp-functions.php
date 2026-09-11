@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @param mixed      $default Default value.
  * @return mixed
  */
-function chip_affiliatewp_array_value( $data, $key, $default = '' ) {
+function chip_affiliatewp_array_value( $data, $key, $default = '' ) { // phpcs:ignore Universal.NamingConventions.NoReservedKeywordParameterNames.defaultFound -- '$default' is the clearest name for a fallback value.
 	return isset( $data[ $key ] ) ? $data[ $key ] : $default;
 }
 

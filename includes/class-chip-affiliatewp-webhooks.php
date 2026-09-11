@@ -174,7 +174,7 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 			if ( is_wp_error( $details ) ) {
 				// Gone or errored; fall through to discovery below.
 				affiliate_wp()->settings->set( array( $keys['id'] => '' ) );
-			} elseif ( $url === (string) chip_affiliatewp_array_value( $details, 'callback_url' ) ) {
+			} elseif ( (string) chip_affiliatewp_array_value( $details, 'callback_url' ) === $url ) {
 				$public_key = (string) chip_affiliatewp_array_value( $details, 'public_key', '' );
 
 				if ( '' !== $public_key ) {
@@ -260,7 +260,7 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 
 			if ( ! is_wp_error( $retry ) && isset( $retry['results'] ) && is_array( $retry['results'] ) ) {
 				foreach ( $retry['results'] as $row ) {
-					if ( $url === (string) chip_affiliatewp_array_value( $row, 'callback_url' ) ) {
+					if ( (string) chip_affiliatewp_array_value( $row, 'callback_url' ) === $url ) {
 						$existing_id = absint( chip_affiliatewp_array_value( $row, 'id' ) );
 						break;
 					}
@@ -279,7 +279,7 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 		}
 	}
 
-	$webhook_id = absint( chip_affiliatewp_array_value( $response, 'id', $existing_id ?: $stale_id ) );
+	$webhook_id = absint( chip_affiliatewp_array_value( $response, 'id', $existing_id ? $existing_id : $stale_id ) );
 
 	if ( empty( $webhook_id ) ) {
 		return new WP_Error( 'chip_webhook_invalid_response', __( 'CHIP Send did not return a webhook ID.', 'chip-for-affiliatewp' ) );
@@ -341,8 +341,8 @@ function chip_affiliatewp_webhook_public_key() {
  * @return WP_REST_Response|WP_Error
  */
 function chip_affiliatewp_handle_webhook( $request ) {
-	$raw = (string) $request->get_body();
-	$signature = (string) $request->get_header( 'X-Signature' );
+	$raw        = (string) $request->get_body();
+	$signature  = (string) $request->get_header( 'X-Signature' );
 	$event_type = (string) $request->get_header( 'Event-Type' );
 
 	$public_key = chip_affiliatewp_webhook_public_key();
@@ -361,6 +361,7 @@ function chip_affiliatewp_handle_webhook( $request ) {
 		return new WP_Error( 'chip_webhook_invalid_key', __( 'The configured webhook public key is not valid.', 'chip-for-affiliatewp' ), array( 'status' => 503 ) );
 	}
 
+	// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- unwraps the RSA signature for openssl_verify(), not obfuscation.
 	$verification = openssl_verify( $raw, (string) base64_decode( $signature ), $key_object, OPENSSL_ALGO_SHA512 );
 
 	if ( 1 !== $verification ) {
@@ -461,9 +462,17 @@ function chip_affiliatewp_process_instruction_webhook( $payload ) {
 		return;
 	}
 
-	// Serialize processing per instruction so duplicate or racing deliveries cannot double-apply.
-	$lock_name  = 'chip_affiliatewp_' . md5( 'instruction_' . ( $instruction_id ? $instruction_id : $payout_id ) );
+	/*
+	 * Serialize processing per instruction so duplicate or racing deliveries
+	 * cannot double-apply. GET_LOCK/RELEASE_LOCK are MySQL advisory locks, not
+	 * data reads: there is nothing to cache, and they must hit the database to
+	 * be atomic across concurrent workers.
+	 */
+	$lock_name = 'chip_affiliatewp_' . md5( 'instruction_' . ( $instruction_id ? $instruction_id : $payout_id ) );
+
+	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- advisory lock, not a data read.
 	$lock_value = 'mysql' === ( $GLOBALS['wpdb']->is_mysql ? 'mysql' : 'other' ) ? $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $lock_name ) ) : null;
+	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 	if ( null !== $lock_value && '1' !== (string) $lock_value ) {
 		// Another worker is already handling this exact delivery.
@@ -474,6 +483,7 @@ function chip_affiliatewp_process_instruction_webhook( $payload ) {
 		chip_affiliatewp_apply_instruction( $payout_id, $payload );
 	} finally {
 		if ( null !== $lock_value && '1' === (string) $lock_value ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releases the advisory lock above.
 			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
 		}
 	}
