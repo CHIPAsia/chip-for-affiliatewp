@@ -69,6 +69,37 @@ function chip_affiliatewp_classify_failure( $error_code, $error_message = '' ) {
 }
 
 /**
+ * Supplies the affiliate-facing body for CHIP Send payout failures.
+ *
+ * The registered `payout_failure_chip_body` setting is the merchant's own copy
+ * and stays authoritative for anything generic. A rejection that names a bank
+ * problem, though, is actionable in a specific way: the affiliate has to fix
+ * their account details, and telling them so beats a generic "your payout
+ * failed". Only the actionable classes get replaced copy.
+ *
+ * @param string $body   Current body.
+ * @param object $payout Payout being emailed about.
+ * @param string $method Payout method slug.
+ * @param string $state  Failure state.
+ * @return string
+ */
+function chip_affiliatewp_failure_email_body( $body, $payout, $method, $state ) {
+	if ( 'chip' !== $method || 'failed' !== $state ) {
+		return $body;
+	}
+
+	$data  = chip_affiliatewp_payout_data( $payout );
+	$class = isset( $data['failure_class'] ) ? (string) $data['failure_class'] : '';
+
+	if ( ! class_exists( '\AffWP\Payouts\Failure_Class' ) || \AffWP\Payouts\Failure_Class::AFFILIATE_ACTION_REQUIRED !== $class ) {
+		return $body;
+	}
+
+	return __( "Hi {name},\n\nWe couldn't send your {amount} commission from {site_name} to your bank account.\n\nThis usually means the bank account details on your affiliate account need attention — a wrong or incomplete account number, or a bank account that hasn't finished verification.\n\nPlease open your settings and check your bank details:\n{affiliate_payout_settings_url}\n\nOnce they're corrected, we'll automatically try sending your commission again. Questions? Just reply to this email.\n\nThanks,\n{site_name}", 'chip-for-affiliatewp' );
+}
+add_filter( 'affwp_payout_failure_email_body', 'chip_affiliatewp_failure_email_body', 10, 4 );
+
+/**
  * Registers the classifier with AffiliateWP.
  *
  * @return void

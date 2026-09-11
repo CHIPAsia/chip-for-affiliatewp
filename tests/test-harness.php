@@ -532,6 +532,19 @@ function affwp_get_affiliate_user_id( $affiliate_id ) {
 
 $GLOBALS['__notices'] = array();
 
+// Minimal stand-in for AffiliateWP's failure classifier, mirroring the
+// constants the plugin compares against.
+if ( ! class_exists( '\AffWP\Payouts\Failure_Class' ) ) {
+	class AffWP_Payouts_Failure_Class_Stub {
+		const TRANSIENT                 = 'transient';
+		const AFFILIATE_ACTION_REQUIRED = 'affiliate_action_required';
+		const ADMIN_ACTION_REQUIRED     = 'admin_action_required';
+		const DATA_ERROR                = 'data_error';
+		const UNKNOWN                   = 'unknown';
+	}
+	class_alias( 'AffWP_Payouts_Failure_Class_Stub', '\AffWP\Payouts\Failure_Class' );
+}
+
 function affwp_notice( $args = array() ) {
 	$GLOBALS['__notices'][] = $args;
 }
@@ -1433,6 +1446,19 @@ $class_row = affiliate_wp()->affiliates->payouts->get_item( $class_payout );
 check( 'payout failed', 'failed' === $class_row->status );
 check( 'failure class recorded', 'affiliate_action_required' === ( $class_row->failure_class ?? '' ) );
 check( 'referral released to unpaid', 'unpaid' === $GLOBALS['__referral_rows'][23]->status );
+
+echo "\n== Test 32: failure email body is swapped only for actionable failures ==\n";
+
+$payout_stub = new stdClass();
+$payout_stub->description = wp_json_encode( array( 'failure_class' => 'affiliate_action_required' ) );
+$body = chip_affiliatewp_failure_email_body( 'generic body', $payout_stub, 'chip', 'failed' );
+check( 'actionable failure replaces the body', false !== strpos( $body, 'bank account details' ) );
+
+$payout_stub->description = wp_json_encode( array( 'failure_class' => 'transient' ) );
+check( 'transient failure keeps the merchant copy', 'generic body' === chip_affiliatewp_failure_email_body( 'generic body', $payout_stub, 'chip', 'failed' ) );
+
+$payout_stub->description = wp_json_encode( array( 'failure_class' => 'affiliate_action_required' ) );
+check( 'other methods are untouched', 'generic body' === chip_affiliatewp_failure_email_body( 'generic body', $payout_stub, 'paypal', 'failed' ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
