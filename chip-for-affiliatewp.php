@@ -47,3 +47,26 @@ require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-admin.php'
 // Activation / deactivation hooks.
 require_once CHIP_AFFILIATEWP_PATH . 'includes/chip-affiliatewp-lifecycle.php';
 register_deactivation_hook( __FILE__, 'chip_affiliatewp_deactivate' );
+
+/**
+ * Keeps the recurring sweep scheduled.
+ *
+ * Activation only fires on the request that turns the plugin on, and an
+ * Action Scheduler action can be lost (a wiped queue, a migration, a host
+ * that clears scheduled work). Re-asserting on an admin-adjacent hook means a
+ * missing sweep heals itself instead of silently leaving payouts unresolved.
+ *
+ * @return void
+ */
+function chip_affiliatewp_ensure_sweep_scheduled() {
+	if ( ! function_exists( 'chip_affiliatewp_schedule_sweep' ) ) {
+		return;
+	}
+
+	if ( ! affiliate_wp()->settings->get( 'chip_payouts' ) ) {
+		return;
+	}
+
+	chip_affiliatewp_schedule_sweep();
+}
+add_action( 'admin_init', 'chip_affiliatewp_ensure_sweep_scheduled' );
