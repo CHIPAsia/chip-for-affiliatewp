@@ -85,6 +85,59 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 		return true;
 	}
 
+	/*
+	 * Serialize submission per payout. The instruction_id guard above is a
+	 * read-then-write, so two workers handling the same payout at once — a
+	 * duplicate scheduled action, or a requery racing a webhook — could both
+	 * see it empty and both send money. The lock closes that window; the
+	 * second worker returns early and lets the first one finish.
+	 */
+	$lock_name = 'chip_affiliatewp_submit_' . absint( $payout_id );
+	$lock_held = false;
+
+	if ( 'mysql' === ( $GLOBALS['wpdb']->is_mysql ? 'mysql' : 'other' ) ) {
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- advisory lock, not a data read.
+		$lock_held = '1' === (string) $GLOBALS['wpdb']->get_var( $GLOBALS['wpdb']->prepare( 'SELECT GET_LOCK(%s, 0)', $lock_name ) );
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+
+		if ( ! $lock_held ) {
+			// Another worker owns this submission.
+			return true;
+		}
+	}
+
+	try {
+		return chip_affiliatewp_submit_payout_locked( $payout_id, $payout );
+	} finally {
+		if ( $lock_held ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releases the advisory lock above.
+			$GLOBALS['wpdb']->query( $GLOBALS['wpdb']->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+		}
+	}
+}
+
+/**
+ * Submits a payout while its submission lock is held.
+ *
+ * Split out so the lock is always released, including when a failure path
+ * returns early.
+ *
+ * @param int    $payout_id Payout ID.
+ * @param object $payout    Payout row.
+ * @return true|WP_Error
+ */
+function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
+	// Re-read: another worker may have completed this payout while we waited.
+	$payout = affwp_get_payout( $payout_id );
+
+	if ( ! $payout ) {
+		return new WP_Error( 'chip_invalid_payout', __( 'The specified payout does not exist.', 'chip-for-affiliatewp' ) );
+	}
+
+	if ( ! empty( chip_affiliatewp_payout_data( $payout )['instruction_id'] ) ) {
+		return true;
+	}
+
 	if ( (float) $payout->amount <= 0 ) {
 		return chip_affiliatewp_fail_payout( $payout_id, __( 'Payout amount must be greater than zero.', 'chip-for-affiliatewp' ), 'chip_invalid_amount' );
 	}
