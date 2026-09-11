@@ -83,6 +83,36 @@ foreach ( $chip_option_names as $chip_option_name ) {
 	delete_option( $chip_option_name );
 }
 
+// Remove the cached CHIP Send account record stored against each affiliate.
+$chip_users = get_users(
+	array(
+		'meta_key' => 'chip_bank_account', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- one-off uninstall sweep.
+		'fields'   => 'ID',
+		'number'   => 0,
+	)
+);
+
+foreach ( $chip_users as $chip_user_id ) {
+	delete_user_meta( (int) $chip_user_id, 'chip_bank_account' );
+}
+
+// Clear cached account summaries and queued notices.
+global $wpdb;
+
+$chip_transients = $wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off uninstall sweep, nothing to cache.
+	$wpdb->prepare(
+		"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+		$wpdb->esc_like( '_transient_chip_affiliatewp_' ) . '%',
+		$wpdb->esc_like( '_transient_timeout_chip_affiliatewp_' ) . '%'
+	)
+);
+
+foreach ( $chip_transients as $chip_transient ) {
+	$chip_key = preg_replace( '/^_transient(_timeout)?_/', '', (string) $chip_transient );
+
+	delete_transient( $chip_key );
+}
+
 // Clear scheduled actions owned by the plugin.
 if ( function_exists( 'as_unschedule_all_actions' ) ) {
 	as_unschedule_all_actions( 'chip_affiliatewp_submit_payout_action' );
