@@ -192,18 +192,28 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	 * would send money the merchant has already reversed and, because the
 	 * referral is no longer unpaid, nothing downstream would notice.
 	 *
-	 * Only a referral still awaiting payment is payable. Anything else is
-	 * dropped; if that leaves nothing, the payout fails and the referrals are
-	 * released rather than partially paid.
+	 * A referral must also still belong to this payout. AffiliateWP records the
+	 * owning payout on the referral, so one that has since been attached
+	 * elsewhere must not be paid from here as well.
+	 *
+	 * Anything failing either check is dropped; if that leaves nothing, the
+	 * payout fails and the referrals are released rather than partially paid.
 	 */
 	$payable_ids = array();
 
 	foreach ( $referral_ids as $referral_id ) {
 		$referral = affwp_get_referral( $referral_id );
 
-		if ( $referral && 'unpaid' === $referral->status ) {
-			$payable_ids[] = $referral_id;
+		if ( ! $referral || 'unpaid' !== $referral->status ) {
+			continue;
 		}
+
+		// 0 means "not attached to any payout"; anything else must be this one.
+		if ( ! empty( $referral->payout_id ) && absint( $referral->payout_id ) !== absint( $payout_id ) ) {
+			continue;
+		}
+
+		$payable_ids[] = $referral_id;
 	}
 
 	if ( empty( $payable_ids ) ) {

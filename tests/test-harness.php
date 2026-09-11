@@ -1974,6 +1974,56 @@ $GLOBALS['__user_meta'][7]['chip_bank_account'] = array( 'id' => 4242, 'status' 
 chip_affiliatewp_save_bank_details( $affiliate, array(), array( 'payment_account_number' => '9999999999' ) );
 check( 'unchanged details keep the cached account', isset( $GLOBALS['__user_meta'][7]['chip_bank_account'] ) );
 
+echo "\n== Test 42: a referral attached to another payout is not paid twice ==\n";
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// Payout 1 owns referral 90. Payout 2 lists it too (a stale or duplicated row).
+$first_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 90 ),
+		'amount'        => '8.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$second_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 90 ),
+		'amount'        => '8.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][90] = new Fake_Referral( 90, 3, '8.00', 'unpaid', $first_id );
+
+// The second payout must refuse: the referral belongs to the first one.
+$GLOBALS['__http_queue'] = array();
+$result = chip_affiliatewp_submit_payout( $second_id );
+
+/*
+ * Assert on the reason, not just is_wp_error(): an unmocked HTTP call is also
+ * a WP_Error, so a weak check would pass even while the plugin tried to send
+ * the money. This message only appears when the eligibility guard drops the
+ * referral.
+ */
+check( 'payout claiming another payout referral fails', is_wp_error( $result ) );
+check( 'payout claiming another payout referral fails on eligibility', false !== strpos( $result->get_error_message(), 'awaiting payment' ) );
+check( 'payout claiming another payout referral sends nothing', array() === $GLOBALS['__http_queue'] );
+check( 'payout claiming another payout referral made no HTTP call', array() === $GLOBALS['__http_log'] );
+
+// The owning payout still pays normally.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9600, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $first_id );
+check( 'owning payout still pays', 9600 === (int) chip_affiliatewp_payout_data( affwp_get_payout( $first_id ) )['instruction_id'] );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
