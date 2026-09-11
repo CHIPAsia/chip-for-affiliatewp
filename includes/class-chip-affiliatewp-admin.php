@@ -589,12 +589,15 @@ function chip_affiliatewp_render_settings_panel() {
 				<div class="p-6">
 					<div class="mb-4">
 						<h4 class="flex items-center text-base font-medium text-gray-900">
-						<?php esc_html_e( 'Webhook', 'chip-for-affiliatewp' ); ?>
-						<?php if ( $configured ) : ?>
-								<span class="px-2 py-1 ml-2 text-xs text-green-700 bg-green-50 rounded-md border border-green-200">
-									<?php esc_html_e( 'Connected', 'chip-for-affiliatewp' ); ?>
-								</span>
+							<?php esc_html_e( 'Webhook', 'chip-for-affiliatewp' ); ?>
+							<?php if ( $configured ) : ?>
+									<span class="px-2 py-1 ml-2 text-xs text-green-700 bg-green-50 rounded-md border border-green-200">
+										<?php esc_html_e( 'Connected', 'chip-for-affiliatewp' ); ?>
+									</span>
 							<?php endif; ?>
+							<span class="px-2 py-1 ml-2 text-xs text-gray-600 bg-gray-50 rounded-md border border-gray-200">
+								<?php echo esc_html( $test_mode ? __( 'Test Mode', 'chip-for-affiliatewp' ) : __( 'Live Mode', 'chip-for-affiliatewp' ) ); ?>
+							</span>
 						</h4>
 					</div>
 				<?php
@@ -602,10 +605,22 @@ function chip_affiliatewp_render_settings_panel() {
 					array(
 						'tone'    => $configured ? 'info' : 'warning',
 						'heading' => $configured
-							? __( 'Webhook connected', 'chip-for-affiliatewp' )
-							: __( 'Webhook not set up yet', 'chip-for-affiliatewp' ),
+							? sprintf(
+								/* translators: %s: "test" or "live". */
+								__( 'Webhook connected (%s)', 'chip-for-affiliatewp' ),
+								$test_mode ? __( 'test mode', 'chip-for-affiliatewp' ) : __( 'live mode', 'chip-for-affiliatewp' )
+							)
+							: sprintf(
+								/* translators: %s: "test" or "live". */
+								__( 'Webhook not set up yet (%s)', 'chip-for-affiliatewp' ),
+								$test_mode ? __( 'test mode', 'chip-for-affiliatewp' ) : __( 'live mode', 'chip-for-affiliatewp' )
+							),
 						'content' => $configured
-							? __( 'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key. Registration is automatic — nothing to configure here.', 'chip-for-affiliatewp' )
+							? sprintf(
+								/* translators: %s: "test" or "live". */
+								__( 'CHIP Send delivers %s payout status updates to this site, and every delivery is verified against the public key for that webhook. Registration is automatic — nothing to configure here.', 'chip-for-affiliatewp' ),
+								$test_mode ? __( 'test-mode', 'chip-for-affiliatewp' ) : __( 'live', 'chip-for-affiliatewp' )
+							)
 							: __( 'Payouts still settle — statuses are requeried hourly — but confirmations arrive faster with the webhook. Save your credentials to register it automatically.', 'chip-for-affiliatewp' ),
 					)
 				);

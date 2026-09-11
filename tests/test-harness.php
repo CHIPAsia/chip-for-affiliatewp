@@ -2226,6 +2226,41 @@ $legacy = affiliate_wp()->affiliates->payouts->add(
 );
 check( 'legacy description JSON still resolves', 1234 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $legacy ) )['instruction_id'] ?? 0 ) );
 
+echo "\n== Test 46: test and live webhooks are independent ==\n";
+reset_state();
+
+// Register a test-mode webhook only.
+$GLOBALS['__options']['chip_test_mode']      = 1;
+$GLOBALS['__options']['chip_webhook_id_test']  = 'wh_test_1';
+$GLOBALS['__options']['chip_webhook_key_test'] = 'TEST_PUBLIC_KEY';
+check( 'test mode reports configured', chip_affiliatewp_webhook_configured() );
+
+// Flipping to live must NOT inherit the test webhook: they are separate
+// objects at CHIP with separate public keys.
+$GLOBALS['__options']['chip_test_mode'] = 0;
+check( 'live mode is not configured by a test webhook', ! chip_affiliatewp_webhook_configured() );
+
+// The live key must not resolve to the test key.
+check( 'live public key does not fall back to the test key', 'TEST_PUBLIC_KEY' !== chip_affiliatewp_webhook_public_key( 'live' ) );
+check( 'test public key still resolves for test mode', 'TEST_PUBLIC_KEY' === chip_affiliatewp_webhook_public_key( 'test' ) );
+
+// Register a live webhook too; each mode resolves its own key.
+$GLOBALS['__options']['chip_webhook_id_live']  = 'wh_live_1';
+$GLOBALS['__options']['chip_webhook_key_live'] = 'LIVE_PUBLIC_KEY';
+check( 'live mode now reports configured', chip_affiliatewp_webhook_configured() );
+check( 'live resolves its own key', 'LIVE_PUBLIC_KEY' === chip_affiliatewp_webhook_public_key( 'live' ) );
+check( 'test resolves its own key', 'TEST_PUBLIC_KEY' === chip_affiliatewp_webhook_public_key( 'test' ) );
+
+// A per-mode manual override wins over the auto-registered key, per mode.
+$GLOBALS['__options']['chip_webhook_public_key_live'] = 'MANUAL_LIVE_KEY';
+check( 'per-mode manual override wins for live', 'MANUAL_LIVE_KEY' === chip_affiliatewp_webhook_public_key( 'live' ) );
+check( 'manual override for live does not leak into test', 'TEST_PUBLIC_KEY' === chip_affiliatewp_webhook_public_key( 'test' ) );
+
+// The legacy single key still works when no per-mode key exists.
+unset( $GLOBALS['__options']['chip_webhook_public_key_live'], $GLOBALS['__options']['chip_webhook_key_live'], $GLOBALS['__options']['chip_webhook_id_live'] );
+$GLOBALS['__options']['chip_webhook_public_key'] = 'LEGACY_KEY';
+check( 'legacy single key still resolves', 'LEGACY_KEY' === chip_affiliatewp_webhook_public_key( 'live' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

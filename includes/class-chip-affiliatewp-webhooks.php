@@ -75,11 +75,28 @@ function chip_affiliatewp_webhook_configured() {
 	$mode = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
 	$keys = chip_affiliatewp_webhook_option_keys( $mode );
 
-	if ( '' !== (string) affiliate_wp()->settings->get( 'chip_webhook_public_key' ) ) {
+	/*
+	 * Manual key, checked for this mode first. The single-key fallback only
+	 * counts when it was set for a webhook we cannot otherwise identify.
+	 */
+	if ( '' !== trim( (string) affiliate_wp()->settings->get( 'chip_webhook_public_key_' . $mode, '' ) ) ) {
 		return true;
 	}
 
-	return ! empty( affiliate_wp()->settings->get( $keys['id'], '' ) ) && ! empty( affiliate_wp()->settings->get( $keys['key'], '' ) );
+	$has_id  = ! empty( affiliate_wp()->settings->get( $keys['id'], '' ) );
+	$has_key = ! empty( affiliate_wp()->settings->get( $keys['key'], '' ) );
+
+	// Auto-registered for this mode: both halves are present.
+	if ( $has_id && $has_key ) {
+		return true;
+	}
+
+	// A legacy single manual key with no per-mode webhook recorded.
+	if ( '' !== trim( (string) affiliate_wp()->settings->get( 'chip_webhook_public_key', '' ) ) && ! $has_id ) {
+		return true;
+	}
+
+	return false;
 }
 
 /**
@@ -309,21 +326,33 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 }
 
 /**
- * Resolves the webhook public key for the current mode.
+ * Resolves the webhook public key for a mode.
  *
- * Manual key (Webhook Public Key setting) wins; otherwise the key captured
- * by auto-registration.
+ * Test and live are separate webhook objects at CHIP, each with its own public
+ * key, so the key has to be resolved per mode. A single shared override would
+ * verify test deliveries against the live key (and the reverse) and fail every
+ * signature check. Manual key wins; otherwise the key captured by
+ * auto-registration.
  *
+ * @param string|null $mode "test" or "live". Defaults to the current mode.
  * @return string PEM public key, or empty string when unavailable.
  */
-function chip_affiliatewp_webhook_public_key() {
-	$manual = trim( (string) affiliate_wp()->settings->get( 'chip_webhook_public_key' ) );
+function chip_affiliatewp_webhook_public_key( $mode = null ) {
+	$mode = in_array( $mode, array( 'test', 'live' ), true )
+		? $mode
+		: ( affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live' );
+
+	$manual = trim( (string) affiliate_wp()->settings->get( 'chip_webhook_public_key_' . $mode, '' ) );
+
+	// Legacy single-key setting, read as a fallback so existing installs keep working.
+	if ( '' === $manual ) {
+		$manual = trim( (string) affiliate_wp()->settings->get( 'chip_webhook_public_key', '' ) );
+	}
 
 	if ( '' !== $manual ) {
 		return $manual;
 	}
 
-	$mode = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
 	$keys = chip_affiliatewp_webhook_option_keys( $mode );
 
 	return trim( (string) affiliate_wp()->settings->get( $keys['key'], '' ) );
