@@ -2567,6 +2567,30 @@ preg_match( '/Stable tag:\s*([0-9.]+)/', (string) file_get_contents( $repo . '/r
 
 check( 'version constant and Stable tag agree', ( $const_match[1] ?? '' ) === ( $stable_match[1] ?? '' ) );
 
+echo "\n== Test 52: docs point at the screens the code actually uses ==\n";
+
+$repo  = dirname( __DIR__ );
+$readme = (string) file_get_contents( $repo . '/readme.txt' );
+$agents = (string) file_get_contents( $repo . '/AGENTS.md' );
+
+// The settings panel moved to the Payouts tab; stale copy sent merchants to
+// Commissions, where no CHIP Send settings exist at all.
+check( 'readme sends merchants to the Payouts tab', false !== strpos( $readme, 'Settings → Payouts' ) );
+check( 'readme does not send merchants to the Commissions tab', false === strpos( $readme, 'Settings → Commissions' ) );
+check( 'AGENTS.md names the Payouts tab', false !== strpos( $agents, 'Payouts** tab' ) || false !== strpos( $agents, 'Payouts tab' ) );
+check( 'AGENTS.md does not claim the Commissions tab', false === strpos( $agents, 'Commissions tab' ) );
+
+// The code must agree: the card registers on the method registry and saves
+// through the Payouts sanitize filter.
+$admin = (string) file_get_contents( $repo . '/includes/class-chip-affiliatewp-admin.php' );
+
+check( 'code registers the card on the method registry', false !== strpos( $admin, 'affwp_register_payment_methods' ) );
+check( 'code saves through the Payouts sanitize filter', false !== strpos( $admin, 'affwp_settings_payouts_sanitize' ) );
+check( 'code does not save through a Commissions filter', false === strpos( $admin, 'affwp_settings_commissions' ) );
+
+// Setup instructions must name a screen that exists in the settings tree.
+check( 'readme setup step exists', false !== strpos( $readme, '== Installation ==' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
