@@ -352,6 +352,25 @@ function wp_get_referer() {
 	return '';
 }
 
+$GLOBALS['__mail'] = array();
+
+function wp_mail( $to, $subject, $body, $headers = '' ) {
+	$GLOBALS['__mail'][] = array( 'to' => $to, 'subject' => $subject, 'body' => $body );
+	return true;
+}
+
+function is_email( $email ) {
+	return (bool) filter_var( (string) $email, FILTER_VALIDATE_EMAIL );
+}
+
+function get_bloginfo( $show = '' ) {
+	return 'Test Store';
+}
+
+function wp_specialchars_decode( $string, $quote_style = ENT_NOQUOTES ) {
+	return html_entity_decode( (string) $string, $quote_style );
+}
+
 function admin_url( $path = '' ) {
 	return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
 }
@@ -851,6 +870,7 @@ function reset_state() {
 	$GLOBALS['__batch_recounts']  = array();
 	$GLOBALS['__payout_meta']     = array();
 	$GLOBALS['__referral_meta']   = array();
+	$GLOBALS['__mail']            = array();
 
 	$GLOBALS['__options']['chip_payouts']     = 1;
 	$GLOBALS['__options']['chip_test_mode']   = 1;
@@ -3305,6 +3325,100 @@ check( 'a raced dead instruction fails the payout', 'failed' === affwp_get_payou
 // The batch path tracks the attempt on the payout row; the referral path uses
 // a burnt-reference list because no payout row exists yet.
 check( 'a raced dead instruction advances the payout attempt', 2 === (int) ( $dead_data['attempt'] ?? 0 ) );
+
+echo "\n== Test 59: a payout parked under review is surfaced, not left silent ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__options_store']['admin_email']     = 'merchant@test.dev';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// 'reviewing' is the state CHIP documents as needing a human.
+check( 'reviewing needs attention', chip_affiliatewp_state_needs_review( 'reviewing' ) );
+check( 'reviewing is matched case-insensitively', chip_affiliatewp_state_needs_review( 'REVIEWING' ) );
+
+// In-flight and terminal states do not.
+foreach ( array( 'received', 'enquiring', 'executing', 'accepted', 'completed', 'rejected', 'deleted' ) as $chip_state ) {
+	check( $chip_state . ' does not need attention', ! chip_affiliatewp_state_needs_review( $chip_state ) );
+}
+
+// A payout whose instruction is under review is listed.
+$review_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 300 ),
+		'amount'        => '12.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][300] = new Fake_Referral( 300, 3, '12.00', 'unpaid', $review_id );
+
+chip_affiliatewp_update_payout_data( $review_id, array( 'instruction_id' => 9001, 'state' => 'reviewing' ) );
+
+$flagged = chip_affiliatewp_payouts_awaiting_review();
+check( 'a reviewing payout is listed', 1 === count( $flagged ) );
+check( 'the listed payout is the right one', $review_id === (int) $flagged[0]['payout_id'] );
+check( 'the listing carries the amount', '12.00' === $flagged[0]['amount'] );
+
+// An ordinary in-flight payout is NOT listed.
+$normal_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 301 ),
+		'amount'        => '3.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][301] = new Fake_Referral( 301, 3, '3.00', 'unpaid', $normal_id );
+
+chip_affiliatewp_update_payout_data( $normal_id, array( 'instruction_id' => 9002, 'state' => 'executing' ) );
+
+check( 'an executing payout is not listed', 1 === count( chip_affiliatewp_payouts_awaiting_review() ) );
+
+// The merchant is emailed once, then not again.
+$GLOBALS['__mail'] = array();
+$sent = chip_affiliatewp_notify_review_payouts();
+
+check( 'the merchant is emailed once', 1 === $sent );
+check( 'the email goes to the merchant', 'merchant@test.dev' === ( $GLOBALS['__mail'][0]['to'] ?? '' ) );
+check( 'the email names the instruction', false !== strpos( $GLOBALS['__mail'][0]['body'] ?? '', '9001' ) );
+
+$GLOBALS['__mail'] = array();
+check( 'the merchant is not emailed twice', 0 === chip_affiliatewp_notify_review_payouts() );
+
+// A second run after a new payout appears emails only about the new one.
+$second_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 302 ),
+		'amount'        => '5.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][302] = new Fake_Referral( 302, 3, '5.00', 'unpaid', $second_id );
+chip_affiliatewp_update_payout_data( $second_id, array( 'instruction_id' => 9003, 'state' => 'reviewing' ) );
+
+$GLOBALS['__mail'] = array();
+check( 'only the new review emails again', 1 === chip_affiliatewp_notify_review_payouts() );
+check( 'the follow-up names the new instruction', false !== strpos( $GLOBALS['__mail'][0]['body'] ?? '', '9003' ) );
+
+// A missing merchant address must not fatal — it just skips.
+$GLOBALS['__options_store']['admin_email'] = 'not-an-email';
+$GLOBALS['__mail'] = array();
+check( 'an invalid merchant address sends nothing', 0 === chip_affiliatewp_notify_review_payouts() );
+check( 'an invalid merchant address makes no mail call', array() === $GLOBALS['__mail'] );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

@@ -469,8 +469,79 @@ function chip_affiliatewp_render_settings_panel() {
 
 	$has_live = '' !== $live_key && '' !== $live_secret;
 	$has_test = '' !== $test_key && '' !== $test_secret;
+
+	// Payouts CHIP has parked for manual review — nobody is told otherwise.
+	$chip_review_rows = function_exists( 'chip_affiliatewp_payouts_awaiting_review' )
+		? chip_affiliatewp_payouts_awaiting_review()
+		: array();
 	?>
 	<div class="max-w-3xl">
+
+		<?php if ( ! empty( $chip_review_rows ) ) : ?>
+			<?php
+			$chip_review_count = count( $chip_review_rows );
+			$chip_payouts_url  = admin_url( 'admin.php?page=affiliate-wp-payouts' );
+			?>
+			<div class="mb-6 overflow-hidden bg-white rounded-lg border border-amber-300">
+				<div class="p-6">
+					<h4 class="text-base font-medium text-amber-900">
+						<?php
+						printf(
+							/* translators: %d: number of payouts. */
+							esc_html(
+								_n(
+									'%d payout is waiting on CHIP',
+									'%d payouts are waiting on CHIP',
+									$chip_review_count,
+									'chip-for-affiliatewp'
+								)
+							),
+							(int) $chip_review_count
+						);
+						?>
+					</h4>
+					<p class="mt-1 text-sm text-gray-600">
+						<?php esc_html_e( 'CHIP Send has put these instructions under review. They will not complete on their own — contact your CHIP account manager and quote the instruction ID. The affiliates have not been paid yet.', 'chip-for-affiliatewp' ); ?>
+					</p>
+
+					<ul class="mt-4 space-y-2">
+						<?php foreach ( $chip_review_rows as $chip_row ) : ?>
+							<?php
+							$chip_affiliate_name = function_exists( 'affwp_get_affiliate_name' )
+								? affwp_get_affiliate_name( (int) $chip_row['affiliate_id'] )
+								: '';
+							$chip_affiliate_name = is_string( $chip_affiliate_name ) && '' !== $chip_affiliate_name
+								? $chip_affiliate_name
+								: sprintf(
+									/* translators: %d: affiliate ID. */
+									__( 'Affiliate #%d', 'chip-for-affiliatewp' ),
+									(int) $chip_row['affiliate_id']
+								);
+							?>
+							<li class="text-sm text-gray-700">
+								<a class="font-medium text-blue-600 underline" href="<?php echo esc_url( $chip_payouts_url ); ?>">
+									<?php
+									printf(
+										/* translators: %d: payout ID. */
+										esc_html__( 'Payout #%d', 'chip-for-affiliatewp' ),
+										(int) $chip_row['payout_id']
+									);
+									?>
+								</a>
+								<?php
+								printf(
+									/* translators: 1: affiliate name, 2: formatted amount. */
+									esc_html__( '— %1$s, %2$s', 'chip-for-affiliatewp' ),
+									esc_html( $chip_affiliate_name ),
+									esc_html( chip_affiliatewp_format_money( $chip_row['amount'] ) )
+								);
+								?>
+							</li>
+						<?php endforeach; ?>
+					</ul>
+				</div>
+			</div>
+		<?php endif; ?>
 
 		<!-- Header Section -->
 		<div class="mb-6">
@@ -1121,6 +1192,12 @@ add_action( 'chip_affiliatewp_check_payout_status', 'chip_affiliatewp_run_schedu
  * Runs the hourly sweep of processing payouts.
  */
 add_action( 'chip_affiliatewp_hourly_sweep', 'chip_affiliatewp_sweep_processing_payouts' );
+
+/*
+ * Tell the merchant about payouts CHIP has parked for manual review. Runs after
+ * the sweep so the states it reads are the freshest ones.
+ */
+add_action( 'chip_affiliatewp_hourly_sweep', 'chip_affiliatewp_notify_review_payouts', 20 );
 
 /**
  * Registers the CHIP Send settings so the save path sanitizes them by type.
