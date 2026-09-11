@@ -909,11 +909,13 @@ function chip_affiliatewp_adopt_referral_instruction( $referral, $instruction, $
 /**
  * Fetches a CHIP Send instruction by ID.
  *
- * @param int $instruction_id CHIP Send instruction ID.
+ * @param int         $instruction_id CHIP Send instruction ID.
+ * @param string|null $mode           Optional. Mode the instruction was created
+ *                                    in. Defaults to the site-wide setting.
  * @return array|WP_Error Instruction payload, or WP_Error on failure.
  */
-function chip_affiliatewp_get_instruction( $instruction_id ) {
-	return chip_affiliatewp_request( 'GET', '/send/send_instructions/' . rawurlencode( (string) $instruction_id ) );
+function chip_affiliatewp_get_instruction( $instruction_id, $mode = null ) {
+	return chip_affiliatewp_request( 'GET', '/send/send_instructions/' . rawurlencode( (string) $instruction_id ), array(), array(), $mode );
 }
 
 /**
@@ -955,28 +957,16 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 	// being retried: the instruction may have completed after a transient
 	// failure (timeout between us and CHIP). Requery and let apply_instruction
 	// heal the record so the affiliate cannot be paid twice.
-	$response = chip_affiliatewp_get_instruction( (int) $data['instruction_id'] );
+	/*
+	 * Requery against the mode this payout was SUBMITTED in, not the site-wide
+	 * setting. A merchant flipping to Test Mode would otherwise poll a live
+	 * instruction against staging: the ID does not exist there, so the payout
+	 * stalls on 404s and the failure looks like a CHIP outage.
+	 */
+	$stored_mode = (string) chip_affiliatewp_array_value( $data, 'mode', '' );
+	$stored_mode = in_array( $stored_mode, array( 'test', 'live' ), true ) ? $stored_mode : null;
 
-	if ( is_wp_error( $response ) ) {
-		// Mode flipped after submission: the payout would otherwise be polled
-		// against the wrong host forever. Resolve against the mode it was
-		// submitted in before giving up this pass.
-		$stored_mode = (string) chip_affiliatewp_array_value( $data, 'mode' );
-
-		if ( in_array( $stored_mode, array( 'test', 'live' ), true ) ) {
-			$probe = chip_affiliatewp_request(
-				'GET',
-				'/send/send_instructions/' . rawurlencode( (string) $data['instruction_id'] ),
-				array(),
-				array(),
-				$stored_mode
-			);
-
-			if ( ! is_wp_error( $probe ) ) {
-				$response = $probe;
-			}
-		}
-	}
+	$response = chip_affiliatewp_get_instruction( (int) $data['instruction_id'], $stored_mode );
 
 	if ( is_wp_error( $response ) ) {
 		$data['poll_count']   = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );

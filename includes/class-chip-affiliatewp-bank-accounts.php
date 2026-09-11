@@ -175,8 +175,9 @@ function chip_affiliatewp_payout_attempt( $data ) {
  */
 function chip_affiliatewp_get_bank_account( $affiliate_id ) {
 	$reference = chip_affiliatewp_bank_reference( $affiliate_id );
+	$mode      = chip_affiliatewp_current_mode();
 
-	$stored = chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference );
+	$stored = chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference, $mode );
 
 	if ( null !== $stored ) {
 		return $stored;
@@ -190,7 +191,8 @@ function chip_affiliatewp_get_bank_account( $affiliate_id ) {
 			'page'      => 1,
 			'limit'     => 25,
 			'reference' => $reference,
-		)
+		),
+		$mode
 	);
 
 	if ( is_wp_error( $response ) || empty( $response['results'] ) || ! is_array( $response['results'] ) ) {
@@ -199,7 +201,7 @@ function chip_affiliatewp_get_bank_account( $affiliate_id ) {
 
 	foreach ( $response['results'] as $account ) {
 		if ( isset( $account['reference'] ) && $reference === (string) $account['reference'] ) {
-			chip_affiliatewp_store_bank_account( $affiliate_id, $account );
+			chip_affiliatewp_store_bank_account( $affiliate_id, $account, $mode );
 
 			return $account;
 		}
@@ -219,10 +221,34 @@ function chip_affiliatewp_get_bank_account( $affiliate_id ) {
  * @param string $reference    Expected CHIP reference.
  * @return array|null Stored record, or null when it must be re-fetched.
  */
-function chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference ) {
+function chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference, $mode = null ) {
 	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
-	$record  = get_user_meta( $user_id, 'chip_bank_account', true );
+	$mode    = null === $mode ? chip_affiliatewp_current_mode() : ( 'test' === $mode ? 'test' : 'live' );
 
+	$records = get_user_meta( $user_id, 'chip_bank_account', true );
+
+	/*
+	 * Records written before the cache became mode-aware are a single flat
+	 * array. Read those on their own mode so an existing installation keeps
+	 * working without waiting for the next write to migrate it.
+	 */
+	if ( is_array( $records ) && isset( $records['id'] ) ) {
+		$legacy_mode = in_array( (string) ( $records['mode'] ?? '' ), array( 'test', 'live' ), true )
+			? (string) $records['mode']
+			: 'live';
+
+		$records = array( $legacy_mode => $records );
+	}
+
+	$record = is_array( $records ) && isset( $records[ $mode ] ) ? $records[ $mode ] : null;
+
+	/*
+	 * A CHIP account ID is scoped to the environment that issued it: the same
+	 * number means a different account in test and in live. Reusing a test ID
+	 * against live would at best fail and at worst name somebody else's
+	 * account, so the cache is kept per mode and an ID is only ever used in the
+	 * mode it came from.
+	 */
 	if ( ! is_array( $record ) || empty( $record['id'] ) ) {
 		return null;
 	}
@@ -256,18 +282,47 @@ function chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference ) {
 }
 
 /**
+ * Returns the mode the site is currently configured for.
+ *
+ * @return string 'test' or 'live'.
+ */
+function chip_affiliatewp_current_mode() {
+	return affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
+}
+
+/**
  * Stores a CHIP Send bank account record against the affiliate.
  *
- * @param int   $affiliate_id Affiliate ID.
- * @param array $account      Bank account record returned by CHIP.
+ * Kept per mode: the same CHIP account ID means different things in test and
+ * live, so each environment's record is stored separately.
+ *
+ * @param int         $affiliate_id Affiliate ID.
+ * @param array       $account      Bank account record returned by CHIP.
+ * @param string|null $mode         Optional. Mode the record came from.
  * @return void
  */
-function chip_affiliatewp_store_bank_account( $affiliate_id, $account ) {
+function chip_affiliatewp_store_bank_account( $affiliate_id, $account, $mode = null ) {
 	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
+	$mode    = null === $mode ? chip_affiliatewp_current_mode() : ( 'test' === $mode ? 'test' : 'live' );
 
 	$account['fingerprint'] = chip_affiliatewp_bank_details_fingerprint( $affiliate_id );
+	$account['mode']        = $mode;
 
-	update_user_meta( $user_id, 'chip_bank_account', $account );
+	$records = get_user_meta( $user_id, 'chip_bank_account', true );
+	$records = is_array( $records ) ? $records : array();
+
+	// Migrate a record written by an older version, which stored one flat array.
+	if ( isset( $records['id'] ) ) {
+		$legacy          = $records;
+		$legacy_mode     = in_array( (string) ( $legacy['mode'] ?? '' ), array( 'test', 'live' ), true )
+			? (string) $legacy['mode']
+			: $mode;
+		$records         = array( $legacy_mode => $legacy );
+	}
+
+	$records[ $mode ] = $account;
+
+	update_user_meta( $user_id, 'chip_bank_account', $records );
 }
 
 /**
@@ -313,6 +368,7 @@ function chip_affiliatewp_bank_details_fingerprint( $affiliate_id ) {
  * @return array|WP_Error Bank account record with at least "id" and "status".
  */
 function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
+	$mode     = chip_affiliatewp_current_mode();
 	$existing = chip_affiliatewp_get_bank_account( $affiliate_id );
 
 	if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
@@ -337,7 +393,9 @@ function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
 			'bank_code'      => $details['bank_code'],
 			'name'           => chip_affiliatewp_substr( (string) affwp_get_affiliate_name( $affiliate_id ), 128 ),
 			'reference'      => chip_affiliatewp_bank_reference( $affiliate_id ),
-		)
+		),
+		array(),
+		$mode
 	);
 
 	if ( is_wp_error( $response ) ) {
@@ -349,7 +407,7 @@ function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
 	}
 
 	// Cache the id so repeat payouts skip the lookup entirely.
-	chip_affiliatewp_store_bank_account( $affiliate_id, $response );
+	chip_affiliatewp_store_bank_account( $affiliate_id, $response, $mode );
 
 	return $response;
 }

@@ -872,6 +872,7 @@ function reset_state() {
 	$GLOBALS['__payout_meta']     = array();
 	$GLOBALS['__referral_meta']   = array();
 	$GLOBALS['__mail']            = array();
+	unset( $GLOBALS['__chip_bank_lookup_override'] );
 
 	$GLOBALS['__options']['chip_payouts']     = 1;
 	$GLOBALS['__options']['chip_test_mode']   = 1;
@@ -1707,7 +1708,9 @@ $GLOBALS['__http_queue'] = array();
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
 $account = chip_affiliatewp_get_bank_account( 3 );
 check( 'first lookup hits CHIP and returns the id', isset( $account['id'] ) && 4242 === (int) $account['id'] );
-check( 'account id is stored against the affiliate', 4242 === (int) $GLOBALS['__user_meta'][7]['chip_bank_account']['id'] );
+$stored_raw = $GLOBALS['__user_meta'][7]['chip_bank_account'];
+$stored_mode_record = isset( $stored_raw['id'] ) ? $stored_raw : ( $stored_raw[ chip_affiliatewp_current_mode() ] ?? array() );
+check( 'account id is stored against the affiliate', 4242 === (int) ( $stored_mode_record['id'] ?? 0 ) );
 
 // Second resolve: stored and still valid, so no HTTP call is queued.
 $GLOBALS['__http_queue'] = array();
@@ -1722,13 +1725,15 @@ check( 'changed details invalidate the stored id', null === chip_affiliatewp_get
 // A deleted account is never reused even when the fingerprint matches.
 $GLOBALS['__user_meta'][7]['payment_account_number'] = '1234567890';
 chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
-$GLOBALS['__user_meta'][7]['chip_bank_account']['deleted_at'] = '2026-01-01T00:00:00Z';
+$_m = chip_affiliatewp_current_mode();
+$GLOBALS['__user_meta'][7]['chip_bank_account'][ $_m ]['deleted_at'] = '2026-01-01T00:00:00Z';
 check( 'deleted account is not reused', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
 
 // A rejected account is not reused either.
 $GLOBALS['__user_meta'][7]['chip_bank_account'] = array();
 chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
-$GLOBALS['__user_meta'][7]['chip_bank_account']['status'] = 'rejected';
+$_m = chip_affiliatewp_current_mode();
+$GLOBALS['__user_meta'][7]['chip_bank_account'][ $_m ]['status'] = 'rejected';
 check( 'rejected account is not reused', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ) ) );
 
 // Details are sanitized: separators do not defeat the fingerprint.
@@ -3939,6 +3944,72 @@ chip_affiliatewp_handle_convert_balance();
 
 $conv_notices = get_transient( 'chip_affiliatewp_notices_' . get_current_user_id() );
 check( 'a successful conversion clears the cached balance', false === get_transient( 'chip_affiliatewp_account_test' ) );
+
+echo "\n== Test 67: a bank account id is never carried across modes ==\n";
+reset_state();
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$reference = chip_affiliatewp_bank_reference( 3 );
+
+// Registered while the site was in test mode: CHIP staging issued id 84.
+$GLOBALS['__options']['chip_test_mode'] = 1;
+chip_affiliatewp_store_bank_account( 3, array( 'id' => 84, 'status' => 'verified', 'reference' => $reference ) );
+
+check( 'the test-mode record is readable in test mode', 84 === (int) ( chip_affiliatewp_get_stored_bank_account( 3, $reference, 'test' )['id'] ?? 0 ) );
+
+// Flipping to live must NOT hand back the staging id.
+check( 'the test-mode id is not reused in live', null === chip_affiliatewp_get_stored_bank_account( 3, $reference, 'live' ) );
+
+// Resolving in live asks CHIP live, and stores the live id separately.
+$GLOBALS['__options']['chip_test_mode']        = 0;
+$GLOBALS['__options']['chip_live_api_key']     = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']  = 'ls';
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 500, 'status' => 'verified', 'reference' => $reference ) ) ) );
+
+$live_account = chip_affiliatewp_get_bank_account( 3 );
+
+check( 'the live lookup returns the live id', 500 === (int) ( $live_account['id'] ?? 0 ) );
+
+// Both modes keep their own record.
+$records = $GLOBALS['__user_meta'][7]['chip_bank_account'];
+check( 'the test record survives', 84 === (int) ( $records['test']['id'] ?? 0 ) );
+check( 'the live record is stored separately', 500 === (int) ( $records['live']['id'] ?? 0 ) );
+
+// Switching back to test still resolves the staging id, not the live one.
+check( 'test mode still resolves its own id', 84 === (int) ( chip_affiliatewp_get_stored_bank_account( 3, $reference, 'test' )['id'] ?? 0 ) );
+check( 'live mode still resolves its own id', 500 === (int) ( chip_affiliatewp_get_stored_bank_account( 3, $reference, 'live' )['id'] ?? 0 ) );
+
+// A record written by an older version (one flat array) is migrated, not lost.
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__options']['chip_test_mode']              = 1;
+$GLOBALS['__options']['chip_test_api_key']           = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']        = 'ts';
+
+$GLOBALS['__user_meta'][7]['chip_bank_account'] = array(
+	'id'          => 4242,
+	'status'      => 'verified',
+	'mode'        => 'test',
+	'reference'   => chip_affiliatewp_bank_reference( 3 ),
+	'fingerprint' => chip_affiliatewp_bank_details_fingerprint( 3 ),
+);
+
+check( 'a legacy flat record still resolves', 4242 === (int) ( chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ), 'test' )['id'] ?? 0 ) );
+
+// Storing again migrates it to the per-mode shape without losing the id.
+chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+
+$migrated = $GLOBALS['__user_meta'][7]['chip_bank_account'];
+check( 'a legacy record migrates to the per-mode shape', 4242 === (int) ( $migrated['test']['id'] ?? 0 ) );
+check( 'the migrated record keeps its mode', 'test' === ( $migrated['test']['mode'] ?? '' ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
