@@ -704,6 +704,27 @@ function affwp_get_payout_meta( $payout_id, $key = '', $single = false ) {
 	return isset( $all[ $key ] ) ? array( $all[ $key ] ) : array();
 }
 
+$GLOBALS['__referral_meta'] = array();
+
+function affwp_get_referral_meta( $referral_id, $key = '', $single = false ) {
+	$all = $GLOBALS['__referral_meta'][ (int) $referral_id ] ?? array();
+
+	if ( '' === $key ) {
+		return $all;
+	}
+
+	if ( $single ) {
+		return $all[ $key ] ?? '';
+	}
+
+	return isset( $all[ $key ] ) ? array( $all[ $key ] ) : array();
+}
+
+function affwp_update_referral_meta( $referral_id, $key, $value, $prev_value = '' ) {
+	$GLOBALS['__referral_meta'][ (int) $referral_id ][ $key ] = $value;
+	return true;
+}
+
 function affwp_get_referral( $referral_id ) {
 	return $GLOBALS['__referral_rows'][ (int) $referral_id ] ?? false;
 }
@@ -829,6 +850,7 @@ function reset_state() {
 	$GLOBALS['__probe_response'] = null;
 	$GLOBALS['__batch_recounts']  = array();
 	$GLOBALS['__payout_meta']     = array();
+	$GLOBALS['__referral_meta']   = array();
 
 	$GLOBALS['__options']['chip_payouts']     = 1;
 	$GLOBALS['__options']['chip_test_mode']   = 1;
@@ -936,7 +958,13 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 84, 'status' => 'pending', 'reference' => 'XT-AFF-3-abc' ) );
 $acct = chip_affiliatewp_ensure_bank_account( 3 );
 check( 'created account returned', is_array( $acct ) && 84 === (int) $acct['id'] );
-check( 'create POST includes reference', 2 === count( $GLOBALS['__http_log'] ) && false !== strpos( $GLOBALS['__http_log'][1]['body'], '"reference"' ) );
+$create_body = '';
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], '/send/bank_accounts' ) ) {
+		$create_body = (string) $call['body'];
+	}
+}
+check( 'create POST includes reference', false !== strpos( $create_body, '"reference"' ) );
 
 echo "\n== Test 6: submit payout (batch path) ==\n";
 reset_state();
@@ -957,7 +985,9 @@ $GLOBALS['__referral_rows'][11] = new Fake_Referral( 11, 3, '250.50', 'unpaid', 
 // Bank lookup: none; create 84 verified; instruction created 9001 completed.
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 84, 'status' => 'verified', 'reference' => 'XT' ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 900, 'state' => 'received', 'receipt_url' => 'https://www.chip-in.asia/receipts/send/abc123' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 900, 'state' => 'received', 'receipt_url' => 'https://www.chip-in.asia/receipts/send/abc123' ) );
 $result = chip_affiliatewp_submit_payout( $payout_id );
 check( 'submit succeeded', true === $result );
 $row = affwp_get_payout( $payout_id );
@@ -968,8 +998,14 @@ check( 'receipt stored', 'https://www.chip-in.asia/receipts/send/abc123' === $da
 check( 'payout still processing', 'processing' === $row->status );
 check( 'recheck scheduled', ! empty( $GLOBALS['__as'] ) );
 check( 'referral NOT yet paid', 'unpaid' === $GLOBALS['__referral_rows'][11]->status );
-check( 'amount in payload', false !== strpos( $GLOBALS['__http_log'][2]['body'], '"amount":"250.50"' ) );
-check( 'reference in payload', false !== strpos( $GLOBALS['__http_log'][2]['body'], '"reference":"XT-PO-' . $payout_id . '"' ) );
+$post_body = '';
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], '/send/send_instructions' ) ) {
+		$post_body = (string) $call['body'];
+	}
+}
+check( 'amount in payload', false !== strpos( $post_body, '"amount":"250.50"' ) );
+check( 'reference in payload', false !== strpos( $post_body, '"reference":"XT-PO-' . $payout_id . '"' ) );
 
 echo "\n== Test 7: submit idempotency (already has instruction) ==\n";
 $GLOBALS['__http_log'] = array();
@@ -1153,7 +1189,9 @@ check( 'batch does not submit inline', 0 === count( array_filter( $GLOBALS['__ht
 // Process the scheduled submission for real.
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 84, 'status' => 'verified', 'reference' => 'XT' ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 950, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 950, 'state' => 'received' ) );
 call_user_func( 'chip_affiliatewp_run_scheduled_submission', $payout_id );
 $row = affwp_get_payout( $payout_id );
 check( 'batch payout submitted', 950 === (int) ( chip_affiliatewp_payout_data( $row )['instruction_id'] ?? 0 ) );
@@ -1177,9 +1215,11 @@ $GLOBALS['__referral_rows'][71] = new Fake_Referral( 71, 3, '45.00', 'unpaid', $
 // Bank account exists.
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
 // POST rejects as duplicate...
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 400, 'body' => array( 'message' => 'reference must be unique', 'code' => 400 ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 400, 'body' => array( 'message' => 'reference must be unique', 'code' => 400 ) );
 // ...and the list-by-reference finds the original instruction.
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 888, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 888, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id ) ) ) );
 $result = chip_affiliatewp_submit_payout( $payout_id );
 $row = affwp_get_payout( $payout_id );
 check( 'conflict resolved by adopting existing instruction', true === $result && 888 === (int) ( chip_affiliatewp_payout_data( $row )['instruction_id'] ?? 0 ) );
@@ -1219,7 +1259,9 @@ $GLOBALS['__affiliates_map'][3] = 7;
 $GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
 $GLOBALS['__referral_rows'][91] = new Fake_Referral( 91, 3, '75.25', 'unpaid', 0 );
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 700, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 700, 'state' => 'received' ) );
 $result = chip_affiliatewp_pay_single_referral( 91 );
 check( 'single pay succeeded', true === $result );
 $created = array_filter( $GLOBALS['__payout_rows'], function ( $p ) { return 'processing' === $p->status && 700 === (int) $p->service_id; } );
@@ -1371,7 +1413,9 @@ chip_affiliatewp_update_payout_data(
 );
 
 // CHIP accepts the retried submission this time.
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 8001, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8001, 'state' => 'received' ) );
 
 $submit_result = chip_affiliatewp_submit_payout( $retry_payout );
 $retry_row    = affiliate_wp()->affiliates->payouts->get_item( $retry_payout );
@@ -1427,7 +1471,9 @@ $desc_payout = affiliate_wp()->affiliates->payouts->add(
 	)
 );
 $GLOBALS['__referral_rows'][18] = new Fake_Referral( 18, 3, '1.00', 'unpaid', $desc_payout );
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 8003, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8003, 'state' => 'received' ) );
 
 chip_affiliatewp_submit_payout( $desc_payout );
 $sent = json_decode( $GLOBALS['__http_log'][ count( $GLOBALS['__http_log'] ) - 1 ]['body'], true );
@@ -1877,7 +1923,13 @@ $GLOBALS['__http_queue'] = array();
 $result = chip_affiliatewp_submit_payout( $payout_id );
 check( 'all-revoked payout fails', is_wp_error( $result ) );
 check( 'all-revoked payout sent no instruction', array() === $GLOBALS['__http_queue'] );
-check( 'all-revoked payout made no HTTP call at all', array() === $GLOBALS['__http_log'] );
+$all_revoked_posts = 0;
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] ) {
+		++$all_revoked_posts;
+	}
+}
+check( 'all-revoked payout sends nothing', 0 === $all_revoked_posts );
 check( 'all-revoked payout records the reason', false !== strpos( $result->get_error_message(), 'awaiting payment' ) );
 
 // One of two revoked -> amount is reduced to what is still payable.
@@ -1893,7 +1945,9 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 $GLOBALS['__referral_rows'][60] = new Fake_Referral( 60, 3, '4.00', 'unpaid', $payout_id );
 $GLOBALS['__referral_rows'][61] = new Fake_Referral( 61, 3, '6.00', 'paid', $payout_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9900, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9900, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $payout_id );
 
 $sent_body = null;
@@ -1917,7 +1971,9 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 );
 $GLOBALS['__referral_rows'][70] = new Fake_Referral( 70, 3, '3.00', 'unpaid', $payout_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9901, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9901, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $payout_id );
 check( 'payable payout keeps its full amount', '3.00' === (string) affwp_get_payout( $payout_id )->amount );
 
@@ -2023,7 +2079,9 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 );
 $GLOBALS['__referral_rows'][81] = new Fake_Referral( 81, 3, '5.00', 'unpaid', $payout_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9500, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9500, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $payout_id );
 check( 'MYR store payout proceeds', 9500 === (int) chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] );
 
@@ -2104,11 +2162,19 @@ $result = chip_affiliatewp_submit_payout( $second_id );
 check( 'payout claiming another payout referral fails', is_wp_error( $result ) );
 check( 'payout claiming another payout referral fails on eligibility', false !== strpos( $result->get_error_message(), 'awaiting payment' ) );
 check( 'payout claiming another payout referral sends nothing', array() === $GLOBALS['__http_queue'] );
-check( 'payout claiming another payout referral made no HTTP call', array() === $GLOBALS['__http_log'] );
+$reassigned_posts = 0;
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] ) {
+		++$reassigned_posts;
+	}
+}
+check( 'payout claiming another payout referral sends nothing', 0 === $reassigned_posts );
 
 // The owning payout still pays normally.
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9600, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9600, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $first_id );
 check( 'owning payout still pays', 9600 === (int) chip_affiliatewp_payout_data( affwp_get_payout( $first_id ) )['instruction_id'] );
 
@@ -2162,7 +2228,9 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 );
 $GLOBALS['__referral_rows'][95] = new Fake_Referral( 95, 3, '2.00', 'unpaid', $payout_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 401, 'body' => array( 'message' => 'Unauthorized' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 401, 'body' => array( 'message' => 'Unauthorized' ) );
 chip_affiliatewp_submit_payout( $payout_id );
 
 $stored = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
@@ -2224,7 +2292,9 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 );
 $GLOBALS['__referral_rows'][96] = new Fake_Referral( 96, 3, '2.00', 'unpaid', $payout_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 422, 'body' => array( 'message' => 'Unprocessable' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 422, 'body' => array( 'message' => 'Unprocessable' ) );
 chip_affiliatewp_submit_payout( $payout_id );
 
 $row = affwp_get_payout( $payout_id );
@@ -2249,7 +2319,9 @@ $ok_id = affiliate_wp()->affiliates->payouts->add(
 );
 $GLOBALS['__referral_rows'][97] = new Fake_Referral( 97, 3, '2.00', 'unpaid', $ok_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $ok_id );
 check( 'successful payout description stays JSON-free', null === json_decode( (string) affwp_get_payout( $ok_id )->description, true ) );
 check( 'successful payout state is in meta', 9700 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $ok_id ) )['instruction_id'] ?? 0 ) );
@@ -2413,7 +2485,9 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 );
 $GLOBALS['__referral_rows'][99] = new Fake_Referral( 99, 3, '2.00', 'unpaid', $payout_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 401, 'body' => array( 'message' => 'Unauthorized' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 401, 'body' => array( 'message' => 'Unauthorized' ) );
 chip_affiliatewp_submit_payout( $payout_id );
 
 $shown = (string) affwp_get_payout( $payout_id )->description;
@@ -2439,7 +2513,9 @@ $transient_id = affiliate_wp()->affiliates->payouts->add(
 );
 $GLOBALS['__referral_rows'][100] = new Fake_Referral( 100, 3, '2.00', 'unpaid', $transient_id );
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 503, 'body' => array( 'message' => 'Server error' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 503, 'body' => array( 'message' => 'Server error' ) );
 chip_affiliatewp_submit_payout( $transient_id );
 
 $transient_shown = (string) affwp_get_payout( $transient_id )->description;
@@ -2752,7 +2828,9 @@ $GLOBALS['__referral_rows'][120] = new Fake_Referral( 120, 3, '5.00', 'unpaid', 
 
 // Submit: CHIP accepts, the payout is in flight with a stored instruction ID.
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9100, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9100, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $payout_id );
 
 check( 'submitted payout stores the instruction id', 9100 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] ?? 0 ) );
@@ -2774,7 +2852,9 @@ check( 'rejected payout clears the row instruction id', 0 === (int) affwp_get_pa
 
 // A retry now creates a FRESH instruction instead of adopting the dead one.
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9200, 'state' => 'received' ) );
+// The submit path checks whether the reference already exists first.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9200, 'state' => 'received' ) );
 $retry = chip_affiliatewp_submit_payout( $payout_id );
 
 check( 'retry submits again', true === $retry );
@@ -2806,6 +2886,425 @@ chip_affiliatewp_fail_payout( $inflight, 'Bank account is not verified yet.', 'c
 
 $kept = chip_affiliatewp_payout_data( affwp_get_payout( $inflight ) );
 check( 'an unverified bank account keeps the instruction id', 9300 === (int) ( $kept['instruction_id'] ?? 0 ) );
+
+echo "\n== Test 55: the reference is the idempotency key ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// Reference shape: stable within an attempt, distinct across attempts.
+check( 'attempt 1 keeps the bare reference', 'XT-PO-9' === chip_affiliatewp_instruction_reference( 9, 1 ) );
+check( 'attempt 2 gets its own reference', 'XT-PO-9-2' === chip_affiliatewp_instruction_reference( 9, 2 ) );
+check( 'attempt 3 gets its own reference', 'XT-PO-9-3' === chip_affiliatewp_instruction_reference( 9, 3 ) );
+check( 'attempt 1 is the default', chip_affiliatewp_instruction_reference( 9 ) === chip_affiliatewp_instruction_reference( 9, 1 ) );
+check( 'a missing attempt reads as 1', 1 === chip_affiliatewp_payout_attempt( array() ) );
+
+// A live instruction found before sending is adopted, not sent again. This is
+// the timeout case: we never saw the first response.
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 130 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][130] = new Fake_Referral( 130, 3, '7.00', 'unpaid', $payout_id );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5001, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id ) ) ) );
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = 0;
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], 'send_instructions' ) ) {
+		++$posts;
+	}
+}
+check( 'an existing live instruction is adopted', true === $result );
+check( 'adopting sends no second instruction', 0 === $posts );
+check( 'adopted instruction id is stored', 5001 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] ?? 0 ) );
+
+// A completed instruction found before sending is adopted AND applied: the
+// webhook for it was delivered long ago and will not come again.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$done_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 131 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][131] = new Fake_Referral( 131, 3, '7.00', 'unpaid', $done_id );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5002, 'state' => 'completed', 'reference' => 'XT-PO-' . $done_id, 'receipt_url' => 'https://www.chip-in.asia/receipts/send/done' ) ) ) );
+chip_affiliatewp_submit_payout( $done_id );
+
+check( 'an adopted completed instruction pays the payout', 'paid' === affwp_get_payout( $done_id )->status );
+check( 'an adopted completed instruction pays the referral', 'paid' === $GLOBALS['__referral_rows'][131]->status );
+
+// A DEAD instruction under the current reference must not be adopted: the
+// submission advances to a fresh attempt instead.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$dead_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 132 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][132] = new Fake_Referral( 132, 3, '7.00', 'unpaid', $dead_id );
+
+// The reference CHIP holds is dead; a fresh attempt must be used.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5003, 'state' => 'rejected', 'reference' => 'XT-PO-' . $dead_id ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 5100, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $dead_id );
+
+$sent_ref = '';
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], 'send_instructions' ) ) {
+		$sent_ref = (string) $call['body'];
+	}
+}
+check( 'a dead instruction is not adopted', 5100 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $dead_id ) )['instruction_id'] ?? 0 ) );
+check( 'the retry uses a fresh reference', false !== strpos( $sent_ref, '-PO-' . $dead_id . '-2' ) );
+check( 'the retry is not stuck on the dead instruction', 5003 !== (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $dead_id ) )['instruction_id'] ?? 0 ) );
+
+echo "\n== Test 56: a webhook rejection advances the attempt ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 140 ),
+		'amount'        => '9.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][140] = new Fake_Referral( 140, 3, '9.00', 'unpaid', $payout_id );
+
+// Submit successfully: attempt 1, reference XT-PO-<id>.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 6001, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'first attempt records attempt 1', 1 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['attempt'] ?? 0 ) );
+
+// The webhook then reports the instruction was REJECTED.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array( 'id' => 6001, 'state' => 'rejected', 'rejection_reason' => 'Invalid account number' )
+);
+
+$after = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'rejection fails the payout', 'failed' === affwp_get_payout( $payout_id )->status );
+check( 'rejection forgets the dead instruction', empty( $after['instruction_id'] ) );
+check( 'rejection advances the attempt', 2 === (int) ( $after['attempt'] ?? 0 ) );
+
+// The retry must therefore use attempt 2's reference, which CHIP has never seen.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 6002, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+
+$sent = '';
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], 'send_instructions' ) ) {
+		$sent = (string) $call['body'];
+	}
+}
+check( 'retry after rejection uses the next reference', false !== strpos( $sent, '-PO-' . $payout_id . '-2' ) );
+check( 'retry after rejection stores the new instruction', 6002 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] ?? 0 ) );
+
+// A SECOND rejection advances again, so a payout is never stuck on one attempt.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array( 'id' => 6002, 'state' => 'rejected', 'rejection_reason' => 'Still invalid' )
+);
+check( 'second rejection advances to attempt 3', 3 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['attempt'] ?? 0 ) );
+check( 'attempt 3 has its own reference', 'XT-PO-' . $payout_id . '-3' === chip_affiliatewp_instruction_reference( $payout_id, 3 ) );
+
+// A DELETED instruction behaves the same way.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$del_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 141 ),
+		'amount'        => '9.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][141] = new Fake_Referral( 141, 3, '9.00', 'unpaid', $del_id );
+
+chip_affiliatewp_update_payout_data( $del_id, array( 'instruction_id' => 6100, 'attempt' => 1, 'state' => 'executing' ) );
+chip_affiliatewp_apply_instruction( $del_id, array( 'id' => 6100, 'state' => 'deleted' ) );
+
+$del_data = chip_affiliatewp_payout_data( affwp_get_payout( $del_id ) );
+check( 'deletion forgets the dead instruction', empty( $del_data['instruction_id'] ) );
+check( 'deletion advances the attempt', 2 === (int) ( $del_data['attempt'] ?? 0 ) );
+
+// An unverified bank account must NOT advance: its instruction is still live.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$keep_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 142 ),
+		'amount'        => '9.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][142] = new Fake_Referral( 142, 3, '9.00', 'unpaid', $keep_id );
+
+chip_affiliatewp_update_payout_data( $keep_id, array( 'instruction_id' => 6200, 'attempt' => 1, 'state' => 'executing' ) );
+chip_affiliatewp_fail_payout( $keep_id, 'Bank account is not verified yet.', 'chip_bank_account_unverified' );
+
+$keep_data = chip_affiliatewp_payout_data( affwp_get_payout( $keep_id ) );
+check( 'an unverified account keeps its instruction', 6200 === (int) ( $keep_data['instruction_id'] ?? 0 ) );
+check( 'an unverified account keeps its attempt', 1 === (int) ( $keep_data['attempt'] ?? 0 ) );
+
+echo "\n== Test 57: the single-referral path also respects the reference ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// No instruction exists yet: the referral is submitted normally.
+$GLOBALS['__referral_rows'][200] = new Fake_Referral( 200, 3, '4.00', 'unpaid', 0 );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 7001, 'state' => 'received' ) );
+chip_affiliatewp_pay_single_referral( 200 );
+
+$created = array_values( array_filter( $GLOBALS['__payout_rows'], function ( $p ) { return 7001 === (int) $p->service_id; } ) );
+check( 'single referral creates a payout', 1 === count( $created ) );
+
+// A LIVE instruction already exists for this referral: adopt, do not re-send.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$GLOBALS['__referral_rows'][201] = new Fake_Referral( 201, 3, '4.00', 'unpaid', 0 );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 7100, 'state' => 'executing', 'reference' => 'XT-R-201' ) ) ) );
+chip_affiliatewp_pay_single_referral( 201 );
+
+$posts = 0;
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], 'send_instructions' ) ) {
+		++$posts;
+	}
+}
+check( 'single referral adopts a live instruction', 0 === $posts );
+
+$adopted = array_values( array_filter( $GLOBALS['__payout_rows'], function ( $p ) { return 7100 === (int) $p->service_id; } ) );
+check( 'adoption creates the payout row', 1 === count( $adopted ) );
+
+// A DEAD instruction must not be adopted: a fresh reference is used instead.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$GLOBALS['__referral_rows'][202] = new Fake_Referral( 202, 3, '4.00', 'unpaid', 0 );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 7200, 'state' => 'rejected', 'reference' => 'XT-R-202' ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 7300, 'state' => 'received' ) );
+chip_affiliatewp_pay_single_referral( 202 );
+
+$sent = '';
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], 'send_instructions' ) ) {
+		$sent = (string) $call['body'];
+	}
+}
+check( 'a dead referral instruction is not adopted', false !== strpos( $sent, 'XT-R-202-2' ) );
+
+$fresh = array_values( array_filter( $GLOBALS['__payout_rows'], function ( $p ) { return 7300 === (int) $p->service_id; } ) );
+check( 'the retry creates a new payout for the new instruction', 1 === count( $fresh ) );
+
+echo "\n== Test 58: a race between the lookup and the POST is still safe ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 210 ),
+		'amount'        => '6.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][210] = new Fake_Referral( 210, 3, '6.00', 'unpaid', $payout_id );
+
+/*
+ * The lookup finds nothing (so we POST), but by the time the POST lands the
+ * instruction exists — another worker, or a webhook that created it. CHIP
+ * refuses with a duplicate-reference error and the follow-up lookup finds a
+ * LIVE instruction. That must be adopted, not re-sent.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 422, 'body' => array( 'message' => array( 'Reference already exists' ), 'code' => 422 ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 8001, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id ) ) ) );
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = 0;
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'POST' === $call['method'] && false !== strpos( $call['url'], 'send_instructions' ) ) {
+		++$posts;
+	}
+}
+check( 'a raced duplicate is resolved', true === $result );
+check( 'a raced duplicate sends only one instruction', 1 === $posts );
+check( 'a raced duplicate adopts the live instruction', 8001 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] ?? 0 ) );
+
+// Same race, but the instruction found is DEAD: do not adopt it, and do not
+// claim success — the payout must fail so the next attempt uses a new reference.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$dead_race = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 211 ),
+		'amount'        => '6.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][211] = new Fake_Referral( 211, 3, '6.00', 'unpaid', $dead_race );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 422, 'body' => array( 'message' => array( 'Reference already exists' ), 'code' => 422 ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 8100, 'state' => 'rejected', 'reference' => 'XT-PO-' . $dead_race ) ) ) );
+
+chip_affiliatewp_submit_payout( $dead_race );
+
+$dead_data = chip_affiliatewp_payout_data( affwp_get_payout( $dead_race ) );
+check( 'a raced dead instruction is not adopted', 8100 !== (int) ( $dead_data['instruction_id'] ?? 0 ) );
+check( 'a raced dead instruction fails the payout', 'failed' === affwp_get_payout( $dead_race )->status );
+// The batch path tracks the attempt on the payout row; the referral path uses
+// a burnt-reference list because no payout row exists yet.
+check( 'a raced dead instruction advances the payout attempt', 2 === (int) ( $dead_data['attempt'] ?? 0 ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

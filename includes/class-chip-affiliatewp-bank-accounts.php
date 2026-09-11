@@ -82,13 +82,54 @@ function chip_affiliatewp_bank_reference( $affiliate_id ) {
 }
 
 /**
- * Returns a stable send instruction reference for a payout.
+ * Returns the send instruction reference for a payout attempt.
+ *
+ * CHIP treats the reference as the idempotency key: it is stored permanently
+ * and a repeated value is refused with `422 Reference already exists`. That
+ * gives the reference two jobs that pull in opposite directions, so it carries
+ * an attempt number.
+ *
+ * - Within one attempt the value is stable, which is what makes a retry after
+ *   an unclear response (a timeout where CHIP may or may not have accepted the
+ *   instruction) safe: the repeat is refused, the existing instruction is
+ *   adopted, and no second payment is created.
+ * - Once CHIP has definitively refused an instruction, the next attempt needs a
+ *   NEW reference. Reusing the old one would be refused too, and adoption would
+ *   find the dead instruction and park the payout on it forever — the retry
+ *   would look successful while nothing moved.
+ *
+ * The first attempt keeps the bare `{prefix}-PO-{id}` form so references
+ * written by earlier versions still resolve.
  *
  * @param int $payout_id Payout ID.
+ * @param int $attempt   Attempt number, 1-based.
  * @return string
  */
-function chip_affiliatewp_instruction_reference( $payout_id ) {
-	return substr( chip_affiliatewp_reference_prefix() . '-PO-' . $payout_id, 0, 40 );
+function chip_affiliatewp_instruction_reference( $payout_id, $attempt = 1 ) {
+	$payout_id = absint( $payout_id );
+	$attempt   = max( 1, absint( $attempt ) );
+	$base      = chip_affiliatewp_reference_prefix() . '-PO-' . $payout_id;
+
+	if ( $attempt > 1 ) {
+		$base .= '-' . $attempt;
+	}
+
+	return substr( $base, 0, 40 );
+}
+
+/**
+ * Returns the attempt number for a payout's next submission.
+ *
+ * Stored in payout meta and incremented only when an attempt ends with CHIP
+ * definitively refusing the instruction.
+ *
+ * @param array $data Payout meta.
+ * @return int Attempt number, 1-based.
+ */
+function chip_affiliatewp_payout_attempt( $data ) {
+	$attempt = isset( $data['attempt'] ) ? absint( $data['attempt'] ) : 1;
+
+	return max( 1, $attempt );
 }
 
 /**
