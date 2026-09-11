@@ -63,6 +63,15 @@ function chip_affiliatewp_update_payout_data( $payout_id, $data ) {
 	affwp_update_payout_meta( $payout_id, 'chip_payout_data', $data );
 
 	/*
+	 * The review list is cached. A state written here decides whether this
+	 * payout belongs on that list, so drop the cache rather than let the panel
+	 * keep showing a payout as under review after it has completed.
+	 */
+	if ( function_exists( 'chip_affiliatewp_flush_review_list_cache' ) ) {
+		chip_affiliatewp_flush_review_list_cache();
+	}
+
+	/*
 	 * A failed payout's description is shown verbatim as the error message, so
 	 * keep a human-readable reason there and nothing else. On any other status
 	 * the description is a notes field, so leave it untouched.

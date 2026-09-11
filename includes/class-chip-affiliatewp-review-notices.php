@@ -46,8 +46,10 @@ function chip_affiliatewp_state_needs_review( $state ) {
 /**
  * Returns payouts whose instruction is parked in a review state.
  *
- * Bounded like the sweep, newest first: a store with a long history should
- * never turn a settings page load into an unbounded query.
+ * Most processing payouts are ordinary in-flight rows, so the query reads wider
+ * than the number asked for. The read window is bounded independently of the
+ * requested count — a store with a long history should never turn a settings
+ * page load or an hourly job into an unbounded scan.
  *
  * @param int $limit Maximum payouts to return.
  * @return array[] Each entry: payout_id, affiliate_id, amount, state, since.
@@ -58,17 +60,41 @@ function chip_affiliatewp_payouts_awaiting_review( $limit = 20 ) {
 	}
 
 	/**
-	 * Filters how many review-state payouts are listed on the panel.
+	 * Filters how many review-state payouts are returned.
 	 *
 	 * @param int $limit Maximum payouts.
 	 */
 	$limit = max( 1, absint( apply_filters( 'chip_affiliatewp_review_list_limit', $limit ) ) );
 
+	/*
+	 * Reading a payout's state means a meta lookup per row, and the settings
+	 * panel is opened often enough that doing that on every load is wasteful.
+	 * The list only changes when an instruction changes state, and every such
+	 * change bumps the version below, so the TTL is a safety net rather than
+	 * the mechanism.
+	 *
+	 * The key carries a version because callers ask for different counts; a
+	 * flush that deleted one literal key would leave every other size stale.
+	 */
+	$cache_key = 'chip_affiliatewp_review_list_' . chip_affiliatewp_review_cache_version() . '_' . $limit;
+	$cached    = get_transient( $cache_key );
+
+	if ( is_array( $cached ) ) {
+		return $cached;
+	}
+
+	/**
+	 * Filters how many processing payouts are read to find review-state ones.
+	 *
+	 * @param int $window Rows to read.
+	 */
+	$window = max( $limit, absint( apply_filters( 'chip_affiliatewp_review_scan_window', 200 ) ) );
+
 	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
 		array(
 			'payout_method' => 'chip',
 			'status'        => 'processing',
-			'number'        => $limit * 3, // Read wider: most are ordinary in-flight rows.
+			'number'        => $window,
 			'orderby'       => 'date',
 			'order'         => 'DESC',
 		)
@@ -100,7 +126,40 @@ function chip_affiliatewp_payouts_awaiting_review( $limit = 20 ) {
 		);
 	}
 
+	// A short TTL only; every instruction-state change clears this directly.
+	set_transient( $cache_key, $found, 5 * MINUTE_IN_SECONDS );
+
 	return $found;
+}
+
+/**
+ * Returns the current review-cache version.
+ *
+ * The list is cached per requested size. Bumping a single option invalidates
+ * every size at once, which is simpler and safer than trying to delete each
+ * literal key: a key that is not deleted keeps serving a stale list.
+ *
+ * @return int
+ */
+function chip_affiliatewp_review_cache_version() {
+	return max( 1, absint( get_option( 'chip_affiliatewp_review_cache_version', 1 ) ) );
+}
+
+/**
+ * Invalidates the cached review list.
+ *
+ * Called whenever an instruction's state is recorded, so the panel reflects a
+ * payout leaving (or entering) review immediately rather than after the TTL.
+ *
+ * @return void
+ */
+function chip_affiliatewp_flush_review_list_cache() {
+	update_option( 'chip_affiliatewp_review_cache_version', chip_affiliatewp_review_cache_version() + 1, false );
+
+	/**
+	 * Fires after the review list cache is invalidated.
+	 */
+	do_action( 'chip_affiliatewp_flush_review_list_cache' );
 }
 
 /**
@@ -109,12 +168,24 @@ function chip_affiliatewp_payouts_awaiting_review( $limit = 20 ) {
  * Runs on the hourly sweep. One email per payout, remembered in payout meta, so
  * a payout that stays parked does not mail the merchant every hour.
  *
+ * Payouts already notified are skipped while COLLECTING rather than while
+ * sending: the listing is bounded and newest-first, so filtering afterwards
+ * would let a long queue keep re-reading the same recent rows and never reach
+ * the older ones still waiting for their first notice.
+ *
  * @return int Number of emails sent.
  */
 function chip_affiliatewp_notify_review_payouts() {
-	$sent = 0;
+	/**
+	 * Filters how many review notices one sweep may send.
+	 *
+	 * @param int $limit Maximum emails per run.
+	 */
+	$limit = max( 1, absint( apply_filters( 'chip_affiliatewp_review_notify_limit', 20 ) ) );
 
-	foreach ( chip_affiliatewp_payouts_awaiting_review( 20 ) as $row ) {
+	$pending = array();
+
+	foreach ( chip_affiliatewp_payouts_awaiting_review( 200 ) as $row ) {
 		$payout = affwp_get_payout( $row['payout_id'] );
 
 		if ( ! $payout ) {
@@ -126,6 +197,23 @@ function chip_affiliatewp_notify_review_payouts() {
 		if ( ! empty( $data['review_notified'] ) ) {
 			continue;
 		}
+
+		$pending[] = array(
+			'payout' => $payout,
+			'data'   => $data,
+			'row'    => $row,
+		);
+
+		if ( count( $pending ) >= $limit ) {
+			break;
+		}
+	}
+
+	$sent = 0;
+
+	foreach ( $pending as $item ) {
+		$payout = $item['payout'];
+		$data   = $item['data'];
 
 		/**
 		 * Filters whether the review notice is emailed to the merchant.
@@ -143,6 +231,7 @@ function chip_affiliatewp_notify_review_payouts() {
 			continue;
 		}
 
+		$payout_id      = absint( $payout->payout_id ?? $payout->ID ?? 0 );
 		$instruction_id = (int) ( $data['instruction_id'] ?? 0 );
 
 		$subject = sprintf(
@@ -157,7 +246,7 @@ function chip_affiliatewp_notify_review_payouts() {
 				"A CHIP Send payout is waiting on manual review at CHIP.\n\nPayout: #%1\$d\nAmount: %2\$s\nCHIP Send instruction: %3\$d\n\nCHIP Send reports this instruction as \"reviewing\", which means it needs attention from your CHIP account manager before it can complete. It will not move on its own, and the affiliate has not been paid yet.\n\nPlease contact your CHIP account manager and quote the instruction ID above.\n\nYour payouts: %4\$s",
 				'chip-for-affiliatewp'
 			),
-			absint( $payout->payout_id ?? $payout->ID ?? 0 ),
+			$payout_id,
 			chip_affiliatewp_format_money( $payout->amount ),
 			$instruction_id,
 			admin_url( 'admin.php?page=affiliate-wp-payouts' )
@@ -168,7 +257,7 @@ function chip_affiliatewp_notify_review_payouts() {
 		if ( $sent_ok ) {
 			$data['review_notified'] = gmdate( 'Y-m-d H:i:s' );
 
-			chip_affiliatewp_update_payout_data( absint( $payout->payout_id ?? $payout->ID ?? 0 ), $data );
+			chip_affiliatewp_update_payout_data( $payout_id, $data );
 
 			++$sent;
 		}

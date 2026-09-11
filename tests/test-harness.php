@@ -466,6 +466,7 @@ $GLOBALS['__referral_rows'] = array();
 
 class Fake_Payouts_DB {
 	public function get_payouts( $args, $count = false ) {
+		$GLOBALS['__payouts_query_count'] = ( $GLOBALS['__payouts_query_count'] ?? 0 ) + 1;
 		$rows = array_values(
 			array_filter(
 				$GLOBALS['__payout_rows'],
@@ -3419,6 +3420,126 @@ $GLOBALS['__options_store']['admin_email'] = 'not-an-email';
 $GLOBALS['__mail'] = array();
 check( 'an invalid merchant address sends nothing', 0 === chip_affiliatewp_notify_review_payouts() );
 check( 'an invalid merchant address makes no mail call', array() === $GLOBALS['__mail'] );
+
+echo "\n== Test 60: a long review queue does not starve the oldest payouts ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options_store']['admin_email']     = 'merchant@test.dev';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+// 30 payouts all parked under review — more than one run may notify.
+$review_ids = array();
+
+for ( $i = 0; $i < 30; $i++ ) {
+	$pid = affiliate_wp()->affiliates->payouts->add(
+		array(
+			'affiliate_id'  => 3,
+			'referrals'     => array( 400 + $i ),
+			'amount'        => '1.00',
+			'payout_method' => 'chip',
+			'status'        => 'processing',
+		)
+	);
+	$GLOBALS['__referral_rows'][ 400 + $i ] = new Fake_Referral( 400 + $i, 3, '1.00', 'unpaid', $pid );
+
+	chip_affiliatewp_update_payout_data( $pid, array( 'instruction_id' => 9500 + $i, 'state' => 'reviewing' ) );
+
+	$review_ids[] = $pid;
+}
+
+check( 'all 30 are listed as under review', 30 === count( chip_affiliatewp_payouts_awaiting_review( 200 ) ) );
+
+// Run 1 notifies the first batch.
+$GLOBALS['__mail'] = array();
+$first = chip_affiliatewp_notify_review_payouts();
+
+check( 'the first run notifies a bounded batch', 20 === $first );
+check( 'the first run sends one email each', 20 === count( $GLOBALS['__mail'] ) );
+
+// Run 2 must reach the ones that have NOT been notified yet.
+$GLOBALS['__mail'] = array();
+$second = chip_affiliatewp_notify_review_payouts();
+
+check( 'the next run reaches the remaining payouts', 10 === $second );
+check( 'the next run does not repeat the first batch', 10 === count( $GLOBALS['__mail'] ) );
+
+// Every payout got exactly one notice.
+$notified = 0;
+
+foreach ( $review_ids as $pid ) {
+	if ( ! empty( chip_affiliatewp_payout_data( affwp_get_payout( $pid ) )['review_notified'] ) ) {
+		++$notified;
+	}
+}
+
+check( 'every payout ends up notified exactly once', 30 === $notified );
+
+// A third run has nothing left to do.
+$GLOBALS['__mail'] = array();
+check( 'a settled queue sends nothing more', 0 === chip_affiliatewp_notify_review_payouts() );
+
+echo "\n== Test 61: the review list is cached and invalidated on state change ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$cached_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 500 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][500] = new Fake_Referral( 500, 3, '2.00', 'unpaid', $cached_id );
+
+chip_affiliatewp_update_payout_data( $cached_id, array( 'instruction_id' => 9600, 'state' => 'reviewing' ) );
+
+check( 'the reviewing payout is listed', 1 === count( chip_affiliatewp_payouts_awaiting_review() ) );
+
+// The list is cached: reading it again does not re-query the payout table.
+$queries_before = $GLOBALS['__payouts_query_count'] ?? 0;
+chip_affiliatewp_payouts_awaiting_review();
+chip_affiliatewp_payouts_awaiting_review();
+$queries_after = $GLOBALS['__payouts_query_count'] ?? 0;
+
+check( 'repeat reads do not re-query payouts', $queries_before === $queries_after );
+
+// When the instruction completes, the cache must drop so the payout leaves the list.
+chip_affiliatewp_apply_instruction( $cached_id, array( 'id' => 9600, 'state' => 'completed' ) );
+
+check( 'a completed payout leaves the review list', 0 === count( chip_affiliatewp_payouts_awaiting_review() ) );
+check( 'the completed payout is paid', 'paid' === affwp_get_payout( $cached_id )->status );
+
+// A NEW reviewing payout appears immediately, without waiting for the TTL.
+$fresh_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 501 ),
+		'amount'        => '3.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][501] = new Fake_Referral( 501, 3, '3.00', 'unpaid', $fresh_id );
+
+chip_affiliatewp_update_payout_data( $fresh_id, array( 'instruction_id' => 9601, 'state' => 'reviewing' ) );
+
+check( 'a new reviewing payout appears at once', 1 === count( chip_affiliatewp_payouts_awaiting_review() ) );
+check( 'the new listing is the new payout', $fresh_id === (int) chip_affiliatewp_payouts_awaiting_review()[0]['payout_id'] );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
