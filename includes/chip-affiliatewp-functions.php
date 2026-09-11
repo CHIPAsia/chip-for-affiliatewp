@@ -43,6 +43,34 @@ function chip_affiliatewp_format_money( $amount, $currency = 'MYR' ) {
 }
 
 /**
+ * Extracts the HTTP status carried by a WP_Error from the API client.
+ *
+ * Returns null when the error did not come from an HTTP response (a transport
+ * failure, or a locally raised error), so callers can tell "the API answered
+ * with 4xx/5xx" apart from "we never reached the API".
+ *
+ * @param mixed $error WP_Error instance.
+ * @return int|null
+ */
+function chip_affiliatewp_error_http_status( $error ) {
+	if ( ! is_wp_error( $error ) || ! method_exists( $error, 'get_error_data' ) ) {
+		return null;
+	}
+
+	$data = $error->get_error_data();
+
+	if ( is_array( $data ) && isset( $data['status'] ) && is_numeric( $data['status'] ) ) {
+		return (int) $data['status'];
+	}
+
+	if ( is_numeric( $data ) ) {
+		return (int) $data;
+	}
+
+	return null;
+}
+
+/**
  * Returns the store's configured currency code, upper-cased.
  *
  * Reads AffiliateWP's setting rather than assuming, because the plugin has to

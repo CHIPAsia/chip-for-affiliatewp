@@ -162,7 +162,12 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	$bank_account = chip_affiliatewp_ensure_bank_account( $payout->affiliate_id );
 
 	if ( is_wp_error( $bank_account ) ) {
-		return chip_affiliatewp_fail_payout( $payout_id, $bank_account->get_error_message(), $bank_account->get_error_code() );
+		return chip_affiliatewp_fail_payout(
+			$payout_id,
+			$bank_account->get_error_message(),
+			$bank_account->get_error_code(),
+			chip_affiliatewp_error_http_status( $bank_account )
+		);
 	}
 
 	if ( empty( $bank_account['status'] ) || 'verified' !== $bank_account['status'] ) {
@@ -287,7 +292,12 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$response = $existing;
 		} else {
-			return chip_affiliatewp_fail_payout( $payout_id, $response->get_error_message(), $response->get_error_code() );
+			return chip_affiliatewp_fail_payout(
+				$payout_id,
+				$response->get_error_message(),
+				$response->get_error_code(),
+				chip_affiliatewp_error_http_status( $response )
+			);
 		}
 	}
 
@@ -384,12 +394,16 @@ function chip_affiliatewp_recount_batch_for_payout( $payout_id ) {
  *                           failure classification. Default empty string.
  * @return WP_Error
  */
-function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '' ) {
+function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $http_status = null ) {
 	$payout = affwp_get_payout( $payout_id );
 
 	$data                 = $payout ? chip_affiliatewp_payout_data( $payout ) : array();
 	$data['error']        = $reason;
 	$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
+
+	if ( null !== $http_status ) {
+		$data['error_status'] = (int) $http_status;
+	}
 
 	if ( $payout ) {
 		$update = array(
@@ -404,7 +418,7 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '' ) {
 		 * told what to fix.
 		 */
 		if ( function_exists( 'chip_affiliatewp_classify_failure' ) ) {
-			$update['failure_class'] = chip_affiliatewp_classify_failure( $error_code, $reason );
+			$update['failure_class'] = chip_affiliatewp_classify_failure( $error_code, $reason, $http_status );
 		}
 
 		affiliate_wp()->affiliates->payouts->update(

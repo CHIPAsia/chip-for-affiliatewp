@@ -2027,6 +2027,64 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code'
 chip_affiliatewp_submit_payout( $first_id );
 check( 'owning payout still pays', 9600 === (int) chip_affiliatewp_payout_data( affwp_get_payout( $first_id ) )['instruction_id'] );
 
+echo "\n== Test 43: failure classification uses the HTTP status ==\n";
+
+// A 4xx is a settled answer: retrying unchanged wastes attempts.
+foreach ( array( 400, 401, 403, 404, 422 ) as $status ) {
+	$class = chip_affiliatewp_classify_failure( 'chip_api_error', 'CHIP Send API error (HTTP ' . $status . '): request failed', $status );
+	check( "HTTP {$status} is not retried blindly", 'transient' !== $class );
+}
+
+// A 5xx is worth retrying.
+foreach ( array( 500, 502, 503, 504 ) as $status ) {
+	$class = chip_affiliatewp_classify_failure( 'chip_api_error', 'CHIP Send API error (HTTP ' . $status . '): server error', $status );
+	check( "HTTP {$status} is transient", 'transient' === $class );
+}
+
+// 429 clears on its own.
+check( 'HTTP 429 is transient', 'transient' === chip_affiliatewp_classify_failure( 'chip_api_error', 'rate limited', 429 ) );
+
+// A transport failure has no status but is still worth retrying.
+check( 'timeout without a status is transient', 'transient' === chip_affiliatewp_classify_failure( 'chip_api_error', 'cURL error 28: Operation timed out' ) );
+check( 'connection failure without a status is transient', 'transient' === chip_affiliatewp_classify_failure( 'chip_api_error', 'cURL error 7: connection refused' ) );
+
+// Affiliate-fixable problems are unaffected by the status path.
+check( 'missing bank details need affiliate action', 'affiliate_action_required' === chip_affiliatewp_classify_failure( 'chip_missing_bank_details', 'no details' ) );
+check( 'rejection needs affiliate action', 'affiliate_action_required' === chip_affiliatewp_classify_failure( 'chip_instruction_rejected', 'instruction rejected' ) );
+
+// The status travels with the WP_Error from the API client.
+$err = new WP_Error( 'chip_api_error', 'boom', array( 'status' => 503 ) );
+check( 'http status is read from the error data', 503 === chip_affiliatewp_error_http_status( $err ) );
+check( 'non-HTTP error has no status', null === chip_affiliatewp_error_http_status( new WP_Error( 'chip_transport', 'timed out' ) ) );
+check( 'non-error has no status', null === chip_affiliatewp_error_http_status( 'not-an-error' ) );
+
+// End to end: a 401 leaves the payout failed and marked for the admin.
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 95 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][95] = new Fake_Referral( 95, 3, '2.00', 'unpaid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 401, 'body' => array( 'message' => 'Unauthorized' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+
+$stored = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( '401 fails the payout', 'failed' === affwp_get_payout( $payout_id )->status );
+check( '401 records the HTTP status for diagnosis', 401 === (int) ( $stored['error_status'] ?? 0 ) );
+check( '401 is classified for the admin, not retried blindly', 'admin_action_required' === ( $GLOBALS['__payout_rows'][ $payout_id ]->failure_class ?? '' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

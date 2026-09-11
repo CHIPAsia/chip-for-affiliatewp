@@ -17,15 +17,38 @@ if ( ! defined( 'ABSPATH' ) ) {
 } // Cannot access directly.
 
 /**
- * Classifies a CHIP Send payout failure into an AffiliateWP failure class.
+ * Classifies a payout failure for AffiliateWP's retry machinery.
  *
- * @param string $error_code    WP_Error code or provider error code.
- * @param string $error_message Human-readable error message.
- * @return string One of the AffiliateWP failure-class constants.
+ * @param string   $error_code Plugin error code.
+ * @param string   $error_message Human-readable failure reason.
+ * @param int|null $http_status  HTTP status from the API response, when known.
+ * @return string Failure class.
  */
-function chip_affiliatewp_classify_failure( $error_code, $error_message = '' ) {
+function chip_affiliatewp_classify_failure( $error_code, $error_message = '', $http_status = null ) {
 	$code    = strtolower( (string) $error_code );
 	$message = strtolower( (string) $error_message );
+	$status  = is_numeric( $http_status ) ? (int) $http_status : 0;
+
+	/*
+	 * The HTTP status is the reliable signal for an API failure, so it is
+	 * checked before anything derived from message text. A 4xx is a settled
+	 * answer — bad credentials, a rejected payload, a missing resource — and
+	 * retrying it unchanged just burns attempts. A 5xx or a transport timeout
+	 * is worth retrying.
+	 */
+	if ( $status >= 500 ) {
+		return 'transient';
+	}
+
+	if ( $status >= 400 ) {
+		// 429 is the one 4xx that clears on its own.
+		if ( 429 === $status ) {
+			return 'transient';
+		}
+
+		// Credentials, permissions and payload problems are the merchant's to fix.
+		return 'admin_action_required';
+	}
 
 	// Bank details the affiliate (or the admin on their behalf) must supply or fix.
 	$affiliate_codes = array(
@@ -53,15 +76,20 @@ function chip_affiliatewp_classify_failure( $error_code, $error_message = '' ) {
 
 	/*
 	 * CHIP rejections are terminal and usually mean the recipient's bank
-	 * details are wrong, so treat them as needing affiliate action. The
-	 * remaining API failures (timeouts, 5xx, rate limits) are worth retrying
-	 * unchanged, which is what the transient class means.
+	 * details are wrong, so treat them as needing affiliate action. Anything
+	 * left is an API or transport problem with no status attached, which is
+	 * worth retrying unchanged.
 	 */
 	if ( false !== strpos( $message, 'instruction rejected' ) || false !== strpos( $message, 'rejection' ) ) {
 		return 'affiliate_action_required';
 	}
 
-	if ( false !== strpos( $code, 'chip_api_error' ) || false !== strpos( $message, 'http 5' ) || false !== strpos( $message, 'timed out' ) ) {
+	if ( false !== strpos( $code, 'chip_api_error' ) || false !== strpos( $code, 'chip_http' ) ) {
+		return 'transient';
+	}
+
+	// A transport failure never reached the API, so nothing was applied.
+	if ( false !== strpos( $message, 'timed out' ) || false !== strpos( $message, 'could not resolve' ) || false !== strpos( $message, 'connection' ) ) {
 		return 'transient';
 	}
 
