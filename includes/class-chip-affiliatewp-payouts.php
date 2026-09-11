@@ -450,13 +450,26 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 		/*
 		 * State goes to payout meta; the description carries the plain reason,
 		 * because AffiliateWP renders a failed payout's description verbatim as
-		 * the error message in the admin drawer.
+		 * the error message in the admin drawer. A hint naming the screen to fix
+		 * is appended for merchant-side problems, whose raw provider text does
+		 * not say where to act — and CHIP has no dashboard URL the drawer's
+		 * button can open.
 		 */
 		chip_affiliatewp_update_payout_data( $payout_id, $data );
 
+		$message = $reason;
+
+		if ( function_exists( 'chip_affiliatewp_failure_hint' ) ) {
+			$hint = chip_affiliatewp_failure_hint( $error_code, $http_status );
+
+			if ( '' !== $hint ) {
+				$message = trim( $reason . ' ' . $hint );
+			}
+		}
+
 		$update = array(
 			'status'      => 'failed',
-			'description' => $reason,
+			'description' => $message,
 		);
 
 		/*

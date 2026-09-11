@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Regenerate languages/chip-for-affiliatewp.pot and languages/chip-for-affiliatewp-ms_MY.po."""
-import re, os
+import re, os, glob
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')) + '/'
-FILES = [
-    'chip-for-affiliatewp.php', 'uninstall.php',
-    'includes/chip-affiliatewp-functions.php',
-    'includes/class-chip-affiliatewp-api.php',
-    'includes/class-chip-affiliatewp-bank-accounts.php',
-    'includes/class-chip-affiliatewp-payouts.php',
-    'includes/class-chip-affiliatewp-webhooks.php',
-    'includes/class-chip-affiliatewp-admin.php',
-    'includes/chip-affiliatewp-lifecycle.php',
+
+# Every PHP source that can carry a translation, discovered rather than listed:
+# a hand-maintained list silently drops strings when a new file is added.
+FILES = ['chip-for-affiliatewp.php', 'uninstall.php']
+FILES += [
+    os.path.relpath(path, BASE)
+    for path in sorted(glob.glob(os.path.join(BASE, 'includes', '*.php')))
 ]
 
 # (msgid -> ['file:line', ...]) — single-quoted strings only, matching our style.
@@ -122,6 +120,11 @@ TRANSLATIONS = {
     'Add your bank details to get paid': 'Tambah butiran bank anda untuk dibayar',
     'Balance': 'Baki',
     'Amount to convert': 'Jumlah untuk ditukar',
+    'Add your CHIP Send API key and secret under Settings → Payouts → CHIP Send.': 'Tambah kunci API dan rahsia CHIP Send anda di Settings → Payouts → CHIP Send.',
+    'Check the API key and secret under Settings → Payouts → CHIP Send, and confirm the key is still active in your CHIP account.': 'Semak kunci API dan rahsia di Settings → Payouts → CHIP Send, dan pastikan kunci itu masih aktif dalam akaun CHIP anda.',
+    "Check the affiliate's bank account details, and contact CHIP support with this message if they look correct.": 'Semak butiran akaun bank affiliate, dan hubungi sokongan CHIP dengan mesej ini jika butirannya betul.',
+    'Save your credentials under Settings → Payouts → CHIP Send so the webhook can register.': 'Simpan kelayakan anda di Settings → Payouts → CHIP Send supaya webhook boleh didaftarkan.',
+    'Turn CHIP Send back on under Settings → Payouts.': 'Hidupkan semula CHIP Send di Settings → Payouts.',
     'Reset webhook': 'Set semula webhook',
     'You do not have permission to reset the webhook.': 'Anda tiada kebenaran untuk set semula webhook.',
     "Remove this site's CHIP Send webhook and register it again on the next save?": 'Buang webhook CHIP Send laman ini dan daftarkan semula pada simpanan seterusnya?',

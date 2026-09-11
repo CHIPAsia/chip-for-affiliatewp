@@ -2342,6 +2342,74 @@ $gone = chip_affiliatewp_reset_webhooks( 'test' );
 check( 'already-deleted webhook counts as removed', 1 === (int) $gone['deleted'] );
 check( 'already-deleted webhook is not a failure', array() === $gone['failed'] );
 
+echo "\n== Test 48: a failed payout says where to fix it ==\n";
+
+// Core hard-codes Stripe/PayPal dashboard URLs and the next-steps builder has
+// no filter, so CHIP's "Open provider dashboard" button renders without a
+// target and does nothing. The description is the surface we control, so it
+// must name the screen.
+
+check( 'missing credentials names the settings screen', false !== strpos( chip_affiliatewp_failure_hint( 'chip_missing_credentials' ), 'Settings' ) );
+check( 'disabled method names the settings screen', false !== strpos( chip_affiliatewp_failure_hint( 'chip_payouts_disabled' ), 'Settings' ) );
+check( 'unconfigured webhook names the settings screen', false !== strpos( chip_affiliatewp_failure_hint( 'chip_webhook_unconfigured' ), 'Settings' ) );
+check( '401 names the credentials screen', false !== strpos( chip_affiliatewp_failure_hint( 'chip_api_error', 401 ), 'Settings' ) );
+check( '403 names the credentials screen', false !== strpos( chip_affiliatewp_failure_hint( 'chip_api_error', 403 ), 'Settings' ) );
+check( '422 names the bank details', false !== strpos( chip_affiliatewp_failure_hint( 'chip_api_error', 422 ), 'bank' ) );
+check( 'a 5xx has no hint (it is transient)', '' === chip_affiliatewp_failure_hint( 'chip_api_error', 503 ) );
+check( 'an unrelated error has no hint', '' === chip_affiliatewp_failure_hint( 'chip_no_email' ) );
+
+// End to end: the hint lands in the description the drawer shows.
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 99 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][99] = new Fake_Referral( 99, 3, '2.00', 'unpaid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 401, 'body' => array( 'message' => 'Unauthorized' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+
+$shown = (string) affwp_get_payout( $payout_id )->description;
+check( 'failed description names where to fix it', false !== strpos( $shown, 'Settings' ) );
+check( 'failed description still explains the failure', false !== stripos( $shown, 'CHIP Send' ) );
+
+// A transient failure gets no hint: nothing for the merchant to fix.
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$transient_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 100 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][100] = new Fake_Referral( 100, 3, '2.00', 'unpaid', $transient_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 503, 'body' => array( 'message' => 'Server error' ) );
+chip_affiliatewp_submit_payout( $transient_id );
+
+$transient_shown = (string) affwp_get_payout( $transient_id )->description;
+check( 'transient failure has no settings hint', false === strpos( $transient_shown, 'Settings' ) );
+check( 'transient failure is classified transient', 'transient' === ( $GLOBALS['__payout_rows'][ $transient_id ]->failure_class ?? '' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

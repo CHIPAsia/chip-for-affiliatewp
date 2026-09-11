@@ -97,6 +97,54 @@ function chip_affiliatewp_classify_failure( $error_code, $error_message = '', $h
 }
 
 /**
+ * Returns an actionable "where to fix this" line for a failure.
+ *
+ * AffiliateWP renders a failed payout's description verbatim as the error
+ * message in the admin drawer. For merchant-side problems the provider text
+ * alone does not say where to act, and CHIP has no dashboard URL core can link
+ * to — core hard-codes Stripe and PayPal, and the next-steps builder has no
+ * filter — so the drawer's button renders without a target and does nothing
+ * when clicked. Naming the exact screen here is what makes the failure
+ * actionable.
+ *
+ * @param string   $error_code  Plugin error code.
+ * @param int|null $http_status HTTP status, when known.
+ * @return string Hint sentence, or empty string when none applies.
+ */
+function chip_affiliatewp_failure_hint( $error_code, $http_status = null ) {
+	$code   = strtolower( (string) $error_code );
+	$status = is_numeric( $http_status ) ? (int) $http_status : 0;
+
+	if ( 'chip_missing_credentials' === $code ) {
+		return __( 'Add your CHIP Send API key and secret under Settings → Payouts → CHIP Send.', 'chip-for-affiliatewp' );
+	}
+
+	if ( 'chip_payouts_disabled' === $code ) {
+		return __( 'Turn CHIP Send back on under Settings → Payouts.', 'chip-for-affiliatewp' );
+	}
+
+	if ( 'chip_webhook_unconfigured' === $code ) {
+		return __( 'Save your credentials under Settings → Payouts → CHIP Send so the webhook can register.', 'chip-for-affiliatewp' );
+	}
+
+	// CHIP refused our credentials: the fix is on our own settings screen.
+	if ( 401 === $status || 403 === $status ) {
+		return __( 'Check the API key and secret under Settings → Payouts → CHIP Send, and confirm the key is still active in your CHIP account.', 'chip-for-affiliatewp' );
+	}
+
+	/*
+	 * A validation rejection. After the description is sanitised before sending,
+	 * the usual remaining cause is the recipient's bank details — but a payload
+	 * problem is possible too, so name both rather than guess.
+	 */
+	if ( 422 === $status ) {
+		return __( "Check the affiliate's bank account details, and contact CHIP support with this message if they look correct.", 'chip-for-affiliatewp' );
+	}
+
+	return '';
+}
+
+/**
  * Supplies the affiliate-facing body for CHIP Send payout failures.
  *
  * The registered `payout_failure_chip_body` setting is the merchant's own copy
