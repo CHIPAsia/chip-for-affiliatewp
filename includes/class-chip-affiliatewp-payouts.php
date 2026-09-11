@@ -452,19 +452,38 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 /**
  * Schedules a payout status check when Action Scheduler is available.
  *
+ * Skips when an identical check is already pending. Webhooks, requeries and
+ * retries all call this for the same payout, and without the guard every
+ * delivery would stack another action — a busy payout could accumulate dozens
+ * of near-identical requeries, each costing an API call.
+ *
  * @param int $payout_id Payout ID.
  * @param int $delay     Delay in seconds.
  * @return void
  */
 function chip_affiliatewp_schedule_check( $payout_id, $delay ) {
-	if ( function_exists( 'as_schedule_single_action' ) ) {
-		as_schedule_single_action(
-			time() + $delay,
-			'chip_affiliatewp_check_payout_status',
-			array( 'payout_id' => (int) $payout_id ),
-			'chip-for-affiliatewp'
-		);
+	if ( ! function_exists( 'as_schedule_single_action' ) ) {
+		return;
 	}
+
+	$payout_id = absint( $payout_id );
+	$args      = array( 'payout_id' => $payout_id );
+
+	// Action Scheduler's own dedupe: a pending check for this payout is enough.
+	if ( function_exists( 'as_has_scheduled_action' ) && as_has_scheduled_action( 'chip_affiliatewp_check_payout_status', $args, chip_affiliatewp_as_group() ) ) {
+		return;
+	}
+
+	if ( function_exists( 'as_next_scheduled_action' ) && false !== as_next_scheduled_action( 'chip_affiliatewp_check_payout_status', $args, chip_affiliatewp_as_group() ) ) {
+		return;
+	}
+
+	as_schedule_single_action(
+		time() + $delay,
+		'chip_affiliatewp_check_payout_status',
+		$args,
+		chip_affiliatewp_as_group()
+	);
 }
 
 /**
@@ -789,7 +808,7 @@ function chip_affiliatewp_process_generated_batch( $batch_id ) {
 			time() + $delay,
 			'chip_affiliatewp_submit_payout_action',
 			array( 'payout_id' => (int) $payout->payout_id ),
-			'chip-affiliatewp'
+			chip_affiliatewp_as_group()
 		);
 
 		// Stagger submissions so concurrent bank-account lookups do not pile up.

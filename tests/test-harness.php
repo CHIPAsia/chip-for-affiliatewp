@@ -668,6 +668,28 @@ function as_schedule_single_action( $ts, $hook, $args, $group ) {
 	return 1;
 }
 
+/**
+ * Action Scheduler dedupe lookups. Real AS exposes these; the harness mirrors
+ * them so the "one pending check per payout" guard is exercised.
+ */
+function as_has_scheduled_action( $hook, $args = array(), $group = '' ) {
+	foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+		if ( $action['hook'] === $hook && $action['args'] === $args ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function as_next_scheduled_action( $hook, $args = array(), $group = '' ) {
+	foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+		if ( $action['hook'] === $hook && $action['args'] === $args ) {
+			return (int) $action['timestamp'];
+		}
+	}
+	return false;
+}
+
 function MINUTE_IN_SECONDS() { return 60; }
 if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 	define( 'MINUTE_IN_SECONDS', 60 );
@@ -2084,6 +2106,39 @@ $stored = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
 check( '401 fails the payout', 'failed' === affwp_get_payout( $payout_id )->status );
 check( '401 records the HTTP status for diagnosis', 401 === (int) ( $stored['error_status'] ?? 0 ) );
 check( '401 is classified for the admin, not retried blindly', 'admin_action_required' === ( $GLOBALS['__payout_rows'][ $payout_id ]->failure_class ?? '' ) );
+
+echo "\n== Test 44: duplicate status checks are not scheduled ==\n";
+reset_state();
+
+// Three deliveries for the same payout must produce one pending check.
+chip_affiliatewp_schedule_check( 700, 120 );
+chip_affiliatewp_schedule_check( 700, 120 );
+chip_affiliatewp_schedule_check( 700, 300 );
+
+$checks = 0;
+foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+	if ( 'chip_affiliatewp_check_payout_status' === $action['hook'] ) {
+		++$checks;
+	}
+}
+check( 'one check per payout is scheduled', 1 === $checks );
+
+// A different payout still gets its own check.
+chip_affiliatewp_schedule_check( 701, 120 );
+$checks = 0;
+foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+	if ( 'chip_affiliatewp_check_payout_status' === $action['hook'] ) {
+		++$checks;
+	}
+}
+check( 'a different payout gets its own check', 2 === $checks );
+
+// All scheduled actions share the plugin's group, so they can be managed together.
+$groups = array();
+foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+	$groups[ $action['group'] ] = true;
+}
+check( 'every scheduled action uses the plugin group', array( 'chip-affiliatewp' ) === array_keys( $groups ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
