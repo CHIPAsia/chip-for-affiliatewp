@@ -642,6 +642,27 @@ function affwp_get_affiliate_payment_email( $affiliate_id ) {
 	return $u ? $u->user_email : '';
 }
 
+$GLOBALS['__payout_meta'] = array();
+
+function affwp_update_payout_meta( $payout_id, $key, $value, $prev_value = '' ) {
+	$GLOBALS['__payout_meta'][ (int) $payout_id ][ $key ] = $value;
+	return true;
+}
+
+function affwp_get_payout_meta( $payout_id, $key = '', $single = false ) {
+	$all = $GLOBALS['__payout_meta'][ (int) $payout_id ] ?? array();
+
+	if ( '' === $key ) {
+		return $all;
+	}
+
+	if ( $single ) {
+		return $all[ $key ] ?? '';
+	}
+
+	return isset( $all[ $key ] ) ? array( $all[ $key ] ) : array();
+}
+
 function affwp_get_referral( $referral_id ) {
 	return $GLOBALS['__referral_rows'][ (int) $referral_id ] ?? false;
 }
@@ -766,6 +787,7 @@ function reset_state() {
 	$GLOBALS['__probe_calls']    = array();
 	$GLOBALS['__probe_response'] = null;
 	$GLOBALS['__batch_recounts']  = array();
+	$GLOBALS['__payout_meta']     = array();
 
 	$GLOBALS['__options']['chip_payouts']     = 1;
 	$GLOBALS['__options']['chip_test_mode']   = 1;
@@ -898,7 +920,7 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code'
 $result = chip_affiliatewp_submit_payout( $payout_id );
 check( 'submit succeeded', true === $result );
 $row = affwp_get_payout( $payout_id );
-$data = json_decode( $row->description, true );
+$data = chip_affiliatewp_payout_data( $row );
 check( 'instruction id stored', 900 === (int) $data['instruction_id'] );
 check( 'service_id stored', 900 === (int) $row->service_id );
 check( 'receipt stored', 'https://www.chip-in.asia/receipts/send/abc123' === $data['receipt_url'] );
@@ -944,7 +966,7 @@ check( 'apply returns terminal', true === $terminal );
 check( 'payout paid', 'paid' === $row->status );
 check( 'referral 11 paid', 'paid' === $GLOBALS['__referral_rows'][11]->status );
 check( 'referral 12 paid', 'paid' === $GLOBALS['__referral_rows'][12]->status );
-check( 'receipt updated', 'https://www.chip-in.asia/receipts/send/zzz' === $data['receipt_url'] || 'https://www.chip-in.asia/receipts/send/zzz' === json_decode( $row->description, true )['receipt_url'] );
+check( 'receipt updated', 'https://www.chip-in.asia/receipts/send/zzz' === ( chip_affiliatewp_payout_data( $row )['receipt_url'] ?? '' ) );
 
 echo "\n== Test 9: webhook dedup (redelivery is a no-op) ==\n";
 $GLOBALS['__referral_rows'][11]->status = 'paid'; // already applied
@@ -1007,7 +1029,7 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 $GLOBALS['__referral_rows'][41] = new Fake_Referral( 41, 3, '20.00', 'unpaid', $payout_id );
 chip_affiliatewp_apply_instruction( $payout_id, array( 'id' => 907, 'state' => 'executing' ) );
 check( 'still processing after executing state', 'processing' === affwp_get_payout( $payout_id )->status );
-check( 'state recorded', 'executing' === json_decode( affwp_get_payout( $payout_id )->description, true )['state'] );
+check( 'state recorded', 'executing' === ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['state'] ?? '' ) );
 
 echo "\n== Test 13: webhook signature verification ==\n";
 reset_state();
@@ -1093,7 +1115,7 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 950, 'state' => 'received' ) );
 call_user_func( 'chip_affiliatewp_run_scheduled_submission', $payout_id );
 $row = affwp_get_payout( $payout_id );
-check( 'batch payout submitted', 950 === (int) json_decode( $row->description, true )['instruction_id'] );
+check( 'batch payout submitted', 950 === (int) ( chip_affiliatewp_payout_data( $row )['instruction_id'] ?? 0 ) );
 
 echo "\n== Test 15: duplicate instruction adoption on POST conflict ==\n";
 reset_state();
@@ -1119,7 +1141,7 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code'
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 888, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id ) ) ) );
 $result = chip_affiliatewp_submit_payout( $payout_id );
 $row = affwp_get_payout( $payout_id );
-check( 'conflict resolved by adopting existing instruction', true === $result && 888 === (int) json_decode( $row->description, true )['instruction_id'] );
+check( 'conflict resolved by adopting existing instruction', true === $result && 888 === (int) ( chip_affiliatewp_payout_data( $row )['instruction_id'] ?? 0 ) );
 
 echo "\n== Test 16: sweep respects cooldown and status filter ==\n";
 reset_state();
@@ -1783,7 +1805,7 @@ chip_affiliatewp_apply_instruction(
 		'receipt_url' => 'https://evil.example.com/steal',
 	)
 );
-$stored = json_decode( affwp_get_payout( $payout_id )->description, true );
+$stored = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
 check( 'forged receipt URL is not stored', empty( $stored['receipt_url'] ) );
 
 echo "\n== Test 37: revoked referrals are not paid ==\n";
@@ -2139,6 +2161,70 @@ foreach ( $GLOBALS['__as_scheduled'] as $action ) {
 	$groups[ $action['group'] ] = true;
 }
 check( 'every scheduled action uses the plugin group', array( 'chip-affiliatewp' ) === array_keys( $groups ) );
+
+echo "\n== Test 45: a failed payout shows a sentence, not JSON ==\n";
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// A failing submission must leave human-readable text in the description,
+// because AffiliateWP renders that verbatim as the drawer's error message.
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 96 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][96] = new Fake_Referral( 96, 3, '2.00', 'unpaid', $payout_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 422, 'body' => array( 'message' => 'Unprocessable' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+
+$row = affwp_get_payout( $payout_id );
+check( 'failed payout description is not JSON', null === json_decode( (string) $row->description, true ) );
+check( 'failed payout description is not empty', '' !== trim( (string) $row->description ) );
+check( 'failed payout description names the problem', false !== stripos( (string) $row->description, 'CHIP Send' ) );
+
+// The structured state is still available, just stored elsewhere.
+$data = chip_affiliatewp_payout_data( $row );
+check( 'structured state survives in meta', 422 === (int) ( $data['error_status'] ?? 0 ) );
+check( 'failure class is recorded on the payout row', 'admin_action_required' === ( $row->failure_class ?? '' ) );
+
+// A successful payout keeps its description as a notes field, not an error.
+$ok_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 97 ),
+		'amount'        => '2.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][97] = new Fake_Referral( 97, 3, '2.00', 'unpaid', $ok_id );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $ok_id );
+check( 'successful payout description stays JSON-free', null === json_decode( (string) affwp_get_payout( $ok_id )->description, true ) );
+check( 'successful payout state is in meta', 9700 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $ok_id ) )['instruction_id'] ?? 0 ) );
+
+// Legacy rows written before the move still resolve.
+$legacy = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 98 ),
+		'amount'        => '1.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'description'   => wp_json_encode( array( 'instruction_id' => 1234, 'state' => 'executing' ) ),
+	)
+);
+check( 'legacy description JSON still resolves', 1234 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $legacy ) )['instruction_id'] ?? 0 ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

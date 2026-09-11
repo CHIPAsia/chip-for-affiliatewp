@@ -10,7 +10,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 } // Cannot access directly.
 
 /**
- * Decodes the JSON payload stored on a payout.
+ * Reads the plugin's metadata for a payout.
+ *
+ * Prefers the payout meta table. Falls back to the description column so rows
+ * written before the move still resolve.
  *
  * @param object|int $payout Payout object or ID.
  * @return array
@@ -22,25 +25,62 @@ function chip_affiliatewp_payout_data( $payout ) {
 		return array();
 	}
 
-	$data = json_decode( (string) $payout->description, true );
+	$payout_id = absint( $payout->payout_id ?? $payout->ID ?? 0 );
 
-	return is_array( $data ) ? $data : array();
+	if ( $payout_id && function_exists( 'affwp_get_payout_meta' ) ) {
+		$data = affwp_get_payout_meta( $payout_id, 'chip_payout_data', true );
+
+		if ( is_array( $data ) ) {
+			return $data;
+		}
+	}
+
+	// Legacy: state stored as JSON in the description column.
+	$legacy = json_decode( (string) $payout->description, true );
+
+	return is_array( $legacy ) ? $legacy : array();
 }
 
 /**
  * Persists payout metadata.
+ *
+ * The state lives in the payout meta table (the same place Stripe keeps its
+ * rail) rather than in the description column. AffiliateWP renders a failed
+ * payout's raw description as its "Error" message in the admin drawer, so
+ * keeping JSON there showed the merchant a JSON blob instead of a sentence.
  *
  * @param int   $payout_id Payout ID.
  * @param array $data      Full metadata payload to store.
  * @return bool
  */
 function chip_affiliatewp_update_payout_data( $payout_id, $data ) {
-	return (bool) affiliate_wp()->affiliates->payouts->update(
-		$payout_id,
-		array( 'description' => wp_json_encode( $data ) ),
-		'',
-		'payout'
-	);
+	$payout_id = absint( $payout_id );
+
+	if ( ! $payout_id || ! function_exists( 'affwp_update_payout_meta' ) ) {
+		return false;
+	}
+
+	affwp_update_payout_meta( $payout_id, 'chip_payout_data', $data );
+
+	/*
+	 * A failed payout's description is shown verbatim as the error message, so
+	 * keep a human-readable reason there and nothing else. On any other status
+	 * the description is a notes field, so leave it untouched.
+	 */
+	$payout = affwp_get_payout( $payout_id );
+
+	if ( $payout && 'failed' === $payout->status ) {
+		$reason = isset( $data['error'] ) ? (string) $data['error'] : '';
+
+		affiliate_wp()->affiliates->payouts->update(
+			$payout_id,
+			array( 'description' => $reason ),
+			'',
+			'payout'
+		);
+	}
+
+	return true;
 }
 
 /**
@@ -317,8 +357,9 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	// The instruction was accepted, so any earlier failure no longer applies.
 	unset( $data['error'] );
 
+	chip_affiliatewp_update_payout_data( $payout_id, $data );
+
 	$update = array(
-		'description'          => wp_json_encode( $data ),
 		'service_id'           => (int) $response['id'],
 		'service_invoice_link' => $data['receipt_url'],
 	);
@@ -406,9 +447,16 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 	}
 
 	if ( $payout ) {
+		/*
+		 * State goes to payout meta; the description carries the plain reason,
+		 * because AffiliateWP renders a failed payout's description verbatim as
+		 * the error message in the admin drawer.
+		 */
+		chip_affiliatewp_update_payout_data( $payout_id, $data );
+
 		$update = array(
 			'status'      => 'failed',
-			'description' => wp_json_encode( $data ),
+			'description' => $reason,
 		);
 
 		/*
@@ -552,11 +600,12 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 
 	switch ( $state ) {
 		case 'completed':
+			chip_affiliatewp_update_payout_data( $payout_id, $data );
+
 			affiliate_wp()->affiliates->payouts->update(
 				$payout_id,
 				array(
 					'status'               => 'paid',
-					'description'          => wp_json_encode( $data ),
 					'service_id'           => (int) chip_affiliatewp_array_value( $instruction, 'id', $data['instruction_id'] ?? 0 ),
 					'service_invoice_link' => (string) chip_affiliatewp_array_value( $data, 'receipt_url', '' ),
 				),
@@ -1007,24 +1056,27 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 			'status'               => 'processing',
 			'service_id'           => (int) $response['id'],
 			'service_invoice_link' => (string) chip_affiliatewp_array_value( $response, 'receipt_url', '' ),
-			'description'          => wp_json_encode(
-				array(
-					'instruction_id' => (int) $response['id'],
-					'reference'      => substr( $reference, 0, 40 ),
-					'state'          => $state,
-					'receipt_url'    => (string) chip_affiliatewp_array_value( $response, 'receipt_url', '' ),
-					'referral_ids'   => array( $referral_id ),
-					'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
-					'poll_count'     => 0,
-					'mode'           => affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live',
-				)
-			),
 		)
 	);
 
 	if ( ! $payout_id ) {
 		return new WP_Error( 'chip_payout_not_created', __( 'The payout record could not be created. The referral may already have an active payout.', 'chip-for-affiliatewp' ) );
 	}
+
+	// State lives in payout meta; the description stays a notes field.
+	chip_affiliatewp_update_payout_data(
+		(int) $payout_id,
+		array(
+			'instruction_id' => (int) $response['id'],
+			'reference'      => substr( $reference, 0, 40 ),
+			'state'          => $state,
+			'receipt_url'    => chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $response, 'receipt_url', '' ) ),
+			'referral_ids'   => array( $referral_id ),
+			'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
+			'poll_count'     => 0,
+			'mode'           => affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live',
+		)
+	);
 
 	chip_affiliatewp_schedule_check( (int) $payout_id, 120 );
 
