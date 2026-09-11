@@ -86,18 +86,18 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 	}
 
 	if ( (float) $payout->amount <= 0 ) {
-		return chip_affiliatewp_fail_payout( $payout_id, __( 'Payout amount must be greater than zero.', 'chip-for-affiliatewp' ) );
+		return chip_affiliatewp_fail_payout( $payout_id, __( 'Payout amount must be greater than zero.', 'chip-for-affiliatewp' ), 'chip_invalid_amount' );
 	}
 
 	$bank_account = chip_affiliatewp_ensure_bank_account( $payout->affiliate_id );
 
 	if ( is_wp_error( $bank_account ) ) {
-		return chip_affiliatewp_fail_payout( $payout_id, $bank_account->get_error_message() );
+		return chip_affiliatewp_fail_payout( $payout_id, $bank_account->get_error_message(), $bank_account->get_error_code() );
 	}
 
 	if ( empty( $bank_account['status'] ) || 'verified' !== $bank_account['status'] ) {
 		/* translators: 1: Bank account status */
-		return chip_affiliatewp_fail_payout( $payout_id, sprintf( __( 'Bank account is not verified yet (status: %s).', 'chip-for-affiliatewp' ), (string) chip_affiliatewp_array_value( $bank_account, 'status', 'unknown' ) ) );
+		return chip_affiliatewp_fail_payout( $payout_id, sprintf( __( 'Bank account is not verified yet (status: %s).', 'chip-for-affiliatewp' ), (string) chip_affiliatewp_array_value( $bank_account, 'status', 'unknown' ) ), 'chip_bank_account_unverified' );
 	}
 
 	$payment_email = affwp_get_affiliate_payment_email( $payout->affiliate_id );
@@ -108,7 +108,7 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 	}
 
 	if ( empty( $payment_email ) ) {
-		return chip_affiliatewp_fail_payout( $payout_id, __( 'This affiliate has no payment email on file.', 'chip-for-affiliatewp' ) );
+		return chip_affiliatewp_fail_payout( $payout_id, __( 'This affiliate has no payment email on file.', 'chip-for-affiliatewp' ), 'chip_no_email' );
 	}
 
 	$reference = chip_affiliatewp_instruction_reference( $payout_id );
@@ -146,12 +146,12 @@ function chip_affiliatewp_submit_payout( $payout_id ) {
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$response = $existing;
 		} else {
-			return chip_affiliatewp_fail_payout( $payout_id, $response->get_error_message() );
+			return chip_affiliatewp_fail_payout( $payout_id, $response->get_error_message(), $response->get_error_code() );
 		}
 	}
 
 	if ( empty( $response['id'] ) ) {
-		return chip_affiliatewp_fail_payout( $payout_id, __( 'CHIP Send did not return a send instruction ID.', 'chip-for-affiliatewp' ) );
+		return chip_affiliatewp_fail_payout( $payout_id, __( 'CHIP Send did not return a send instruction ID.', 'chip-for-affiliatewp' ), 'chip_instruction_failed' );
 	}
 
 	$data['instruction_id'] = (int) $response['id'];
@@ -241,7 +241,7 @@ function chip_affiliatewp_recount_batch_for_payout( $payout_id ) {
  * @param string $reason    Human-readable failure reason.
  * @return WP_Error
  */
-function chip_affiliatewp_fail_payout( $payout_id, $reason ) {
+function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '' ) {
 	$payout = affwp_get_payout( $payout_id );
 
 	$data = $payout ? chip_affiliatewp_payout_data( $payout ) : array();
@@ -249,12 +249,24 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason ) {
 	$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
 
 	if ( $payout ) {
+		$update = array(
+			'status'      => 'failed',
+			'description' => wp_json_encode( $data ),
+		);
+
+		/*
+		 * Classify the failure so AffiliateWP can drive the Retry button, the
+		 * automatic retry sweep, and the action-required email. Without a
+		 * class every failure reads as UNKNOWN and the affiliate is never
+		 * told what to fix.
+		 */
+		if ( function_exists( 'chip_affiliatewp_classify_failure' ) ) {
+			$update['failure_class'] = chip_affiliatewp_classify_failure( $error_code, $reason );
+		}
+
 		affiliate_wp()->affiliates->payouts->update(
 			$payout_id,
-			array(
-				'status'      => 'failed',
-				'description' => wp_json_encode( $data ),
-			),
+			$update,
 			'',
 			'payout'
 		);
@@ -266,6 +278,15 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason ) {
 		// A failure is terminal for the batch roll-up: recount so the batch can
 		// settle instead of staying on "Processing" behind a dead payout.
 		chip_affiliatewp_recount_batch_for_payout( $payout_id );
+
+		/*
+		 * Dispatch the action-required email when the affiliate can fix the
+		 * problem. All gating (the setting toggle, the cooldown, and the
+		 * affiliate_action_required class check) lives in AffiliateWP.
+		 */
+		if ( function_exists( 'affwp_maybe_send_failure_email' ) ) {
+			affwp_maybe_send_failure_email( (int) $payout_id );
+		}
 	}
 
 	return new WP_Error( 'chip_payout_failed', $reason );
@@ -383,7 +404,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 			/* translators: 1: Send instruction state, 2: Optional rejection reason */
 			$reason = sprintf( __( 'CHIP Send instruction %1$s. %2$s', 'chip-for-affiliatewp' ), $state, $rejection_reason );
 
-			chip_affiliatewp_fail_payout( $payout_id, trim( $reason ) );
+			chip_affiliatewp_fail_payout( $payout_id, trim( $reason ), 'chip_instruction_' . $state );
 
 			return true;
 	}

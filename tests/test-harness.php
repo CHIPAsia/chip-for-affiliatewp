@@ -1380,6 +1380,44 @@ check( 'single referral handler filter is registered', ! empty( $GLOBALS['__filt
 check( 'payouts settings sanitize filter is registered', ! empty( $GLOBALS['__filters']['affwp_settings_payouts_sanitize'] ) );
 check( 'batch initial status filter is registered', ! empty( $GLOBALS['__filters']['affwp_batch_payout_initial_status'] ) );
 
+echo "\n== Test 31: failure classification drives retry and email behaviour ==\n";
+check( 'missing bank details needs affiliate action', 'affiliate_action_required' === chip_affiliatewp_classify_failure( 'chip_missing_bank_details', 'no bank details' ) );
+check( 'unverified bank account needs affiliate action', 'affiliate_action_required' === chip_affiliatewp_classify_failure( 'chip_bank_account_unverified', 'status: pending' ) );
+check( 'missing payment email needs affiliate action', 'affiliate_action_required' === chip_affiliatewp_classify_failure( 'chip_no_email', 'no email' ) );
+check( 'rejected instruction needs affiliate action', 'affiliate_action_required' === chip_affiliatewp_classify_failure( 'chip_instruction_rejected', 'CHIP Send instruction rejected. bank closed' ) );
+check( 'missing credentials needs admin action', 'admin_action_required' === chip_affiliatewp_classify_failure( 'chip_missing_credentials', 'no keys' ) );
+check( 'disabled method needs admin action', 'admin_action_required' === chip_affiliatewp_classify_failure( 'chip_payouts_disabled', 'disabled' ) );
+check( 'api failure is transient', 'transient' === chip_affiliatewp_classify_failure( 'chip_api_error', 'CHIP Send API error (HTTP 503): unavailable' ) );
+check( 'timeout is transient', 'transient' === chip_affiliatewp_classify_failure( '', 'Request timed out' ) );
+check( 'unrecognised failure is unknown', 'unknown' === chip_affiliatewp_classify_failure( 'weird', 'something else' ) );
+check( 'classifier registered for chip', function_exists( 'chip_affiliatewp_register_failure_classifier' ) );
+
+echo "\n== Test 32: a failed payout records its failure class ==\n";
+reset_state();
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = (object) array( 'ID' => 7, 'user_email' => 'aff3@example.test' );
+
+$class_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 23 ),
+		'amount'        => '8.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][23] = new Fake_Referral( 23, 3, '8.00', 'unpaid', $class_payout );
+
+chip_affiliatewp_fail_payout( $class_payout, 'Bank account is not verified yet (status: pending).', 'chip_bank_account_unverified' );
+$class_row = affiliate_wp()->affiliates->payouts->get_item( $class_payout );
+check( 'payout failed', 'failed' === $class_row->status );
+check( 'failure class recorded', 'affiliate_action_required' === ( $class_row->failure_class ?? '' ) );
+check( 'referral released to unpaid', 'unpaid' === $GLOBALS['__referral_rows'][23]->status );
+
 echo "\n== Test 24: requery only uses valid payout statuses (unpaid is a referral status) ==\n";
 reset_state();
 $GLOBALS['__options']['chip_test_mode']     = 1;
