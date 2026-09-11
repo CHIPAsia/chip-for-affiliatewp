@@ -229,15 +229,21 @@ function chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference, $m
 
 	/*
 	 * Records written before the cache became mode-aware are a single flat
-	 * array. Read those on their own mode so an existing installation keeps
-	 * working without waiting for the next write to migrate it.
+	 * array with no reliable mode marker. Guessing which environment issued
+	 * them is unsafe: defaulting a test-mode ID into live would pay whoever
+	 * owns that ID live, and the reverse is merely wrong. Treat such a record
+	 * as unusable and let the next payout re-register the account in the mode
+	 * actually in use — one extra API call, never a wrong payment.
+	 *
+	 * A record that does carry a mode was written by the mode-aware version and
+	 * is grouped under that mode.
 	 */
 	if ( is_array( $records ) && isset( $records['id'] ) ) {
-		$legacy_mode = in_array( (string) ( $records['mode'] ?? '' ), array( 'test', 'live' ), true )
-			? (string) $records['mode']
-			: 'live';
+		$legacy_mode = (string) ( $records['mode'] ?? '' );
 
-		$records = array( $legacy_mode => $records );
+		$records = in_array( $legacy_mode, array( 'test', 'live' ), true )
+			? array( $legacy_mode => $records )
+			: array();
 	}
 
 	$record = is_array( $records ) && isset( $records[ $mode ] ) ? $records[ $mode ] : null;
@@ -313,11 +319,12 @@ function chip_affiliatewp_store_bank_account( $affiliate_id, $account, $mode = n
 
 	// Migrate a record written by an older version, which stored one flat array.
 	if ( isset( $records['id'] ) ) {
-		$legacy          = $records;
-		$legacy_mode     = in_array( (string) ( $legacy['mode'] ?? '' ), array( 'test', 'live' ), true )
-			? (string) $legacy['mode']
-			: $mode;
-		$records         = array( $legacy_mode => $legacy );
+		$legacy_mode = (string) ( $records['mode'] ?? '' );
+
+		// No reliable mode marker: drop it rather than guess an environment.
+		$records = in_array( $legacy_mode, array( 'test', 'live' ), true )
+			? array( $legacy_mode => $records )
+			: array();
 	}
 
 	$records[ $mode ] = $account;

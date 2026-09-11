@@ -4002,9 +4002,35 @@ $GLOBALS['__user_meta'][7]['chip_bank_account'] = array(
 	'fingerprint' => chip_affiliatewp_bank_details_fingerprint( 3 ),
 );
 
-check( 'a legacy flat record still resolves', 4242 === (int) ( chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ), 'test' )['id'] ?? 0 ) );
+check( 'a legacy record carrying a mode still resolves', 4242 === (int) ( chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ), 'test' )['id'] ?? 0 ) );
 
-// Storing again migrates it to the per-mode shape without losing the id.
+// A legacy record with NO mode marker is discarded rather than guessed into an
+// environment: a staging ID must never be handed to live.
+$GLOBALS['__user_meta'][7]['chip_bank_account'] = array(
+	'id'          => 7777,
+	'status'      => 'verified',
+	'reference'   => chip_affiliatewp_bank_reference( 3 ),
+	'fingerprint' => chip_affiliatewp_bank_details_fingerprint( 3 ),
+);
+
+$GLOBALS['__options']['chip_test_mode'] = 1;
+check( 'an unmoded legacy record is not reused in test', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ), 'test' ) );
+
+$GLOBALS['__options']['chip_test_mode'] = 0;
+check( 'an unmoded legacy record is not reused in live', null === chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ), 'live' ) );
+
+// A record that DOES carry a mode is grouped under it, not discarded.
+$GLOBALS['__user_meta'][7]['chip_bank_account'] = array(
+	'id'          => 4242,
+	'status'      => 'verified',
+	'mode'        => 'test',
+	'reference'   => chip_affiliatewp_bank_reference( 3 ),
+	'fingerprint' => chip_affiliatewp_bank_details_fingerprint( 3 ),
+);
+
+check( 'a moded legacy record still resolves', 4242 === (int) ( chip_affiliatewp_get_stored_bank_account( 3, chip_affiliatewp_bank_reference( 3 ), 'test' )['id'] ?? 0 ) );
+
+// Storing again rewrites it in the per-mode shape.
 chip_affiliatewp_store_bank_account( 3, array( 'id' => 4242, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
 
 $migrated = $GLOBALS['__user_meta'][7]['chip_bank_account'];
