@@ -3541,6 +3541,122 @@ chip_affiliatewp_update_payout_data( $fresh_id, array( 'instruction_id' => 9601,
 check( 'a new reviewing payout appears at once', 1 === count( chip_affiliatewp_payouts_awaiting_review() ) );
 check( 'the new listing is the new payout', $fresh_id === (int) chip_affiliatewp_payouts_awaiting_review()[0]['payout_id'] );
 
+echo "\n== Test 62: a reviewed payout does not consume the sweep budget ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// An older payout parked under review, last checked 30 minutes ago.
+$review_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 600 ),
+		'amount'        => '4.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][600] = new Fake_Referral( 600, 3, '4.00', 'unpaid', $review_id );
+chip_affiliatewp_update_payout_data(
+	$review_id,
+	array(
+		'instruction_id' => 9700,
+		'state'          => 'reviewing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s', time() - 30 * MINUTE_IN_SECONDS ),
+	)
+);
+
+// A newer payout genuinely in flight, last checked 30 minutes ago too.
+$flight_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 601 ),
+		'amount'        => '4.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][601] = new Fake_Referral( 601, 3, '4.00', 'unpaid', $flight_id );
+chip_affiliatewp_update_payout_data(
+	$flight_id,
+	array(
+		'instruction_id' => 9701,
+		'state'          => 'executing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s', time() - 30 * MINUTE_IN_SECONDS ),
+	)
+);
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/9701', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 9701, 'state' => 'executing' ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/9700', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'reviewing' ) );
+
+chip_affiliatewp_sweep_processing_payouts();
+
+$probed = array();
+
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( false !== strpos( $call['url'], 'send_instructions/' ) ) {
+		$probed[] = (int) substr( $call['url'], strrpos( $call['url'], '/' ) + 1 );
+	}
+}
+
+check( 'the in-flight payout is requeryed', in_array( 9701, $probed, true ) );
+check( 'a reviewed payout is not requeryed on the short cooldown', ! in_array( 9700, $probed, true ) );
+
+// It IS requeryed once the long review cooldown has passed.
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                        = new Fake_User( 7, 'affiliate@test.dev' );
+
+$old_review = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 602 ),
+		'amount'        => '4.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][602] = new Fake_Referral( 602, 3, '4.00', 'unpaid', $old_review );
+chip_affiliatewp_update_payout_data(
+	$old_review,
+	array(
+		'instruction_id' => 9702,
+		'state'          => 'reviewing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s', time() - 7 * HOUR_IN_SECONDS ),
+	)
+);
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/9702', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 9702, 'state' => 'reviewing' ) );
+
+chip_affiliatewp_sweep_processing_payouts();
+
+$probed = array();
+
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( false !== strpos( $call['url'], 'send_instructions/' ) ) {
+		$probed[] = (int) substr( $call['url'], strrpos( $call['url'], '/' ) + 1 );
+	}
+}
+
+check( 'a reviewed payout is requeryed after the long cooldown', in_array( 9702, $probed, true ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

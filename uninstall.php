@@ -38,6 +38,9 @@ $chip_option_names = array_merge(
 	array( 'chip_payouts', 'chip_test_mode', 'chip_reference_prefix', 'chip_send_recipient_receipt' )
 );
 
+// Standalone options the plugin writes outside AffiliateWP's settings.
+$chip_option_names[] = 'chip_affiliatewp_review_cache_version';
+
 // Best effort: delete the CHIP Send webhooks this plugin registered so the
 // site stops receiving webhook deliveries. Failures are ignored — the
 // webhook can also be removed from the CHIP portal manually.

@@ -999,8 +999,16 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 		$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
 		chip_affiliatewp_update_payout_data( $payout_id, $data );
 
-		// Cap Action Scheduler re-checks at one day; the hourly sweep keeps healing afterwards.
-		if ( $reschedule && $attempts < 48 ) {
+		/*
+		 * Cap Action Scheduler re-checks at one day; the hourly sweep keeps
+		 * healing afterwards.
+		 *
+		 * A state CHIP has parked for manual review is not rescheduled: it will
+		 * not change without a human, so a 15-minute poll would spend a day of
+		 * requests on a row that cannot move. The hourly sweep still picks it
+		 * up on its much longer review cooldown, and the merchant has been told.
+		 */
+		if ( $reschedule && $attempts < 48 && ! chip_affiliatewp_state_needs_review( (string) ( $data['state'] ?? '' ) ) ) {
 			chip_affiliatewp_schedule_check( $payout_id, 15 * MINUTE_IN_SECONDS );
 		}
 	}
@@ -1053,6 +1061,17 @@ function chip_affiliatewp_sweep_processing_payouts() {
 	}
 
 	$cooldown = 10 * MINUTE_IN_SECONDS;
+
+	/*
+	 * An instruction CHIP has parked for manual review will not move until a
+	 * human intervenes. Requerying it on the ordinary cooldown would burn the
+	 * sweep's per-run budget on rows that cannot change, starving the payouts
+	 * that are genuinely in flight — an older reviewed payout sorts first, so
+	 * it would win a slot every single run. Check these rarely instead; the
+	 * merchant is told about them separately.
+	 */
+	$review_cooldown = (int) apply_filters( 'chip_affiliatewp_review_requery_cooldown', 6 * HOUR_IN_SECONDS );
+
 	$checked  = 0;
 
 	foreach ( $payouts as $payout ) {
@@ -1068,7 +1087,11 @@ function chip_affiliatewp_sweep_processing_payouts() {
 		$data    = chip_affiliatewp_payout_data( $payout );
 		$against = chip_affiliatewp_parse_utc( chip_affiliatewp_array_value( $data, 'last_checked', '' ) );
 
-		if ( $against && ( time() - $against ) < $cooldown ) {
+		$window = chip_affiliatewp_state_needs_review( (string) ( $data['state'] ?? '' ) )
+			? $review_cooldown
+			: $cooldown;
+
+		if ( $against && ( time() - $against ) < $window ) {
 			continue;
 		}
 
