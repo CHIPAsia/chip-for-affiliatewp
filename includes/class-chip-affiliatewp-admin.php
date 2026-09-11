@@ -326,6 +326,124 @@ function chip_affiliatewp_register_single_referral_handler( $handlers ) {
 add_filter( 'affwp_single_referral_payout_handlers', 'chip_affiliatewp_register_single_referral_handler' );
 
 /**
+ * Reports per-affiliate readiness for CHIP Send in the Payouts preview.
+ *
+ * AffiliateWP asks each method whether an affiliate can actually be paid
+ * before rendering the batch preview rows. Without an answer here the core
+ * default is 'ready', which would promise a payout that fails later because
+ * the affiliate has no bank details on file. Reporting the real state means
+ * the preview shows the same "not connected" badge Stripe / PayPal produce.
+ *
+ * @param string $status       Preflight status: 'ready', 'invite', or 'blocked'.
+ * @param string $method       Payout method key.
+ * @param int    $affiliate_id Affiliate ID.
+ * @return string
+ */
+function chip_affiliatewp_preflight_payout_status( $status, $method, $affiliate_id ) {
+	if ( 'chip' !== $method ) {
+		return $status;
+	}
+
+	$details = chip_affiliatewp_get_bank_details( $affiliate_id );
+
+	if ( '' === $details['account_number'] || '' === $details['bank_code'] ) {
+		return 'blocked';
+	}
+
+	return 'ready';
+}
+add_filter( 'affwp_preflight_payout_status', 'chip_affiliatewp_preflight_payout_status', 10, 3 );
+
+/**
+ * Appends a bank-details readiness indicator to the Affiliates list.
+ *
+ * The bundled Stripe method annotates the payout-method column with a status
+ * dot so an admin can see at a glance who is payable. CHIP Send mirrors that
+ * using the same core indicator helper: green when the affiliate has bank
+ * details on file, grey (with a tooltip) when they cannot be paid yet.
+ *
+ * @param string $value     Rendered payout-method cell value.
+ * @param object $affiliate Affiliate row object.
+ * @return string
+ */
+function chip_affiliatewp_affiliate_table_payout_method( $value, $affiliate ) {
+	if ( ! function_exists( 'affwp_render_payout_method_status_indicator' ) ) {
+		return $value;
+	}
+
+	if ( ! isset( $affiliate->affiliate_id ) ) {
+		return $value;
+	}
+
+	if ( function_exists( 'affwp_get_affiliate_effective_method' )
+		&& 'chip' !== affwp_get_affiliate_effective_method( $affiliate ) ) {
+		return $value;
+	}
+
+	$details = chip_affiliatewp_get_bank_details( (int) $affiliate->affiliate_id );
+	$ready   = '' !== $details['account_number'] && '' !== $details['bank_code'];
+
+	$indicator = affwp_render_payout_method_status_indicator(
+		array(
+			'dot_class' => $ready ? 'bg-green-500' : 'bg-gray-300',
+			'label'     => $ready
+				? __( 'Ready', 'chip-for-affiliatewp' )
+				: __( 'No bank details', 'chip-for-affiliatewp' ),
+			'tooltip'   => array(
+				/* translators: %s: payout method name. */
+				'title'   => sprintf( __( '%s: bank details', 'chip-for-affiliatewp' ), __( 'CHIP Send', 'chip-for-affiliatewp' ) ),
+				'content' => $ready
+					? __( 'This affiliate has bank details on file and can be paid via CHIP Send.', 'chip-for-affiliatewp' )
+					: __( 'This affiliate has no bank code or account number on file, so a CHIP Send payout would fail.', 'chip-for-affiliatewp' ),
+				'type'    => $ready ? 'success' : 'info',
+			),
+		)
+	);
+
+	return sprintf( '<span class="inline-flex items-center gap-2">%1$s%2$s</span>', $value, $indicator );
+}
+add_filter( 'affwp_affiliate_table_payout_method', 'chip_affiliatewp_affiliate_table_payout_method', 15, 2 );
+
+/**
+ * Adds a note to the CHIP Send section of the batch payout preview.
+ *
+ * Mirrors the per-method notes the bundled providers render (for example
+ * PayPal's invite explanation) so the preview explains CHIP Send's behaviour
+ * in the same place and the same style.
+ *
+ * @param array $method_data Method section data from the preview renderer.
+ * @return void
+ */
+function chip_affiliatewp_preview_payout_note( $method_data ) {
+	unset( $method_data );
+
+	$test_mode = (bool) affiliate_wp()->settings->get( 'chip_test_mode' );
+
+	if ( function_exists( 'affwp_callout' ) ) {
+		affwp_callout(
+			array(
+				'tone'    => 'info',
+				'content' => $test_mode
+					? __( 'CHIP Send is in Test Mode — payouts go to the CHIP Send staging environment and no real money moves.', 'chip-for-affiliatewp' )
+					: __( 'CHIP Send pays each affiliate directly to their bank account. Payouts stay in Processing until CHIP confirms the transfer, then the referral is marked Paid.', 'chip-for-affiliatewp' ),
+			)
+		);
+
+		return;
+	}
+
+	printf(
+		'<p class="description">%s</p>',
+		esc_html(
+			$test_mode
+				? __( 'CHIP Send is in Test Mode — payouts go to the CHIP Send staging environment and no real money moves.', 'chip-for-affiliatewp' )
+				: __( 'CHIP Send pays each affiliate directly to their bank account. Payouts stay in Processing until CHIP confirms the transfer, then the referral is marked Paid.', 'chip-for-affiliatewp' )
+		)
+	);
+}
+add_action( 'affwp_preview_payout_note_chip', 'chip_affiliatewp_preview_payout_note' );
+
+/**
  * Runs the status requery for a scheduled payout check.
  *
  * @param int $payout_id Payout ID.
