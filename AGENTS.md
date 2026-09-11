@@ -12,10 +12,15 @@ send instruction to the affiliate's verified bank account and tracks the transfe
 to completion.
 
 - **Pure PHP** WordPress plugin — no JS build step, no Composer runtime deps.
-- Minimum PHP 7.1, minimum WordPress 4.7.
-- Text domain: `chip-for-affiliatewp`.
+- Minimum PHP 7.1, minimum WordPress 7.1.
+- Text domain: `chip-for-affiliatewp`, declared via the `Text Domain` and
+  `Domain Path` plugin headers. Translations load just in time; there is no
+  `load_plugin_textdomain()` call (WordPress 4.6+ loads from the headers, and
+  Plugin Check flags the manual call as discouraged).
 - AffiliateWP requirement is documented in `readme.txt` (Installation), not via
-  the wp.org-only `Requires Plugins` header.
+  the wp.org-only `Requires Plugins` header. AffiliateWP is a premium plugin,
+  so the dependency is enforced at runtime (`chip_affiliatewp_dependencies_met`)
+  with an admin notice rather than by the header.
 
 ## Architecture
 
@@ -29,13 +34,16 @@ functions, all prefixed `chip_affiliatewp_`.
 
 | File | Responsibility |
 |---|---|
-| `chip-affiliatewp-functions.php` | Shared helpers (array access, safe substring). |
+| `chip-affiliatewp-functions.php` | Shared helpers (array access, safe substring, UTC timestamp parsing, currency lookup, money formatting, receipt-URL validation, WP_Error HTTP-status extraction). |
 | `class-chip-affiliatewp-api.php` | CHIP Send API client. Every request carries an `epoch` header and an HMAC-SHA512 `checksum` of `"{epoch}{api_key}"` signed with the API secret. Base URL switches between `https://api.chip-in.asia/api` (live) and `https://staging-api.chip-in.asia/api` (test mode). |
-| `class-chip-affiliatewp-bank-accounts.php` | Affiliate bank details (Edit Affiliate screen fields + save hook) and CHIP Send bank-account sync (idempotent via per-affiliate reference). |
-| `class-chip-affiliatewp-payouts.php` | Payout state machine: submit, instruction adoption on duplicate-reference rejection, state application (`completed`→paid, `rejected/deleted`→failed + referrals unpaid), scheduled requery, hourly sweep, batch fan-out (one Action Scheduler action per payout, staggered 5s). |
-| `class-chip-affiliatewp-webhooks.php` | Per-site random webhook URL (`/wp-json/chip-affiliatewp/v1/webhook/{32-hex-secret}`), reachability-gated auto-registration (reuse/repoint/PATCH before POST), public-key capture, inbound signature verification, mode-aware reconciliation. |
-| `class-chip-affiliatewp-admin.php` | Settings (Commissions tab via `affwp_settings_commissions`), webhook URL hint field, notices, hook registrations. |
-| `chip-affiliatewp-lifecycle.php` | Activation schedules the hourly sweep; deactivation clears it. |
+| `class-chip-affiliatewp-account.php` | Account balance and budget allocation: reads `current_balance` / `convertible_balance_from_statement` / `settlement_convert_approvals_count`, cached in a transient (5 min success, 2 min failure), and requests a conversion via `POST /send/send_limits`. |
+| `class-chip-affiliatewp-bank-accounts.php` | Affiliate bank details (Edit Affiliate screen fields + save hook) and CHIP Send bank-account sync. The bank-account ID is cached in affiliate user meta against a fingerprint of the details; the reference is derived from digits only, so `1234-567 890` and `1234567890` resolve to one account. |
+| `class-chip-affiliatewp-payouts.php` | Payout state machine: submit (advisory-locked), instruction adoption on duplicate-reference rejection, state application (`completed`→paid, `rejected/deleted`→failed + referrals unpaid), scheduled requery, hourly sweep, batch fan-out (one Action Scheduler action per payout, staggered 5s). Payout state lives in payout meta (`chip_payout_data`), not the description column. |
+| `class-chip-affiliatewp-webhooks.php` | Per-site random webhook URL (`/wp-json/chip-affiliatewp/v1/webhook/{32-hex-secret}`), reachability-gated auto-registration (reuse/repoint/PATCH before POST), per-mode public-key capture, inbound signature verification, mode-aware reconciliation. |
+| `class-chip-affiliatewp-webhook-reset.php` | Finds and deletes the webhooks this plugin owns (recorded ID, plugin name, or this site's callback URL) for a mode, then registers again — the Webhook card's Reset button. Other webhooks in the merchant's CHIP account are never touched. |
+| `class-chip-affiliatewp-failures.php` | Registers the failure classifier and failure-email template with AffiliateWP. Classification branches on the HTTP status (5xx and 429 transient; other 4xx need the admin) with message-text fallbacks; appends an actionable hint to a failed payout's description. |
+| `class-chip-affiliatewp-admin.php` | Settings panel on the **Payouts** tab (`affwp_settings_payouts_sanitize`), the method card and its enable toggle, balance card with budget conversion, webhook status card with the reset button, notices, hook registrations. |
+| `chip-affiliatewp-lifecycle.php` | Activation schedules the hourly sweep; deactivation clears every action the plugin schedules (sweep, payout checks, queued submissions) via Action Scheduler with a WP-Cron fallback. |
 
 ### Money-flow invariants (do not break these)
 
@@ -53,7 +61,24 @@ functions, all prefixed `chip_affiliatewp_`.
    succeeds. Missing key → 503; bad signature → 401; both fail closed.
 4. **Mode isolation**: payouts remember the mode they were submitted in
    (`mode` in payout meta) and requery against that mode even if the site-wide
-   mode flipped afterwards.
+   mode flipped afterwards. Webhook public keys are resolved per mode too:
+   test and live are separate webhook objects with separate keys.
+5. **Eligibility is re-checked before the money moves**: a referral must still
+   be `unpaid` *and* still belong to the payout being sent (its `payout_id` is
+   empty or this payout). A revoked or reassigned referral is dropped; if none
+   remain, the payout fails and the referrals are released rather than
+   partially paid.
+6. **MYR only**: CHIP Send pays in MYR, and the API takes a bare amount with no
+   currency field. A payout is refused when the store currency is not MYR —
+   otherwise a USD store would send `100.00` and CHIP would pay RM100.
+7. **Stored timestamps are UTC**: every timestamp is written with `gmdate()`, so
+   it must be read with `chip_affiliatewp_parse_utc()`. `strtotime()` would
+   interpret it in the site's local timezone and skew cooldowns by the UTC
+   offset (in Malaysia, a 10-minute cooldown would never apply).
+8. **Deactivation and uninstall leave nothing behind**: deactivation clears all
+   three scheduled actions; uninstall removes the settings keys, the per-mode
+   webhook record, the affiliate bank-account cache, and this method's entry in
+   AffiliateWP's hidden-methods option.
 
 ### Webhook URL secret
 
@@ -71,14 +96,31 @@ The real endpoint still verifies the CHIP RSA signature on every delivery.
 php -f tests/test-harness.php
 ```
 
-Standalone stub harness (no WordPress needed): 83 checks covering checksum
+Standalone stub harness (no WordPress needed): 307 checks covering checksum
 signing, amount formatting, webhook signature verification (valid, tampered,
-missing), payout state transitions, idempotency/replay, failed-payout healing,
-batch fan-out scheduling, and mode flips. Keep it green on every change; add a
-check for any bug fixed.
+missing), webhook reset ownership, payout state transitions,
+idempotency/replay, failed-payout healing, eligibility re-checks, currency
+refusal, UTC timestamp parsing across timezones, failure classification by HTTP
+status, batch fan-out scheduling, deactivation cleanup, and mode flips. Keep it
+green on every change; add a check for any bug fixed.
 
 The harness stubs the minimal WP/AffiliateWP surface — when adding a call to a
 new WP function inside plugin modules, stub it in `tests/test-harness.php`.
+
+Assert on the **reason** for a failure, not just `is_wp_error()`. An unmocked
+HTTP call is also a `WP_Error`, so a bare `is_wp_error()` check passes even
+while the plugin is attempting a send. Verify a new guard actually bites by
+removing it and confirming the test fails.
+
+### Translations
+
+```bash
+/usr/local/lib/hermes-agent/venv/bin/python3 scripts/build-translations.py
+```
+
+Regenerates the `.pot`, the ms_MY `.po` and the compiled `.mo`. Sources are
+discovered with a glob over `includes/*.php`, so a new module is picked up
+automatically — a hand-maintained list silently drops its strings.
 
 ### Distribution build
 
@@ -99,13 +141,22 @@ Defined in three places — bump together:
 ## WordPress.org compliance notes
 
 - readme.txt follows the full WordPress readme format (headers, description,
-  installation, FAQ, changelog, upgrade notice); `Tested up to` tracks the
-  current WordPress major release.
+  installation, FAQ, changelog, upgrade notice); `Requires at least` and
+  `Tested up to` both track the current WordPress major release.
 - Author: CHIP IN SDN BHD (https://chip-in.asia); contributors list the
   wordpress.org username.
-- i18n: all user-facing strings use `__('…', 'chip-for-affiliatewp')`;
-  `load_plugin_textdomain` runs on `init`; `languages/` holds offline `.mo`
-  files for non-hosted distributions.
+- i18n: all user-facing strings use `__('…', 'chip-for-affiliatewp')`; the text
+  domain is declared in the plugin headers (`Text Domain`, `Domain Path`), so
+  WordPress loads translations just in time. There is deliberately no
+  `load_plugin_textdomain()` call — Plugin Check flags it as discouraged.
+- Coding standards: `vendor/bin/phpcs --standard=phpcs.xml .` must report zero
+  errors and zero warnings. `phpcs.xml` pins `minimum_supported_wp_version` to
+  the same version as the plugin header.
+- Plugin Check (the wp.org review tool) reports zero errors against the built
+  dist zip. Its remaining warnings are benign: `trademarked_term "wp"` comes
+  from the product name AffiliateWP, and the unprefixed-variable warnings point
+  at `uninstall.php`, where the plugin's own `chip_*` locals are read as
+  globals because the file defines no functions.
 - Internal infrastructure hostnames, credentials, and test data must never be
   committed. `staging-api.chip-in.asia` in the API client is a public product
   endpoint (test-mode base URL), not an internal leak.

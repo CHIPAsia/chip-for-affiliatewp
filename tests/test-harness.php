@@ -2523,6 +2523,50 @@ as_schedule_single_action( time() + 60, 'some_other_plugin_task', array(), 'othe
 chip_affiliatewp_unschedule_sweep();
 check( "another plugin's action is untouched", 1 === count( $GLOBALS['__as_scheduled'] ) );
 
+echo "\n== Test 51: AGENTS.md stays in step with the code ==\n";
+
+$repo = dirname( __DIR__ );
+$agents = (string) file_get_contents( $repo . '/AGENTS.md' );
+
+check( 'AGENTS.md exists and is non-empty', '' !== trim( $agents ) );
+
+// Every module on disk must be described, or the table silently goes stale.
+$missing = array();
+
+foreach ( glob( $repo . '/includes/*.php' ) as $module ) {
+	if ( false === strpos( $agents, basename( $module ) ) ) {
+		$missing[] = basename( $module );
+	}
+}
+
+check( 'every module is listed in AGENTS.md', array() === $missing );
+
+// The documented check count must match reality, or the number misleads.
+$counted = null;
+
+if ( preg_match( '/Standalone stub harness \(no WordPress needed\): (\d+) checks/', $agents, $m ) ) {
+	$counted = (int) $m[1];
+}
+
+check( 'AGENTS.md states the harness check count', null !== $counted );
+
+// The plugin header and phpcs.xml must agree on the minimum WordPress version.
+$bootstrap = (string) file_get_contents( $repo . '/chip-for-affiliatewp.php' );
+
+preg_match( '/Requires at least:\s*([0-9.]+)/', $bootstrap, $header_match );
+preg_match( '/minimum_supported_wp_version" value="([0-9.]+)"/', (string) file_get_contents( $repo . '/phpcs.xml' ), $phpcs_match );
+
+check( 'plugin header declares a minimum WordPress version', ! empty( $header_match[1] ) );
+check( 'phpcs.xml declares a minimum WordPress version', ! empty( $phpcs_match[1] ) );
+check( 'header and phpcs.xml agree on the minimum version', ( $header_match[1] ?? '' ) === ( $phpcs_match[1] ?? '' ) );
+check( 'AGENTS.md records the same minimum version', false !== strpos( $agents, 'minimum WordPress ' . ( $header_match[1] ?? 'x' ) ) );
+
+// The version lives in three places; they must not drift apart.
+preg_match( "/define\( 'CHIP_AFFILIATEWP_VERSION', '([0-9.]+)' \)/", $bootstrap, $const_match );
+preg_match( '/Stable tag:\s*([0-9.]+)/', (string) file_get_contents( $repo . '/readme.txt' ), $stable_match );
+
+check( 'version constant and Stable tag agree', ( $const_match[1] ?? '' ) === ( $stable_match[1] ?? '' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
