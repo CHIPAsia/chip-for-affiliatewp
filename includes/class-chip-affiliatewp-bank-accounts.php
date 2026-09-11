@@ -17,11 +17,34 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 function chip_affiliatewp_get_bank_details( $affiliate_id ) {
 	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
+	$code    = (string) get_user_meta( $user_id, 'payment_bank_code', true );
 
 	return array(
 		'account_number' => (string) get_user_meta( $user_id, 'payment_account_number', true ),
-		'bank_code'      => (string) get_user_meta( $user_id, 'payment_bank_code', true ),
+		'bank_code'      => $code,
+		'bank_name'      => chip_affiliatewp_bank_label( $code ),
 	);
+}
+
+/**
+ * Returns a human-readable label for a bank code.
+ *
+ * Falls back to the raw code so a bank we do not list still renders something
+ * meaningful rather than an empty string.
+ *
+ * @param string $code Bank code.
+ * @return string
+ */
+function chip_affiliatewp_bank_label( $code ) {
+	$code = strtoupper( trim( (string) $code ) );
+
+	if ( '' === $code ) {
+		return '';
+	}
+
+	$banks = chip_affiliatewp_bank_codes();
+
+	return isset( $banks[ $code ] ) ? $banks[ $code ] : $code;
 }
 
 /**

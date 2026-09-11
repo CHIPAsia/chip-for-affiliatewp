@@ -80,6 +80,70 @@ function chip_affiliatewp_payout_method_is_affiliate_ready( $ready, $method, $af
 add_filter( 'affwp_payout_method_is_affiliate_ready', 'chip_affiliatewp_payout_method_is_affiliate_ready', 10, 4 );
 
 /**
+ * Tells the affiliate what CHIP Send needs from them, on their dashboard.
+ *
+ * The bundled methods all surface their account state on the affiliate
+ * dashboard, so an affiliate whose bank details are missing or still being
+ * verified learns it there rather than by having a payout fail later. Only
+ * shown when CHIP Send is the affiliate's effective method.
+ *
+ * @return void
+ */
+function chip_affiliatewp_affiliate_dashboard_notice() {
+	if ( ! function_exists( 'affwp_get_affiliate_id' ) || ! function_exists( 'affwp_get_affiliate_usable_payout_method' ) ) {
+		return;
+	}
+
+	$affiliate_id = affwp_get_affiliate_id();
+
+	if ( ! $affiliate_id ) {
+		return;
+	}
+
+	if ( 'chip' !== affwp_get_affiliate_usable_payout_method( $affiliate_id ) ) {
+		return;
+	}
+
+	$details = chip_affiliatewp_get_bank_details( $affiliate_id );
+
+	if ( '' === $details['account_number'] || '' === $details['bank_code'] ) {
+		$notice = array(
+			'variant' => 'warning',
+			'heading' => __( 'Add your bank details to get paid', 'chip-for-affiliatewp' ),
+			'body'    => __( 'Your commissions are paid straight to your Malaysian bank account. Add your bank account details in your payout settings so we can send your next payout.', 'chip-for-affiliatewp' ),
+		);
+	} else {
+		$notice = array(
+			'variant' => 'info',
+			'heading' => __( 'Payouts go to your bank account', 'chip-for-affiliatewp' ),
+			/* translators: 1: bank name, 2: masked account number */
+			'body'    => sprintf(
+				__( 'Your commissions are sent to %1$s %2$s. Bank account verification can take a little while; you will be paid as soon as it completes.', 'chip-for-affiliatewp' ),
+				$details['bank_name'],
+				$details['account_number']
+			),
+		);
+	}
+
+	/**
+	 * Filters the notice shown to CHIP Send affiliates on their dashboard.
+	 *
+	 * @param array $notice Notice arguments.
+	 * @param int   $affiliate_id Affiliate ID.
+	 */
+	$notice = apply_filters( 'chip_affiliatewp_affiliate_dashboard_notice', $notice, $affiliate_id );
+
+	if ( empty( $notice ) ) {
+		return;
+	}
+
+	if ( function_exists( 'affwp_notice' ) ) {
+		affwp_notice( $notice );
+	}
+}
+add_action( 'affwp_affiliate_dashboard_notices', 'chip_affiliatewp_affiliate_dashboard_notice' );
+
+/**
  * Registers CHIP Send as a payment-method card on the Payouts tab.
  *
  * AffiliateWP 2.29+ renders each payout provider from the

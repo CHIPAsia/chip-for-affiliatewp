@@ -530,6 +530,22 @@ function affwp_get_affiliate_user_id( $affiliate_id ) {
 	return $GLOBALS['__affiliates_map'][ (int) $affiliate_id ] ?? 0;
 }
 
+$GLOBALS['__notices'] = array();
+
+function affwp_notice( $args = array() ) {
+	$GLOBALS['__notices'][] = $args;
+}
+
+function affwp_get_affiliate_id() {
+	return $GLOBALS['__current_affiliate_id'] ?? 0;
+}
+
+function affwp_get_affiliate_usable_payout_method( $affiliate_id ) {
+	$pick = $GLOBALS['__affiliate_meta'][ (int) $affiliate_id ]['payout_method_pick'] ?? '';
+
+	return '' !== $pick ? $pick : 'manual';
+}
+
 function affwp_get_affiliate_name( $affiliate_id ) {
 	return 'Test Affiliate ' . $affiliate_id;
 }
@@ -1417,6 +1433,41 @@ $class_row = affiliate_wp()->affiliates->payouts->get_item( $class_payout );
 check( 'payout failed', 'failed' === $class_row->status );
 check( 'failure class recorded', 'affiliate_action_required' === ( $class_row->failure_class ?? '' ) );
 check( 'referral released to unpaid', 'unpaid' === $GLOBALS['__referral_rows'][23]->status );
+
+echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+// Affiliate 3 is on CHIP Send with no bank details -> warning notice.
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['__current_affiliate_id'] = 3;
+$GLOBALS['__user_meta'][7] = array();
+$GLOBALS['__notices'] = array();
+chip_affiliatewp_affiliate_dashboard_notice();
+$notice = isset($GLOBALS['__notices'][0]) ? $GLOBALS['__notices'][0] : array();
+check( 'no bank details renders a warning notice', isset($notice['variant']) && 'warning' === $notice['variant'] );
+check( 'warning notice asks for bank details', isset($notice['heading']) && false !== strpos( $notice['heading'], 'bank details' ) );
+
+// With details on file -> informational notice naming the bank.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '1234567890';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__notices'] = array();
+chip_affiliatewp_affiliate_dashboard_notice();
+$notice = isset($GLOBALS['__notices'][0]) ? $GLOBALS['__notices'][0] : array();
+check( 'bank details renders an info notice', isset($notice['variant']) && 'info' === $notice['variant'] );
+check( 'info notice names the bank', isset($notice['body']) && false !== strpos( $notice['body'], 'Maybank' ) );
+
+// Affiliate on another method -> no CHIP notice at all.
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'paypal';
+$GLOBALS['__notices'] = array();
+chip_affiliatewp_affiliate_dashboard_notice();
+check( 'other methods get no CHIP notice', array() === $GLOBALS['__notices'] );
+
+// Bank code label falls back to the raw code for unlisted banks.
+check( 'bank label resolves a known code', 'Maybank Berhad' === chip_affiliatewp_bank_label( 'MBBEMYKL' ) );
+check( 'bank label falls back to the raw code', 'ZZZZMYKL' === chip_affiliatewp_bank_label( 'ZZZZMYKL' ) );
+check( 'bank label of empty code is empty', '' === chip_affiliatewp_bank_label( '' ) );
 
 echo "\n== Test 24: requery only uses valid payout statuses (unpaid is a referral status) ==\n";
 reset_state();
