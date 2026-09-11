@@ -117,7 +117,7 @@ function chip_affiliatewp_affiliate_dashboard_notice() {
 			'variant' => 'info',
 			'heading' => __( 'Payouts go to your bank account', 'chip-for-affiliatewp' ),
 			'body'    => sprintf(
-				/* translators: 1: bank name, 2: masked account number. */
+				/* translators: 1: bank name, 2: bank account number. */
 				__( 'Your commissions are sent to %1$s %2$s. Bank account verification can take a little while; you will be paid as soon as it completes.', 'chip-for-affiliatewp' ),
 				$details['bank_name'],
 				$details['account_number']
