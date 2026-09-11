@@ -120,6 +120,8 @@ TRANSLATIONS = {
     'Add your bank details to get paid': 'Tambah butiran bank anda untuk dibayar',
     'Balance': 'Baki',
     'Amount to convert': 'Jumlah untuk ditukar',
+    'Enter your bank account number.': 'Masukkan nombor akaun bank anda.',
+    'Choose your bank.': 'Pilih bank anda.',
     'Payout bank account': 'Akaun bank pembayaran',
     'Bank': 'Bank',
     'Bank account number': 'Nombor akaun bank',

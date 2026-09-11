@@ -448,6 +448,27 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 		$data['error_status'] = (int) $http_status;
 	}
 
+	/*
+	 * Drop the instruction ID when CHIP has definitively refused or removed it.
+	 * The reference is deterministic per payout, so a retry would hit CHIP's
+	 * duplicate-reference rejection, adopt the same dead instruction, and mark
+	 * the payout processing again without any money moving — the payout would
+	 * look retried but never settle. Clearing the ID makes the retry create a
+	 * fresh instruction for the (now corrected) bank details.
+	 *
+	 * An instruction that is merely unverified or in flight is left alone: it
+	 * still exists at CHIP and will resolve on its own.
+	 */
+	$terminal_at_chip = in_array(
+		strtolower( (string) $error_code ),
+		array( 'chip_instruction_rejected', 'chip_instruction_deleted' ),
+		true
+	);
+
+	if ( $terminal_at_chip ) {
+		unset( $data['instruction_id'] );
+	}
+
 	if ( $payout ) {
 		/*
 		 * State goes to payout meta; the description carries the plain reason,
@@ -473,6 +494,16 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 			'status'      => 'failed',
 			'description' => $message,
 		);
+
+		/*
+		 * Clear the row's instruction ID too. The requery path restores a
+		 * missing meta instruction_id from this column, so leaving it behind
+		 * would resurrect the dead instruction on the next sweep and undo the
+		 * cleanup above.
+		 */
+		if ( $terminal_at_chip ) {
+			$update['service_id'] = 0;
+		}
 
 		/*
 		 * Classify the failure so AffiliateWP can drive the Retry button, the

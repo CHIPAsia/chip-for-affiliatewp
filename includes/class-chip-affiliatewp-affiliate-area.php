@@ -211,24 +211,27 @@ function chip_affiliatewp_handle_affiliate_bank_save() {
 
 	$notice = array();
 
+	$code_check   = chip_affiliatewp_validate_bank_code( $bank_code );
+	$number_check = chip_affiliatewp_validate_account_number( $number );
+
 	if ( '' === $bank_code || '' === $number ) {
 		$notice = array(
 			'type'    => 'error',
 			'heading' => __( 'Both fields are required', 'chip-for-affiliatewp' ),
 			'message' => __( 'Choose your bank and enter the account number before saving.', 'chip-for-affiliatewp' ),
 		);
-	} elseif ( ! array_key_exists( $bank_code, chip_affiliatewp_bank_codes() ) ) {
+	} elseif ( is_wp_error( $code_check ) ) {
 		// The select only offers supported banks; anything else is a forged post.
 		$notice = array(
 			'type'    => 'error',
 			'heading' => __( 'That bank is not supported', 'chip-for-affiliatewp' ),
-			'message' => __( 'Pick a bank from the list. CHIP Send can only pay to the banks shown.', 'chip-for-affiliatewp' ),
+			'message' => $code_check->get_error_message(),
 		);
-	} elseif ( strlen( $number ) < 6 || strlen( $number ) > 20 ) {
+	} elseif ( is_wp_error( $number_check ) ) {
 		$notice = array(
 			'type'    => 'error',
 			'heading' => __( 'That account number looks wrong', 'chip-for-affiliatewp' ),
-			'message' => __( 'A Malaysian bank account number is between 6 and 20 digits. Check the number and try again.', 'chip-for-affiliatewp' ),
+			'message' => $number_check->get_error_message(),
 		);
 	} else {
 		$user_id = affwp_get_affiliate_user_id( $affiliate_id );

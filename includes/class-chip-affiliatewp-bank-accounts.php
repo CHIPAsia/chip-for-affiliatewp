@@ -327,16 +327,63 @@ function chip_affiliatewp_affiliate_bank_fields( $affiliate ) {
 add_action( 'affwp_edit_affiliate_end', 'chip_affiliatewp_affiliate_bank_fields' );
 
 /**
+ * Validates a Malaysian bank account number.
+ *
+ * Lives here rather than in the form handler so the affiliate area and the Edit
+ * Affiliate screen accept exactly the same numbers. A number that reaches CHIP
+ * with the wrong shape comes back as a rejection the affiliate cannot act on,
+ * so the check belongs with the storage it guards.
+ *
+ * @param string $number Account number, digits only.
+ * @return true|WP_Error True when usable, WP_Error describing the problem.
+ */
+function chip_affiliatewp_validate_account_number( $number ) {
+	$number = preg_replace( '/\D/', '', (string) $number );
+
+	if ( '' === $number ) {
+		return new WP_Error( 'chip_account_number_missing', __( 'Enter your bank account number.', 'chip-for-affiliatewp' ) );
+	}
+
+	// Malaysian account numbers run from 6 to 20 digits across the banks CHIP pays.
+	if ( strlen( $number ) < 6 || strlen( $number ) > 20 ) {
+		return new WP_Error( 'chip_account_number_length', __( 'A Malaysian bank account number is between 6 and 20 digits. Check the number and try again.', 'chip-for-affiliatewp' ) );
+	}
+
+	return true;
+}
+
+/**
+ * Validates a bank code against the banks CHIP Send can pay to.
+ *
+ * @param string $bank_code Bank code.
+ * @return true|WP_Error True when supported, WP_Error otherwise.
+ */
+function chip_affiliatewp_validate_bank_code( $bank_code ) {
+	$bank_code = strtoupper( trim( (string) $bank_code ) );
+
+	if ( '' === $bank_code ) {
+		return new WP_Error( 'chip_bank_code_missing', __( 'Choose your bank.', 'chip-for-affiliatewp' ) );
+	}
+
+	if ( ! array_key_exists( $bank_code, chip_affiliatewp_bank_codes() ) ) {
+		return new WP_Error( 'chip_bank_code_unsupported', __( 'Pick a bank from the list. CHIP Send can only pay to the banks shown.', 'chip-for-affiliatewp' ) );
+	}
+
+	return true;
+}
+
+/**
  * Stores an affiliate's bank details after validation.
  *
  * Shared by the Edit Affiliate screen and the affiliate area form, so both
  * entry points normalise identically: digits only, an uppercase bank code that
  * must be one CHIP Send supports, and a dropped CHIP account cache when
- * anything changed.
+ * anything changed. A value that fails validation is stored as empty, which
+ * leaves the affiliate "not ready" rather than registered with a bad account.
  *
  * @param int    $user_id   Affiliate's WordPress user ID.
- * @param string $bank_code Bank code (validated by the caller or dropped here).
- * @param string $number    Account number (normalised to digits here).
+ * @param string $bank_code Bank code.
+ * @param string $number    Account number.
  * @return bool Whether the stored details changed.
  */
 function chip_affiliatewp_store_bank_details( $user_id, $bank_code, $number ) {
@@ -358,9 +405,13 @@ function chip_affiliatewp_store_bank_details( $user_id, $bank_code, $number ) {
 	$new_number = preg_replace( '/\D/', '', (string) $number );
 	$new_code   = strtoupper( trim( (string) $bank_code ) );
 
-	// Only banks CHIP Send can pay to; anything else would fail at the API.
-	if ( '' !== $new_code && ! array_key_exists( $new_code, chip_affiliatewp_bank_codes() ) ) {
+	// A code or number CHIP cannot use is stored empty, never as-is.
+	if ( is_wp_error( chip_affiliatewp_validate_bank_code( $new_code ) ) ) {
 		$new_code = '';
+	}
+
+	if ( is_wp_error( chip_affiliatewp_validate_account_number( $new_number ) ) ) {
+		$new_number = '';
 	}
 
 	if ( (string) get_user_meta( $user_id, 'payment_account_number', true ) !== $new_number ) {

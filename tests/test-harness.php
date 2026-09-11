@@ -2724,6 +2724,89 @@ check( 'unchanged details keep the cached CHIP account', 1000 === (int) ( get_us
 
 $_POST = array();
 
+echo "\n== Test 54: a rejected instruction can be retried after the bank is fixed ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']             = 'MYR';
+$GLOBALS['__affiliates_map'][3]               = 7;
+$GLOBALS['__users'][7]                        = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 120 ),
+		'amount'        => '5.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][120] = new Fake_Referral( 120, 3, '5.00', 'unpaid', $payout_id );
+
+// Submit: CHIP accepts, the payout is in flight with a stored instruction ID.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9100, 'state' => 'received' ) );
+chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'submitted payout stores the instruction id', 9100 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] ?? 0 ) );
+
+// CHIP rejects the instruction (the affiliate's bank details were wrong).
+$GLOBALS['__http_queue'] = array();
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array( 'id' => 9100, 'state' => 'rejected', 'rejection_reason' => 'Invalid account number' )
+);
+
+$after = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'rejected payout is failed', 'failed' === affwp_get_payout( $payout_id )->status );
+check( 'rejected payout releases the referral', 'unpaid' === $GLOBALS['__referral_rows'][120]->status );
+
+// The dead instruction must be forgotten, or a retry would adopt it forever.
+check( 'rejected payout forgets the instruction id', empty( $after['instruction_id'] ) );
+check( 'rejected payout clears the row instruction id', 0 === (int) affwp_get_payout( $payout_id )->service_id );
+
+// A retry now creates a FRESH instruction instead of adopting the dead one.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'code' => 200, 'body' => array( 'id' => 9200, 'state' => 'received' ) );
+$retry = chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'retry submits again', true === $retry );
+check( 'retry creates a new instruction', 9200 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['instruction_id'] ?? 0 ) );
+check( 'retried payout returns to processing', 'processing' === affwp_get_payout( $payout_id )->status );
+
+// An in-flight instruction must NOT be forgotten: it still exists at CHIP.
+reset_state();
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__affiliates_map'][3]               = 7;
+$GLOBALS['__users'][7]                        = new Fake_User( 7, 'affiliate@test.dev' );
+
+$inflight = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 121 ),
+		'amount'        => '5.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][121] = new Fake_Referral( 121, 3, '5.00', 'unpaid', $inflight );
+
+chip_affiliatewp_update_payout_data( $inflight, array( 'instruction_id' => 9300, 'state' => 'executing' ) );
+chip_affiliatewp_fail_payout( $inflight, 'Bank account is not verified yet.', 'chip_bank_account_unverified' );
+
+$kept = chip_affiliatewp_payout_data( affwp_get_payout( $inflight ) );
+check( 'an unverified bank account keeps the instruction id', 9300 === (int) ( $kept['instruction_id'] ?? 0 ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
