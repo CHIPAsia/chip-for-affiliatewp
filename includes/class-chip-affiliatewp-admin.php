@@ -389,8 +389,7 @@ function chip_affiliatewp_render_settings_panel() {
 
 		// Webhook status card.
 		if ( function_exists( 'affwp_callout' ) ) {
-			$webhook_url = chip_affiliatewp_webhook_url();
-			$configured  = chip_affiliatewp_webhook_configured();
+			$configured = chip_affiliatewp_webhook_configured();
 			?>
 			<div class="overflow-hidden bg-white rounded-lg border border-gray-200">
 				<div class="p-6">
@@ -412,25 +411,15 @@ function chip_affiliatewp_render_settings_panel() {
 								? __( 'Webhook connected', 'chip-for-affiliatewp' )
 								: __( 'Webhook not set up yet', 'chip-for-affiliatewp' ),
 							'content' => $configured
-								? __( 'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key.', 'chip-for-affiliatewp' )
+								? __( 'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key. Registration is automatic — nothing to configure here.', 'chip-for-affiliatewp' )
 								: __( 'Payouts still settle — statuses are requeried hourly — but confirmations arrive faster with the webhook. Save your credentials to register it automatically.', 'chip-for-affiliatewp' ),
 						)
 					);
-
-					if ( function_exists( 'affwp_copy_button' ) ) {
-						affwp_copy_button(
-							array(
-								'content'     => $webhook_url,
-								'button_text' => __( 'Copy webhook URL', 'chip-for-affiliatewp' ),
-								'variant'     => 'secondary',
-							)
-						);
-					}
 					?>
 				</div>
 			</div>
 			<?php
-			unset( $webhook_url, $configured );
+			unset( $configured );
 		}
 		?>
 	</div>

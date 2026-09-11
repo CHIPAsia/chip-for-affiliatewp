@@ -131,6 +131,7 @@ TRANSLATIONS = {
     'Webhook connected': 'Webhook bersambung',
     'Webhook not set up yet': 'Webhook belum disediakan',
     'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key.': 'CHIP Send menghantar kemas kini status pembayaran ke laman ini dan setiap penghantaran disahkan menggunakan kunci awam webhook.',
+    'CHIP Send delivers payout status updates to this site and every delivery is verified against the webhook public key. Registration is automatic — nothing to configure here.': 'CHIP Send menghantar kemas kini status pembayaran ke laman ini dan setiap penghantaran disahkan menggunakan kunci awam webhook. Pendaftaran adalah automatik — tiada apa yang perlu dikonfigurasikan di sini.',
     'Payouts still settle — statuses are requeried hourly — but confirmations arrive faster with the webhook. Save your credentials to register it automatically.': 'Pembayaran tetap diselesaikan — status disemak setiap jam — tetapi pengesahan lebih pantas dengan webhook. Simpan kredensial anda untuk mendaftarkannya secara automatik.',
     'Copy webhook URL': 'Salin URL webhook',
     'Ready': 'Sedia',
