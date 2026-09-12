@@ -102,7 +102,7 @@ The real endpoint still verifies the CHIP RSA signature on every delivery.
 php -f tests/test-harness.php
 ```
 
-Standalone stub harness (no WordPress needed): 510 checks covering checksum
+Standalone stub harness (no WordPress needed): 635 checks covering checksum
 signing, amount formatting, webhook signature verification (valid, tampered,
 missing), webhook reset ownership, payout state transitions,
 idempotency/replay, failed-payout healing, eligibility re-checks, currency

@@ -19,7 +19,7 @@ trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/chip-for-affiliatewp"
 
-cp chip-for-affiliatewp.php uninstall.php readme.txt "$STAGE/chip-for-affiliatewp/"
+cp chip-for-affiliatewp.php uninstall.php readme.txt LICENSE "$STAGE/chip-for-affiliatewp/"
 cp -r includes languages assets "$STAGE/chip-for-affiliatewp/"
 
 find "$STAGE" -name '.DS_Store' -delete
