@@ -744,6 +744,21 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 		unset( $data['error'] );
 	}
 
+	/*
+	 * CHIP's note about an in-flight instruction is not sticky. It is sent
+	 * while the instruction is parked and comes back as null once the problem
+	 * is resolved, so a note we already hold has to be replaced or cleared to
+	 * match what CHIP is saying now — keeping it would show the merchant a
+	 * reason that has since been fixed, and they would chase it again.
+	 */
+	$note = trim( (string) chip_affiliatewp_array_value( $instruction, 'rejection_reason', '' ) );
+
+	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) || '' === $note ) {
+		unset( $data['note'] );
+	} else {
+		$data['note'] = $note;
+	}
+
 	if ( ! empty( $instruction['id'] ) ) {
 		$data['instruction_id'] = (int) $instruction['id'];
 	}
@@ -795,10 +810,6 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	}
 
 	// received / enquiring / executing / reviewing / accepted: still in flight.
-	if ( ! empty( $instruction['rejection_reason'] ) ) {
-		$data['note'] = (string) $instruction['rejection_reason'];
-	}
-
 	chip_affiliatewp_update_payout_data( $payout_id, $data );
 
 	return false;

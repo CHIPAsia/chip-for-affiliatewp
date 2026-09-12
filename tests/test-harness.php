@@ -4893,11 +4893,24 @@ $data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
 check( 'the state is recorded', 'reviewing' === ( strtolower( (string) ( $data['state'] ?? '' ) ) ) );
 check( 'CHIP the reason is recorded', $reason === (string) ( $data['note'] ?? '' ) );
 
-// A later poll with no reason must not erase what CHIP already said.
+// A later poll repeats the same reason: the note stays as CHIP reported it.
+chip_affiliatewp_apply_instruction( $payout_id, array( 'id' => 9500, 'state' => 'reviewing', 'rejection_reason' => $reason ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'a repeated reason is kept', $reason === (string) ( $data['note'] ?? '' ) );
+
+/*
+ * CHIP reports rejection_reason as null once it no longer applies. A note we
+ * already hold must not outlive that: the merchant would chase a reason that
+ * has since been resolved.
+ */
 chip_affiliatewp_apply_instruction( $payout_id, array( 'id' => 9500, 'state' => 'reviewing' ) );
 
 $data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
-check( 'a later poll keeps the recorded reason', $reason === (string) ( $data['note'] ?? '' ) );
+check( 'a cleared reason is dropped', '' === (string) ( $data['note'] ?? '' ) );
+
+// Restore it for the list assertions below.
+chip_affiliatewp_apply_instruction( $payout_id, array( 'id' => 9500, 'state' => 'reviewing', 'rejection_reason' => $reason ) );
 
 // The note must reach the review list the merchant sees.
 $rows = chip_affiliatewp_payouts_awaiting_review();
