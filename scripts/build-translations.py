@@ -141,7 +141,7 @@ TRANSLATIONS = {
     'Digits only. The account must be in your own name.': 'Digit sahaja. Akaun itu mesti atas nama anda sendiri.',
     'Choose your bank and enter the account number before saving.': 'Pilih bank anda dan masukkan nombor akaun sebelum menyimpan.',
     'Pick a bank from the list. CHIP Send can only pay to the banks shown.': 'Pilih bank dari senarai. CHIP Send hanya boleh membayar ke bank yang ditunjukkan.',
-    'A Malaysian bank account number is between 6 and 20 digits. Check the number and try again.': 'Nombor akaun bank Malaysia adalah antara 6 hingga 20 digit. Semak nombor itu dan cuba lagi.',
+    'A Malaysian bank account number is between 5 and 20 digits. Check the number and try again.': 'Nombor akaun bank Malaysia adalah antara 5 hingga 20 digit. Semak nombor itu dan cuba lagi.',
     'CHIP Send verifies the account before your next payout. You will be paid as soon as verification completes.': 'CHIP Send mengesahkan akaun sebelum pembayaran seterusnya. Anda akan dibayar sebaik sahaja pengesahan selesai.',
     'Your commissions are paid straight to a Malaysian bank account through CHIP Send.': 'Komisen anda dibayar terus ke akaun bank Malaysia melalui CHIP Send.',
     'Currently paying to %1$s %2$s. Change it below if that is wrong.': 'Kini membayar ke %1$s %2$s. Tukar di bawah jika itu salah.',

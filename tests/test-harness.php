@@ -4341,6 +4341,46 @@ foreach ( array( 'tests', 'scripts', 'vendor' ) as $dev_only ) {
 	check( 'the build does not ship ' . $dev_only, ! preg_match( '/^\s*' . $dev_only . '\s*\\/m', $build_source ) );
 }
 
+echo "\n== Test 72: the bank list and length bounds cover what CHIP accepts ==\n";
+
+$banks = chip_affiliatewp_bank_codes();
+
+// Banks CHIP Send supports. Every one must be offered, or an affiliate at that
+// bank can never be paid.
+foreach ( array(
+	'BOBEMYK2' => 'BOOST Bank Berhad',
+	'CITIMYKL' => 'Citibank Berhad',
+) as $code => $label ) {
+	check( 'the bank list offers ' . $label, isset( $banks[ $code ] ) );
+	check( $label . ' has the right label', $label === ( $banks[ $code ] ?? '' ) );
+}
+
+// Every bank code must look like a BIC and carry a non-empty label.
+$bad_codes = array();
+
+foreach ( $banks as $code => $label ) {
+	if ( 1 !== preg_match( '/^[A-Z0-9]{8,11}$/', (string) $code ) || '' === trim( (string) $label ) ) {
+		$bad_codes[] = $code;
+	}
+}
+
+check( 'every bank entry is well formed', array() === $bad_codes );
+
+// Every supported bank's own length range must be accepted.
+// Bank of America and Standard Chartered allow 5-digit accounts.
+check( 'a 5-digit account is accepted', true === chip_affiliatewp_validate_account_number( '12345' ) );
+check( 'a 10-digit account is accepted', true === chip_affiliatewp_validate_account_number( '1234567890' ) );
+check( 'a 17-digit account is accepted', true === chip_affiliatewp_validate_account_number( '12345678901234567' ) );
+check( 'a 20-digit account is accepted', true === chip_affiliatewp_validate_account_number( '12345678901234567890' ) );
+
+// Nonsense is still refused.
+check( 'a 4-digit account is refused', is_wp_error( chip_affiliatewp_validate_account_number( '1234' ) ) );
+check( 'a 21-digit account is refused', is_wp_error( chip_affiliatewp_validate_account_number( '123456789012345678901' ) ) );
+check( 'an empty account is refused', is_wp_error( chip_affiliatewp_validate_account_number( '' ) ) );
+
+// Separators are tolerated on input.
+check( 'a separated account is accepted', true === chip_affiliatewp_validate_account_number( '1234-567 890' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

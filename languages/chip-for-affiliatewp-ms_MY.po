@@ -18,12 +18,12 @@ msgstr ""
 msgid "%s: bank details"
 msgstr "%s: butiran bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:523
+#: includes/class-chip-affiliatewp-bank-accounts.php:533
 msgid ""
-"A Malaysian bank account number is between 6 and 20 digits. Check the number"
+"A Malaysian bank account number is between 5 and 20 digits. Check the number"
 " and try again."
 msgstr ""
-"Nombor akaun bank Malaysia adalah antara 6 hingga 20 digit. Semak nombor itu"
+"Nombor akaun bank Malaysia adalah antara 5 hingga 20 digit. Semak nombor itu"
 " dan cuba lagi."
 
 #: includes/class-chip-affiliatewp-payouts.php:1248
@@ -258,7 +258,7 @@ msgstr ""
 msgid "Choose your bank and enter the account number before saving."
 msgstr "Pilih bank anda dan masukkan nombor akaun sebelum menyimpan."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:539
+#: includes/class-chip-affiliatewp-bank-accounts.php:549
 msgid "Choose your bank."
 msgstr "Pilih bank anda."
 
@@ -401,7 +401,7 @@ msgstr ""
 "pengesahan lebih pantas dengan webhook. Simpan kredensial anda untuk "
 "mendaftarkannya secara automatik."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:543
+#: includes/class-chip-affiliatewp-bank-accounts.php:553
 msgid "Pick a bank from the list. CHIP Send can only pay to the banks shown."
 msgstr ""
 "Pilih bank dari senarai. CHIP Send hanya boleh membayar ke bank yang "

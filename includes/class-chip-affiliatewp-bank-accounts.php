@@ -518,9 +518,19 @@ function chip_affiliatewp_validate_account_number( $number ) {
 		return new WP_Error( 'chip_account_number_missing', __( 'Enter your bank account number.', 'chip-for-affiliatewp' ) );
 	}
 
-	// Malaysian account numbers run from 6 to 20 digits across the banks CHIP pays.
-	if ( strlen( $number ) < 6 || strlen( $number ) > 20 ) {
-		return new WP_Error( 'chip_account_number_length', __( 'A Malaysian bank account number is between 6 and 20 digits. Check the number and try again.', 'chip-for-affiliatewp' ) );
+	/*
+	 * Length depends on the recipient bank: CHIP's own schema puts the general
+	 * range at 10-17 digits, while individual banks extend as low as 5
+	 * (Bank of America, Standard Chartered) and as high as 17.
+	 *
+	 * This is a sanity bound, not the bank's own rule — CHIP verifies the
+	 * account against the bank and reports anything it will not accept. Being
+	 * wider than CHIP's schema means a number CHIP rejects is reported with
+	 * CHIP's reason rather than a misleading "wrong length"; being narrower
+	 * would refuse accounts that are genuinely valid.
+	 */
+	if ( strlen( $number ) < 5 || strlen( $number ) > 20 ) {
+		return new WP_Error( 'chip_account_number_length', __( 'A Malaysian bank account number is between 5 and 20 digits. Check the number and try again.', 'chip-for-affiliatewp' ) );
 	}
 
 	return true;
@@ -656,8 +666,10 @@ function chip_affiliatewp_bank_codes() {
 		'BOTKMYKX' => 'Bank of Tokyo-Mitsubishi UFJ (M) Berhad',
 		'BSNAMYK1' => 'Bank Simpanan Nasional Berhad',
 		'BNPAMYKL' => 'BNP Paribas Malaysia Berhad',
+		'BOBEMYK2' => 'BOOST Bank Berhad',
 		'PCBCMYKL' => 'China Construction Bank (M) Berhad',
 		'CIBBMYKL' => 'CIMB Bank Berhad',
+		'CITIMYKL' => 'Citibank Berhad',
 		'DEUTMYKL' => 'Deutsche Bank (Malaysia) Berhad',
 		'FNXSMYNB' => 'Finexus Cards Sdn. Bhd.',
 		'GXSPMYKL' => 'GX Bank Berhad',
