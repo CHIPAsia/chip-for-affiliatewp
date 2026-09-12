@@ -387,9 +387,31 @@ function chip_affiliatewp_handle_webhook( $request ) {
 		return new WP_Error( 'chip_webhook_too_large', __( 'Payload too large.', 'chip-for-affiliatewp' ), array( 'status' => 413 ) );
 	}
 
-	$public_key = chip_affiliatewp_webhook_public_key();
+	/*
+	 * Try every configured key, not just the current mode's.
+	 *
+	 * A webhook belongs to the mode that created it, and a merchant can flip
+	 * modes while deliveries for the other one are still in flight — a test
+	 * payout completing after the switch to live is the ordinary case. Checking
+	 * only the current mode's key would reject those signed deliveries as
+	 * forgeries, leaving the payout to be healed by the hourly sweep instead of
+	 * settling immediately.
+	 *
+	 * Trying both keys does not widen the trust: each is a public key CHIP
+	 * issued for this site's own webhook, and the signature must still verify
+	 * against the exact raw body.
+	 */
+	$public_keys = array();
 
-	if ( '' === $public_key ) {
+	foreach ( array( 'test', 'live' ) as $candidate_mode ) {
+		$candidate = chip_affiliatewp_webhook_public_key( $candidate_mode );
+
+		if ( '' !== $candidate ) {
+			$public_keys[ $candidate_mode ] = $candidate;
+		}
+	}
+
+	if ( empty( $public_keys ) ) {
 		return new WP_Error( 'chip_webhook_unconfigured', __( 'Webhook signature verification is not configured yet.', 'chip-for-affiliatewp' ), array( 'status' => 503 ) );
 	}
 
@@ -397,16 +419,28 @@ function chip_affiliatewp_handle_webhook( $request ) {
 		return new WP_Error( 'chip_webhook_missing_signature', __( 'Missing signature.', 'chip-for-affiliatewp' ), array( 'status' => 401 ) );
 	}
 
-	$key_object = openssl_pkey_get_public( $public_key );
+	$signature_bytes = (string) base64_decode( $signature, true );
 
-	if ( false === $key_object ) {
-		return new WP_Error( 'chip_webhook_invalid_key', __( 'The configured webhook public key is not valid.', 'chip-for-affiliatewp' ), array( 'status' => 503 ) );
+	if ( '' === $signature_bytes ) {
+		return new WP_Error( 'chip_webhook_invalid_signature', __( 'Signature verification failed.', 'chip-for-affiliatewp' ), array( 'status' => 401 ) );
 	}
 
-	// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- unwraps the RSA signature for openssl_verify(), not obfuscation.
-	$verification = openssl_verify( $raw, (string) base64_decode( $signature ), $key_object, OPENSSL_ALGO_SHA512 );
+	$verified_mode = '';
 
-	if ( 1 !== $verification ) {
+	foreach ( $public_keys as $candidate_mode => $candidate_key ) {
+		$key_object = openssl_pkey_get_public( $candidate_key );
+
+		if ( false === $key_object ) {
+			continue;
+		}
+
+		if ( 1 === openssl_verify( $raw, $signature_bytes, $key_object, OPENSSL_ALGO_SHA512 ) ) {
+			$verified_mode = $candidate_mode;
+			break;
+		}
+	}
+
+	if ( '' === $verified_mode ) {
 		return new WP_Error( 'chip_webhook_invalid_signature', __( 'Signature verification failed.', 'chip-for-affiliatewp' ), array( 'status' => 401 ) );
 	}
 

@@ -18,7 +18,7 @@ msgstr ""
 msgid "%s: bank details"
 msgstr "%s: butiran bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:477
+#: includes/class-chip-affiliatewp-bank-accounts.php:484
 msgid ""
 "A Malaysian bank account number is between 6 and 20 digits. Check the number"
 " and try again."
@@ -38,7 +38,7 @@ msgstr ""
 msgid "API Key"
 msgstr "Kunci API"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:450
+#: includes/class-chip-affiliatewp-bank-accounts.php:457
 msgid "Account number for the affiliate payout sent via CHIP Send."
 msgstr ""
 "Nombor akaun untuk pembayaran afiliasi yang dihantar melalui CHIP Send."
@@ -90,11 +90,11 @@ msgstr "Baki tidak tersedia"
 msgid "Bank"
 msgstr "Bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:446
+#: includes/class-chip-affiliatewp-bank-accounts.php:453
 msgid "Bank Account Number"
 msgstr "Nombor Akaun Bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:430
+#: includes/class-chip-affiliatewp-bank-accounts.php:437
 msgid "Bank Code"
 msgstr "Kod Bank"
 
@@ -107,7 +107,7 @@ msgstr "Akaun bank belum disahkan (status: %s)."
 msgid "Bank account number"
 msgstr "Nombor akaun bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:441
+#: includes/class-chip-affiliatewp-bank-accounts.php:448
 msgid "Bank code for the affiliate payout sent via CHIP Send."
 msgstr "Kod bank untuk pembayaran afiliasi yang dihantar melalui CHIP Send."
 
@@ -163,7 +163,7 @@ msgstr ""
 "Pendaftaran adalah automatik — tiada apa yang perlu dikonfigurasikan di "
 "sini."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:406
+#: includes/class-chip-affiliatewp-bank-accounts.php:413
 msgid "CHIP Send did not return a bank account ID."
 msgstr "CHIP Send tidak memulangkan ID akaun bank."
 
@@ -258,7 +258,7 @@ msgstr ""
 msgid "Choose your bank and enter the account number before saving."
 msgstr "Pilih bank anda dan masukkan nombor akaun sebelum menyimpan."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:493
+#: includes/class-chip-affiliatewp-bank-accounts.php:500
 msgid "Choose your bank."
 msgstr "Pilih bank anda."
 
@@ -312,7 +312,7 @@ msgstr "Masukkan kunci API ujian CHIP Send anda"
 msgid "Enter your CHIP Send test secret key"
 msgstr "Masukkan kunci rahsia ujian CHIP Send anda"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:472
+#: includes/class-chip-affiliatewp-bank-accounts.php:479
 msgid "Enter your bank account number."
 msgstr "Masukkan nombor akaun bank anda."
 
@@ -339,11 +339,11 @@ msgstr "Kelayakan Live"
 msgid "Live Mode"
 msgstr "Mod Live"
 
-#: includes/class-chip-affiliatewp-webhooks.php:416
+#: includes/class-chip-affiliatewp-webhooks.php:450
 msgid "Malformed payload."
 msgstr "Muatan tidak sah."
 
-#: includes/class-chip-affiliatewp-webhooks.php:397
+#: includes/class-chip-affiliatewp-webhooks.php:419
 msgid "Missing signature."
 msgstr "Tandatangan tiada."
 
@@ -355,7 +355,7 @@ msgstr "Mod"
 msgid "No bank details"
 msgstr "Tiada butiran bank"
 
-#: includes/class-chip-affiliatewp-webhooks.php:670
+#: includes/class-chip-affiliatewp-webhooks.php:704
 msgid "No route was found matching the URL and request method."
 msgstr "Tiada laluan sepadan dengan URL dan kaedah permintaan tersebut."
 
@@ -401,7 +401,7 @@ msgstr ""
 "pengesahan lebih pantas dengan webhook. Simpan kredensial anda untuk "
 "mendaftarkannya secara automatik."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:497
+#: includes/class-chip-affiliatewp-bank-accounts.php:504
 msgid "Pick a bank from the list. CHIP Send can only pay to the banks shown."
 msgstr ""
 "Pilih bank dari senarai. CHIP Send hanya boleh membayar ke bank yang "
@@ -467,7 +467,8 @@ msgstr ""
 msgid "Secret Key"
 msgstr "Kunci Rahsia"
 
-#: includes/class-chip-affiliatewp-webhooks.php:410
+#: includes/class-chip-affiliatewp-webhooks.php:425
+#: includes/class-chip-affiliatewp-webhooks.php:444
 msgid "Signature verification failed."
 msgstr "Pengesahan tandatangan gagal."
 
@@ -507,11 +508,7 @@ msgstr "Nombor akaun itu kelihatan salah"
 msgid "That bank is not supported"
 msgstr "Bank itu tidak disokong"
 
-#: includes/class-chip-affiliatewp-webhooks.php:403
-msgid "The configured webhook public key is not valid."
-msgstr "Kunci awam webhook yang dikonfigurasi tidak sah."
-
-#: includes/class-chip-affiliatewp-webhooks.php:457
+#: includes/class-chip-affiliatewp-webhooks.php:491
 msgid "The payload is missing a send instruction ID or state."
 msgstr "Muatan tiada ID atau keadaan arahan penghantaran (send instruction)."
 
@@ -569,7 +566,7 @@ msgstr ""
 "Afiliasi ini mempunyai butiran bank disimpan dan boleh dibayar melalui CHIP "
 "Send."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:385
+#: includes/class-chip-affiliatewp-bank-accounts.php:392
 msgid "This affiliate has no bank account details on file."
 msgstr "Afiliasi ini tiada butiran akaun bank disimpan."
 
@@ -636,7 +633,7 @@ msgstr "Webhook disambung (%s)"
 msgid "Webhook not set up yet (%s)"
 msgstr "Webhook belum disediakan (%s)"
 
-#: includes/class-chip-affiliatewp-webhooks.php:393
+#: includes/class-chip-affiliatewp-webhooks.php:415
 msgid "Webhook signature verification is not configured yet."
 msgstr "Pengesahan tandatangan webhook belum dikonfigurasi."
 
@@ -719,6 +716,6 @@ msgid "— %1$s, %2$s"
 msgstr "— %1$s, %2$s"
 
 #: includes/class-chip-affiliatewp-affiliate-area.php:115
-#: includes/class-chip-affiliatewp-bank-accounts.php:434
+#: includes/class-chip-affiliatewp-bank-accounts.php:441
 msgid "— Select bank —"
 msgstr "— Pilih bank —"

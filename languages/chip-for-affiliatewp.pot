@@ -13,7 +13,7 @@ msgstr ""
 msgid "%s: bank details"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:477
+#: includes/class-chip-affiliatewp-bank-accounts.php:484
 msgid ""
 "A Malaysian bank account number is between 6 and 20 digits. Check the number"
 " and try again."
@@ -29,7 +29,7 @@ msgstr ""
 msgid "API Key"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:450
+#: includes/class-chip-affiliatewp-bank-accounts.php:457
 msgid "Account number for the affiliate payout sent via CHIP Send."
 msgstr ""
 
@@ -78,11 +78,11 @@ msgstr ""
 msgid "Bank"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:446
+#: includes/class-chip-affiliatewp-bank-accounts.php:453
 msgid "Bank Account Number"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:430
+#: includes/class-chip-affiliatewp-bank-accounts.php:437
 msgid "Bank Code"
 msgstr ""
 
@@ -95,7 +95,7 @@ msgstr ""
 msgid "Bank account number"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:441
+#: includes/class-chip-affiliatewp-bank-accounts.php:448
 msgid "Bank code for the affiliate payout sent via CHIP Send."
 msgstr ""
 
@@ -145,7 +145,7 @@ msgid ""
 "automatic — nothing to configure here."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:406
+#: includes/class-chip-affiliatewp-bank-accounts.php:413
 msgid "CHIP Send did not return a bank account ID."
 msgstr ""
 
@@ -222,7 +222,7 @@ msgstr ""
 msgid "Choose your bank and enter the account number before saving."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:493
+#: includes/class-chip-affiliatewp-bank-accounts.php:500
 msgid "Choose your bank."
 msgstr ""
 
@@ -274,7 +274,7 @@ msgstr ""
 msgid "Enter your CHIP Send test secret key"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:472
+#: includes/class-chip-affiliatewp-bank-accounts.php:479
 msgid "Enter your bank account number."
 msgstr ""
 
@@ -301,11 +301,11 @@ msgstr ""
 msgid "Live Mode"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:416
+#: includes/class-chip-affiliatewp-webhooks.php:450
 msgid "Malformed payload."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:397
+#: includes/class-chip-affiliatewp-webhooks.php:419
 msgid "Missing signature."
 msgstr ""
 
@@ -317,7 +317,7 @@ msgstr ""
 msgid "No bank details"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:670
+#: includes/class-chip-affiliatewp-webhooks.php:704
 msgid "No route was found matching the URL and request method."
 msgstr ""
 
@@ -358,7 +358,7 @@ msgid ""
 "automatically."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:497
+#: includes/class-chip-affiliatewp-bank-accounts.php:504
 msgid "Pick a bank from the list. CHIP Send can only pay to the banks shown."
 msgstr ""
 
@@ -416,7 +416,8 @@ msgstr ""
 msgid "Secret Key"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:410
+#: includes/class-chip-affiliatewp-webhooks.php:425
+#: includes/class-chip-affiliatewp-webhooks.php:444
 msgid "Signature verification failed."
 msgstr ""
 
@@ -454,11 +455,7 @@ msgstr ""
 msgid "That bank is not supported"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:403
-msgid "The configured webhook public key is not valid."
-msgstr ""
-
-#: includes/class-chip-affiliatewp-webhooks.php:457
+#: includes/class-chip-affiliatewp-webhooks.php:491
 msgid "The payload is missing a send instruction ID or state."
 msgstr ""
 
@@ -508,7 +505,7 @@ msgstr ""
 msgid "This affiliate has bank details on file and can be paid via CHIP Send."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:385
+#: includes/class-chip-affiliatewp-bank-accounts.php:392
 msgid "This affiliate has no bank account details on file."
 msgstr ""
 
@@ -568,7 +565,7 @@ msgstr ""
 msgid "Webhook not set up yet (%s)"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:393
+#: includes/class-chip-affiliatewp-webhooks.php:415
 msgid "Webhook signature verification is not configured yet."
 msgstr ""
 
@@ -644,6 +641,6 @@ msgid "— %1$s, %2$s"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-affiliate-area.php:115
-#: includes/class-chip-affiliatewp-bank-accounts.php:434
+#: includes/class-chip-affiliatewp-bank-accounts.php:441
 msgid "— Select bank —"
 msgstr ""

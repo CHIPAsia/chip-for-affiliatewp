@@ -4037,6 +4037,138 @@ $migrated = $GLOBALS['__user_meta'][7]['chip_bank_account'];
 check( 'a legacy record migrates to the per-mode shape', 4242 === (int) ( $migrated['test']['id'] ?? 0 ) );
 check( 'the migrated record keeps its mode', 'test' === ( $migrated['test']['mode'] ?? '' ) );
 
+echo "\n== Test 68: a webhook signed for the other mode is still accepted ==\n";
+
+/**
+ * Builds a signed request for a given keypair.
+ */
+function __chip_signed_request( $body_array, $priv_pem, $event_type = 'send_instruction_status' ) {
+	$body = json_encode( $body_array );
+	openssl_sign( $body, $sig, $priv_pem, OPENSSL_ALGO_SHA512 );
+
+	$request = new Fake_Request();
+	$request->body = $body;
+	$request->headers['HTTP_X_SIGNATURE'] = base64_encode( $sig );
+	$request->headers['HTTP_EVENT_TYPE']  = $event_type;
+
+	return $request;
+}
+
+reset_state();
+
+// Two keypairs, as CHIP issues one per environment.
+$test_pair = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+openssl_pkey_export( $test_pair, $test_priv );
+$test_pub = openssl_pkey_get_details( $test_pair )['key'];
+
+$live_pair = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+openssl_pkey_export( $live_pair, $live_priv );
+$live_pub = openssl_pkey_get_details( $live_pair )['key'];
+
+$GLOBALS['__options']['chip_payouts']             = 1;
+$GLOBALS['__options']['chip_webhook_secret']      = 'fixedharnesssecret000000000000000000';
+$GLOBALS['__options']['chip_webhook_public_key_test'] = $test_pub;
+$GLOBALS['__options']['chip_webhook_public_key_live'] = $live_pub;
+
+// A payout submitted in test mode is awaiting its webhook.
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 700 ),
+		'amount'        => '8.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][700] = new Fake_Referral( 700, 3, '8.00', 'unpaid', $payout_id );
+
+chip_affiliatewp_update_payout_data( $payout_id, array( 'instruction_id' => 9800, 'state' => 'executing', 'mode' => 'test' ) );
+
+// The merchant has since switched the site to live mode.
+$GLOBALS['__options']['chip_test_mode'] = 0;
+
+// CHIP delivers the TEST webhook for that test payout.
+$test_request = __chip_signed_request(
+	array( 'id' => 9800, 'state' => 'completed', 'reference' => 'XT-PO-' . $payout_id ),
+	$test_priv
+);
+
+$test_response = chip_affiliatewp_handle_webhook( $test_request );
+
+check( 'a webhook signed by the other mode is accepted', is_array( $test_response ) );
+check( 'the test-mode payout settles after the mode flip', 'paid' === affwp_get_payout( $payout_id )->status );
+check( 'the test-mode referral is paid', 'paid' === $GLOBALS['__referral_rows'][700]->status );
+
+// A live-signed webhook is still accepted while live is current.
+reset_state();
+$GLOBALS['__options']['chip_payouts']             = 1;
+$GLOBALS['__options']['chip_webhook_secret']      = 'fixedharnesssecret000000000000000000';
+$GLOBALS['__options']['chip_webhook_public_key_test'] = $test_pub;
+$GLOBALS['__options']['chip_webhook_public_key_live'] = $live_pub;
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7] = new Fake_User( 7, 'affiliate@test.dev' );
+
+$live_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 701 ),
+		'amount'        => '8.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+$GLOBALS['__referral_rows'][701] = new Fake_Referral( 701, 3, '8.00', 'unpaid', $live_payout );
+
+chip_affiliatewp_update_payout_data( $live_payout, array( 'instruction_id' => 9801, 'state' => 'executing', 'mode' => 'live' ) );
+
+$live_response = chip_affiliatewp_handle_webhook(
+	__chip_signed_request(
+		array( 'id' => 9801, 'state' => 'completed', 'reference' => 'XT-PO-' . $live_payout ),
+		$live_priv
+	)
+);
+
+check( 'a live-signed webhook is accepted', is_array( $live_response ) );
+check( 'the live payout settles', 'paid' === affwp_get_payout( $live_payout )->status );
+
+// A forged signature is still rejected, even with both keys configured.
+$forged_pair = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+openssl_pkey_export( $forged_pair, $forged_priv );
+
+$forged = chip_affiliatewp_handle_webhook(
+	__chip_signed_request( array( 'id' => 9802, 'state' => 'completed' ), $forged_priv )
+);
+
+check( 'a signature from an unknown key is rejected', is_wp_error( $forged ) );
+check( 'the rejected signature is a 401', is_wp_error( $forged ) && 401 === $forged->get_error_data()['status'] );
+
+// A payload signed correctly but tampered with afterwards is rejected too.
+$good_body = json_encode( array( 'id' => 9803, 'state' => 'completed' ) );
+openssl_sign( $good_body, $good_sig, $live_priv, OPENSSL_ALGO_SHA512 );
+
+$tampered = new Fake_Request();
+$tampered->body = $good_body . 'x';
+$tampered->headers['HTTP_X_SIGNATURE'] = base64_encode( $good_sig );
+$tampered->headers['HTTP_EVENT_TYPE']  = 'send_instruction_status';
+
+$tampered_result = chip_affiliatewp_handle_webhook( $tampered );
+
+check( 'a tampered body is rejected', is_wp_error( $tampered_result ) );
+check( 'the tampered body is a 401', is_wp_error( $tampered_result ) && 401 === $tampered_result->get_error_data()['status'] );
+
+// A malformed signature is rejected without a PHP error.
+$bad_sig = new Fake_Request();
+$bad_sig->body = $good_body;
+$bad_sig->headers['HTTP_X_SIGNATURE'] = 'not-base64!!!';
+$bad_sig->headers['HTTP_EVENT_TYPE']  = 'send_instruction_status';
+
+$bad_sig_result = chip_affiliatewp_handle_webhook( $bad_sig );
+
+check( 'a malformed signature is rejected', is_wp_error( $bad_sig_result ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
