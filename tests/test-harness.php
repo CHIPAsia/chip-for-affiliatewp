@@ -4354,14 +4354,27 @@ foreach ( $referenced as $relative => $from ) {
 	check( 'referenced asset exists on disk: ' . $relative . ' (' . $from . ')', $on_disk );
 
 	/*
-	 * The build script lists whole directories, one per line, each ending in a
-	 * trailing backslash. Match the directory as its own line so a mention in a
-	 * comment cannot satisfy the check.
+	 * The build script must ship the directory. It lists them one per line,
+	 * either as a bare zip argument ending in a trailing backslash or as an
+	 * argument to a copy. Match the directory as its own token so a mention
+	 * inside a comment cannot satisfy the check.
 	 */
 	$shipped = false;
 
 	foreach ( preg_split( '/\R/', $build_source ) as $build_line ) {
-		if ( trim( rtrim( trim( $build_line ), '\\' ) ) === $top_level ) {
+		$line = trim( $build_line );
+
+		if ( '' === $line || 0 === strpos( $line, '#' ) ) {
+			continue;
+		}
+
+		if ( trim( rtrim( $line, '\\' ) ) === $top_level ) {
+			$shipped = true;
+			break;
+		}
+
+		// cp -r includes languages assets "$STAGE/..."
+		if ( preg_match( '/^(?:cp|rsync)\b/', $line ) && preg_match( '/(?:^|\s)' . preg_quote( $top_level, '/' ) . '(?:\s|$)/', $line ) ) {
 			$shipped = true;
 			break;
 		}
@@ -4377,6 +4390,16 @@ check( 'the build ships the languages directory', false !== strpos( $build_sourc
 foreach ( array( 'tests', 'scripts', 'vendor' ) as $dev_only ) {
 	check( 'the build does not ship ' . $dev_only, ! preg_match( '/^\s*' . $dev_only . '\s*\\/m', $build_source ) );
 }
+
+/*
+ * The archive must carry one top-level directory named after the plugin.
+ * WordPress decides from the archive whether an upload is a single plugin:
+ * WP_Upgrader only descends into a lone top-level directory, and otherwise
+ * copies the entries straight into wp-content/plugins/. A flat zip installs
+ * a plugin that can never be activated.
+ */
+check( 'the build stages into a plugin directory', false !== strpos( $build_source, 'chip-for-affiliatewp' ) && false !== strpos( $build_source, 'STAGE' ) );
+check( 'the zip is built from inside the stage', false !== strpos( $build_source, 'zip -rq' ) && false !== strpos( $build_source, 'cd "$STAGE"' ) );
 
 echo "\n== Test 72: the bank list and length bounds cover what CHIP accepts ==\n";
 
