@@ -5054,6 +5054,79 @@ check( 'the failure status is cleared with it', empty( $data['error_status'] ) )
 // Neither key may linger on a successful payout.
 check( 'no orphaned status', ! isset( $data['error_status'] ) );
 
+echo "\n== Test 84: a failed payout keeps no receipt for money that never moved ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 995 ),
+		'amount'        => '73.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$receipt = 'https://staging.chip-in.asia/receipts/send/abc123';
+
+// CHIP reports the instruction running, and already supplies a receipt.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array( 'id' => 9200, 'state' => 'executing', 'receipt_url' => $receipt )
+);
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'a receipt is kept while the transfer is live', $receipt === (string) ( $data['receipt_url'] ?? '' ) );
+
+// The row's invoice link is written when the instruction is submitted or
+// completes, so it is set here the way a submission would have set it.
+affiliate_wp()->affiliates->payouts->update( $payout_id, array( 'service_invoice_link' => $receipt ), '', 'payout' );
+
+$row = affwp_get_payout( $payout_id );
+check( 'the row carries the receipt link while live', false !== strpos( (string) $row->service_invoice_link, 'receipts' ) );
+
+// CHIP then refuses it: no money moved, so the receipt must go.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array( 'id' => 9200, 'state' => 'rejected', 'rejection_reason' => 'Account closed.' )
+);
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+$row  = affwp_get_payout( $payout_id );
+
+check( 'the payout failed', 'failed' === $row->status );
+check( 'the receipt is dropped from meta', empty( $data['receipt_url'] ) );
+check( 'the receipt link is cleared on the row', '' === (string) $row->service_invoice_link );
+
+// A receipt for a real payment is untouched.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$paid = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 996 ),
+		'amount'        => '18.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+chip_affiliatewp_apply_instruction( $paid, array( 'id' => 9201, 'state' => 'completed', 'receipt_url' => $receipt ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $paid ) );
+$row  = affwp_get_payout( $paid );
+
+check( 'a paid payout keeps its receipt', $receipt === (string) ( $data['receipt_url'] ?? '' ) );
+check( 'a paid payout keeps its invoice link', false !== strpos( (string) $row->service_invoice_link, 'receipts' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

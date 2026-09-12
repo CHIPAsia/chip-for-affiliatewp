@@ -591,6 +591,15 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 	 */
 	unset( $data['review_notified'], $data['note'] );
 
+	/*
+	 * Drop the receipt. CHIP issues one as soon as an instruction exists, so a
+	 * payout that was later refused still holds a link to a receipt for a
+	 * transfer that did not happen — and that link is shown to the merchant as
+	 * the payout's "invoice" on a failed row. A receipt is evidence of payment,
+	 * so it must not outlive the payout's claim to have been paid.
+	 */
+	unset( $data['receipt_url'] );
+
 	if ( $payout ) {
 		/*
 		 * State goes to payout meta; the description carries the plain reason,
@@ -622,10 +631,16 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 		 * missing meta instruction_id from this column, so leaving it behind
 		 * would resurrect the dead instruction on the next sweep and undo the
 		 * cleanup above.
+		 *
+		 * The receipt link goes with it: it is rendered as this payout's
+		 * invoice, and a failed payout must not carry a link to a receipt for
+		 * money that never moved.
 		 */
 		if ( $terminal_at_chip ) {
 			$update['service_id'] = 0;
 		}
+
+		$update['service_invoice_link'] = '';
 
 		/*
 		 * Classify the failure so AffiliateWP can drive the Retry button, the
