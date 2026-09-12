@@ -4169,6 +4169,60 @@ $bad_sig_result = chip_affiliatewp_handle_webhook( $bad_sig );
 
 check( 'a malformed signature is rejected', is_wp_error( $bad_sig_result ) );
 
+echo "\n== Test 69: a payout born from a webhook records its mode ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']                 = 1;
+$GLOBALS['__options']['chip_webhook_secret']          = 'fixedharnesssecret000000000000000000';
+$GLOBALS['__affiliates_map'][3]                       = 7;
+$GLOBALS['__users'][7]                                = new Fake_User( 7, 'affiliate@test.dev' );
+
+$pair = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+openssl_pkey_export( $pair, $priv );
+$GLOBALS['__options']['chip_webhook_public_key_test'] = openssl_pkey_get_details( $pair )['key'];
+
+// The site is in TEST mode and only a test key exists.
+$GLOBALS['__options']['chip_test_mode'] = 1;
+
+// A single referral was submitted without a payout row; its webhook arrives.
+$GLOBALS['__referral_rows'][800] = new Fake_Referral( 800, 3, '11.00', 'unpaid', 0 );
+
+$webhook_body = array(
+	'id'        => 9900,
+	'state'     => 'executing',
+	'reference' => 'XT-R-800',
+);
+
+$signed = json_encode( $webhook_body );
+openssl_sign( $signed, $sig, $priv, OPENSSL_ALGO_SHA512 );
+
+$request = new Fake_Request();
+$request->body = $signed;
+$request->headers['HTTP_X_SIGNATURE'] = base64_encode( $sig );
+$request->headers['HTTP_EVENT_TYPE']  = 'send_instruction_status';
+
+chip_affiliatewp_handle_webhook( $request );
+
+// The payout created from that webhook must carry the mode that verified it.
+$created = 0;
+
+foreach ( $GLOBALS['__payout_rows'] as $row ) {
+	if ( 9900 === (int) ( $row->service_id ?? 0 ) ) {
+		$created = (int) $row->payout_id;
+	}
+}
+
+check( 'the webhook created a payout', $created > 0 );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $created ) );
+check( 'the created payout records the verified mode', 'test' === ( $data['mode'] ?? '' ) );
+check( 'the created payout records its instruction', 9900 === (int) ( $data['instruction_id'] ?? 0 ) );
+
+// After a switch to live, the payout still resolves in its own mode.
+$GLOBALS['__options']['chip_test_mode'] = 0;
+
+check( 'the created payout still knows its mode after a flip', 'test' === ( chip_affiliatewp_payout_data( affwp_get_payout( $created ) )['mode'] ?? '' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

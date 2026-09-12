@@ -355,7 +355,7 @@ msgstr "Mod"
 msgid "No bank details"
 msgstr "Tiada butiran bank"
 
-#: includes/class-chip-affiliatewp-webhooks.php:704
+#: includes/class-chip-affiliatewp-webhooks.php:735
 msgid "No route was found matching the URL and request method."
 msgstr "Tiada laluan sepadan dengan URL dan kaedah permintaan tersebut."
 

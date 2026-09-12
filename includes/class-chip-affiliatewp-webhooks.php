@@ -491,7 +491,7 @@ function chip_affiliatewp_handle_webhook( $request ) {
 		return new WP_Error( 'chip_webhook_incomplete', __( 'The payload is missing a send instruction ID or state.', 'chip-for-affiliatewp' ), array( 'status' => 400 ) );
 	}
 
-	chip_affiliatewp_process_instruction_webhook( $payload );
+	chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode );
 
 	return rest_ensure_response( array( 'handled' => true ) );
 }
@@ -555,8 +555,19 @@ function chip_affiliatewp_forget_cached_bank_account_from_webhook( $payload ) {
  * @param array $payload Webhook payload.
  * @return void
  */
-function chip_affiliatewp_process_instruction_webhook( $payload ) {
+function chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode = '' ) {
 	global $wpdb;
+
+	/*
+	 * The mode the signature verified against is the only reliable statement of
+	 * which environment this instruction belongs to. It is what a payout created
+	 * here must record: without it, a payout born from a webhook has no mode, and
+	 * the first requery after a mode switch resolves the instruction against the
+	 * wrong host and 404s forever.
+	 */
+	$verified_mode = in_array( $verified_mode, array( 'test', 'live' ), true )
+		? $verified_mode
+		: chip_affiliatewp_current_mode();
 
 	$instruction_id = absint( chip_affiliatewp_array_value( $payload, 'id' ) );
 	$reference      = (string) chip_affiliatewp_array_value( $payload, 'reference' );
@@ -594,10 +605,30 @@ function chip_affiliatewp_process_instruction_webhook( $payload ) {
 								'state'          => (string) chip_affiliatewp_array_value( $payload, 'state', '' ),
 								'referral_ids'   => array( (int) $referral->ID ),
 								'recovered'      => true,
+								'mode'           => $verified_mode,
 							)
 						),
 					)
 				);
+
+				/*
+				 * Record the mode in payout meta as well: the requery path reads
+				 * it from there, and this payout was born without a submission
+				 * to set it.
+				 */
+				if ( $payout_id ) {
+					chip_affiliatewp_update_payout_data(
+						(int) $payout_id,
+						array(
+							'instruction_id' => $instruction_id,
+							'reference'      => $reference,
+							'state'          => (string) chip_affiliatewp_array_value( $payload, 'state', '' ),
+							'referral_ids'   => array( (int) $referral->ID ),
+							'mode'           => $verified_mode,
+							'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
+						)
+					);
+				}
 			}
 		}
 	}
