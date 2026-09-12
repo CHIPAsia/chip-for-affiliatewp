@@ -40,6 +40,18 @@ function chip_affiliatewp_schedule_sweep() {
 		return;
 	}
 
+	/*
+	 * Action Scheduler is available, so the WP-Cron event is now redundant.
+	 * Clear it: a site that ran an earlier version kept the WP-Cron event when
+	 * scheduling moved to Action Scheduler, and both stayed active — the sweep
+	 * ran twice an hour, doubling the payout scan and the API traffic for no
+	 * benefit. The cooldown keeps it from requerying the same payout twice, but
+	 * the work of finding them is done twice.
+	 */
+	if ( wp_next_scheduled( 'chip_affiliatewp_hourly_sweep' ) ) {
+		wp_clear_scheduled_hook( 'chip_affiliatewp_hourly_sweep' );
+	}
+
 	if ( false !== as_next_scheduled_action( 'chip_affiliatewp_hourly_sweep', array(), chip_affiliatewp_as_group() ) ) {
 		return;
 	}

@@ -71,8 +71,12 @@ function wp_clear_scheduled_hook( $hook ) {
 
 function as_schedule_recurring_action( $ts, $interval, $hook, $args = array(), $group = '' ) {
 	$GLOBALS['__as_scheduled'][] = array( 'timestamp' => $ts, 'hook' => $hook, 'args' => $args, 'group' => $group );
-	// Mirrored so tests asserting on the WP-Cron registry still see it.
-	$GLOBALS['__schedule'][ $hook ] = $ts;
+	/*
+	 * Deliberately NOT mirrored into the WP-Cron registry: real Action
+	 * Scheduler keeps its own table and never touches WP-Cron. Mirroring it
+	 * made a redundant WP-Cron event look like an Action Scheduler one, which
+	 * hid the double-scheduling bug the sweep used to have.
+	 */
 	return 1;
 }
 
@@ -1328,7 +1332,9 @@ check( 'referral stays unpaid until confirmed', 'unpaid' === $GLOBALS['__referra
 echo "\n== Test 18: activation/deactivation hooks ==\n";
 reset_state();
 call_user_func( $GLOBALS['__activate_cb'] );
-check( 'hourly sweep scheduled', ! empty( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) );
+// The sweep runs through Action Scheduler when it is available; the WP-Cron
+// registry is only the fallback, so assert on the scheduler actually used.
+check( 'hourly sweep scheduled', ! empty( $GLOBALS['__as_scheduled'] ) );
 call_user_func( $GLOBALS['__deactivate_cb'] );
 check( 'sweep cleared', empty( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) );
 
@@ -4641,6 +4647,34 @@ $hook_at    = strpos( $main, 'register_activation_hook(' );
 
 check( 'the lifecycle module is required', false !== $require_at );
 check( 'the hooks are registered after the require', false !== $hook_at && false !== $require_at && $hook_at > $require_at );
+
+echo "\n== Test 77: only one scheduler runs the sweep ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+// Action Scheduler available; a WP-Cron event left over from an earlier version.
+$GLOBALS['__schedule']     = array( 'chip_affiliatewp_hourly_sweep' => time() + 3600 );
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_schedule_sweep();
+
+check( 'the leftover WP-Cron event is cleared', ! isset( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) );
+check( 'an Action Scheduler action is created', 1 === count( $GLOBALS['__as_scheduled'] ) );
+
+// A second call must not duplicate the Action Scheduler action.
+chip_affiliatewp_schedule_sweep();
+
+check( 'a second call does not duplicate the action', 1 === count( $GLOBALS['__as_scheduled'] ) );
+
+// The sweep must not be resurrected on WP-Cron while Action Scheduler owns it.
+check( 'no WP-Cron event remains', ! isset( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) );
+
+// Both schedulers must never be active at the same time.
+check(
+	'never both schedulers at once',
+	! ( isset( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) && ! empty( $GLOBALS['__as_scheduled'] ) )
+);
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
