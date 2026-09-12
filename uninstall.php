@@ -25,28 +25,64 @@ if ( defined( 'WP_PLUGIN_DIR' ) ) {
 
 require WP_UNINSTALL_PLUGIN;
 
+/*
+ * Settings keys, per mode where the plugin stores them per mode.
+ *
+ * The webhook keys are built by chip_affiliatewp_webhook_option_keys(), which
+ * puts the mode LAST (`chip_webhook_id_test`). Listing them by hand as
+ * `chip_test_webhook_id` looks right and matches nothing, so the recorded
+ * webhook ID and its public key survived an uninstall. Derive them from the
+ * same builder instead of copying the shape.
+ */
 $chip_option_names = array();
 
 foreach ( array( 'test', 'live' ) as $chip_mode ) {
-	foreach ( array( 'api_key', 'secret_key', 'webhook_id', 'webhook_public_key', 'webhook_setup' ) as $chip_suffix ) {
-		$chip_option_names[] = 'chip_' . $chip_mode . '_' . $chip_suffix;
+	$chip_option_names[] = 'chip_' . $chip_mode . '_api_key';
+	$chip_option_names[] = 'chip_' . $chip_mode . '_secret_key';
+	$chip_option_names[] = 'chip_' . $chip_mode . '_webhook_setup';
+
+	// The same keys the plugin writes, rather than a hand-copied guess.
+	if ( function_exists( 'chip_affiliatewp_webhook_option_keys' ) ) {
+		foreach ( chip_affiliatewp_webhook_option_keys( $chip_mode ) as $chip_key_name ) {
+			$chip_option_names[] = $chip_key_name;
+		}
+	} else {
+		$chip_option_names[] = 'chip_webhook_id_' . $chip_mode;
+		$chip_option_names[] = 'chip_webhook_key_' . $chip_mode;
+		$chip_option_names[] = 'chip_webhook_checked_' . $chip_mode;
 	}
+
+	// Per-mode manual public key (optional, admin-entered).
+	$chip_option_names[] = 'chip_webhook_public_key_' . $chip_mode;
 }
 
 $chip_option_names = array_merge(
 	$chip_option_names,
-	array( 'chip_payouts', 'chip_test_mode', 'chip_reference_prefix', 'chip_send_recipient_receipt' )
+	array(
+		'chip_payouts',
+		'chip_test_mode',
+		'chip_reference_prefix',
+		'chip_send_recipient_receipt',
+		// The legacy single-key setting and the per-site URL secret.
+		'chip_webhook_public_key',
+		'chip_webhook_secret',
+		// Standalone options the plugin writes outside AffiliateWP's settings.
+		'chip_affiliatewp_review_cache_version',
+	)
 );
-
-// Standalone options the plugin writes outside AffiliateWP's settings.
-$chip_option_names[] = 'chip_affiliatewp_review_cache_version';
 
 // Best effort: delete the CHIP Send webhooks this plugin registered so the
 // site stops receiving webhook deliveries. Failures are ignored — the
 // webhook can also be removed from the CHIP portal manually.
 if ( class_exists( 'Affiliate_WP' ) && function_exists( 'chip_affiliatewp_request' ) ) {
 	foreach ( array( 'test', 'live' ) as $chip_target_mode ) {
-		$chip_webhook_id = (string) affiliate_wp()->settings->get( 'chip_' . $chip_target_mode . '_webhook_id', '' );
+		// The recorded ID, read through the same keys the plugin writes to.
+		if ( ! function_exists( 'chip_affiliatewp_webhook_option_keys' ) ) {
+			continue;
+		}
+
+		$chip_keys       = chip_affiliatewp_webhook_option_keys( $chip_target_mode );
+		$chip_webhook_id = (string) affiliate_wp()->settings->get( $chip_keys['id'], '' );
 
 		if ( '' === $chip_webhook_id ) {
 			continue;

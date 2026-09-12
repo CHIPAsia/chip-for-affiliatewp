@@ -4512,6 +4512,107 @@ check( 'no notice on a current install', '' === trim( $clean ) );
 
 $GLOBALS['__affwp_version'] = '2.36.2';
 
+echo "\n== Test 75: uninstall removes the options the plugin actually writes ==\n";
+
+$repo      = dirname( __DIR__ );
+$uninstall = (string) file_get_contents( $repo . '/uninstall.php' );
+
+check( 'uninstall.php was read', '' !== $uninstall );
+
+/*
+ * Every option the plugin WRITES must be named in uninstall.php, or it
+ * survives an uninstall. This is exactly how the recorded webhook ID was left
+ * behind: the code wrote chip_webhook_id_test while uninstall looked for
+ * chip_test_webhook_id.
+ *
+ * Only the functions that persist options are read, so function names and
+ * transient keys cannot pollute the list.
+ */
+$written = array();
+
+foreach ( glob( $repo . '/includes/*.php' ) as $path ) {
+	$src = (string) file_get_contents( $path );
+
+	// add_option( 'name' ... ) / update_option( 'name' ... )
+	if ( preg_match_all( "/\b(?:add|update)_option\(\s*'([a-z0-9_]+)'/", $src, $hits ) ) {
+		foreach ( $hits[1] as $name ) {
+			$written[ $name ] = basename( $path );
+		}
+	}
+
+	// $input['name'] = ... inside the options sanitizer
+	if ( preg_match_all( "/\\$input\[\s*'([a-z0-9_]+)'\s*\]/", $src, $hits ) ) {
+		foreach ( $hits[1] as $name ) {
+			$written[ $name ] = basename( $path );
+		}
+	}
+
+	// AffiliateWP settings keys, which live in the affwp_settings option.
+	if ( preg_match_all( "/->settings->(?:get|update)\(\s*'(chip_[a-z0-9_]+)'/", $src, $hits ) ) {
+		foreach ( $hits[1] as $name ) {
+			$written[ $name ] = basename( $path );
+		}
+	}
+}
+
+// Per-mode webhook keys are built at runtime by webhook_option_keys().
+foreach ( array( 'test', 'live' ) as $mode ) {
+	foreach ( array( 'id', 'key', 'checked' ) as $part ) {
+		$written[ 'chip_webhook_' . $part . '_' . $mode ] = 'webhook_option_keys()';
+	}
+
+	// Credential keys are built at runtime by setting_key().
+	$written[ 'chip_' . $mode . '_api_key' ]    = 'setting_key()';
+	$written[ 'chip_' . $mode . '_secret_key' ] = 'setting_key()';
+}
+
+check( 'the scan found options to check', count( $written ) > 0 );
+
+$missing = array();
+
+foreach ( $written as $name => $from ) {
+	if ( false !== strpos( $uninstall, $name ) ) {
+		continue;
+	}
+
+	// A runtime-built webhook key is covered only when uninstall DERIVES it
+	// from the shared builder. Mentioning the builder elsewhere (the webhook
+	// DELETE section does) is not enough.
+	if ( 'webhook_option_keys()' === $from && false !== strpos( $uninstall, 'foreach ( chip_affiliatewp_webhook_option_keys' ) ) {
+		continue;
+	}
+
+	if ( 'setting_key()' === $from && preg_match( "/chip_' \\. \\\$chip_mode \\. '_/", $uninstall ) ) {
+		continue;
+	}
+
+	$missing[] = $name . ' (' . $from . ')';
+}
+
+check(
+	'every written option is covered by uninstall.php' . ( $missing ? ' — MISSING: ' . implode( ', ', $missing ) : '' ),
+	array() === $missing
+);
+
+// The specific regression: mode comes LAST in the webhook keys.
+// Only a real key string counts, not the comment that documents the mistake.
+$uninstall_code = preg_replace( '#/\*[\s\S]*?\*/#', '', preg_replace( '#^\s*//.*$#m', '', $uninstall ) );
+
+check( 'uninstall does not invent chip_test_webhook_id', false === strpos( $uninstall_code, 'chip_test_webhook_id' ) );
+
+// The same mistake written as concatenation: mode BEFORE the key name.
+check(
+	'uninstall does not build the webhook keys with the mode first',
+	0 === preg_match( "/chip_' \\. \\\$chip_mode \\. '_webhook_(?:id|key|checked)/", $uninstall_code )
+);
+check( 'uninstall does not invent chip_live_webhook_id', false === strpos( $uninstall_code, 'chip_live_webhook_id' ) );
+
+// The per-site URL secret must be cleared, or a reinstall inherits it.
+check( 'uninstall clears the webhook URL secret', false !== strpos( $uninstall, 'chip_webhook_secret' ) );
+
+// The legacy single-key setting must be cleared too.
+check( 'uninstall clears the legacy public key', false !== strpos( $uninstall, "'chip_webhook_public_key'" ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
