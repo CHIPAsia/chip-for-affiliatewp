@@ -5236,6 +5236,114 @@ chip_affiliatewp_process_generated_batch( 88 );
 
 check( 'a different batch queues nothing', 0 === count( $GLOBALS['__as_scheduled'] ) );
 
+echo "\n== Test 87: adoption records the mode the instruction lives in ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$referral = new Fake_Referral( 1100, 3, '48.00', 'unpaid', 0 );
+
+// Adoption runs while the site is in TEST mode, and the instruction is a test one.
+chip_affiliatewp_adopt_referral_instruction(
+	$referral,
+	array( 'id' => 8800, 'state' => 'executing', 'reference' => 'XT-R-1100' ),
+	'XT-R-1100',
+	'test'
+);
+
+$rows = array_values(
+	array_filter(
+		$GLOBALS['__payout_rows'],
+		function ( $p ) {
+			return 8800 === (int) $p->service_id;
+		}
+	)
+);
+
+check( 'the adopted payout was created', 1 === count( $rows ) );
+
+$adopted_id = (int) $rows[0]->payout_id;
+$data       = chip_affiliatewp_payout_data( affwp_get_payout( $adopted_id ) );
+
+check( 'the adopted payout records the given mode', 'test' === ( $data['mode'] ?? '' ) );
+
+// Now the site is in live mode, but the instruction was found in test:
+// the recorded mode must follow the instruction, not the setting.
+reset_state();
+$GLOBALS['__options']['chip_payouts']       = 1;
+$GLOBALS['__options']['chip_test_mode']     = 0;
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+chip_affiliatewp_adopt_referral_instruction(
+	new Fake_Referral( 1101, 3, '48.00', 'unpaid', 0 ),
+	array( 'id' => 8801, 'state' => 'executing', 'reference' => 'XT-R-1101' ),
+	'XT-R-1101',
+	'test'
+);
+
+$rows = array_values(
+	array_filter(
+		$GLOBALS['__payout_rows'],
+		function ( $p ) {
+			return 8801 === (int) $p->service_id;
+		}
+	)
+);
+
+check( 'the second payout was created', 1 === count( $rows ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( (int) $rows[0]->payout_id ) );
+
+check( 'a live-mode site still records the test instruction as test', 'test' === ( $data['mode'] ?? '' ) );
+
+// With no mode passed, the current mode is the sensible default.
+reset_state();
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+chip_affiliatewp_adopt_referral_instruction(
+	new Fake_Referral( 1102, 3, '48.00', 'unpaid', 0 ),
+	array( 'id' => 8802, 'state' => 'executing', 'reference' => 'XT-R-1102' ),
+	'XT-R-1102'
+);
+
+$rows = array_values(
+	array_filter(
+		$GLOBALS['__payout_rows'],
+		function ( $p ) {
+			return 8802 === (int) $p->service_id;
+		}
+	)
+);
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( (int) $rows[0]->payout_id ) );
+
+check( 'an omitted mode falls back to the current mode', 'test' === ( $data['mode'] ?? '' ) );
+
+// The reference lookup must pass the mode through to the API request.
+// Live credentials are needed for the live host to be used at all.
+$GLOBALS['__options']['chip_live_api_key']    = 'lk';
+$GLOBALS['__options']['chip_live_secret_key'] = 'ls';
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_list_instruction_by_reference( 'XT-R-1103', 'live' );
+
+check( 'the reference lookup hits the live host when asked', 1 === count( $GLOBALS['__http_log'] ) );
+check( 'the lookup used the live base URL', false !== strpos( (string) $GLOBALS['__http_log'][0]['url'], 'api.chip-in.asia' ) && false === strpos( (string) $GLOBALS['__http_log'][0]['url'], 'staging-api' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

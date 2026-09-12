@@ -252,7 +252,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	 * handled below by advancing the attempt, so this lookup never adopts a
 	 * refused instruction.
 	 */
-	$existing = chip_affiliatewp_list_instruction_by_reference( $reference );
+	$existing = chip_affiliatewp_list_instruction_by_reference( $reference, chip_affiliatewp_current_mode() );
 
 	if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 		$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
@@ -373,7 +373,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		 * or a webhook that attached the payout row first. Adopt it instead of
 		 * re-sending, which is what keeps a retry from paying twice.
 		 */
-		$existing = chip_affiliatewp_list_instruction_by_reference( $reference );
+		$existing = chip_affiliatewp_list_instruction_by_reference( $reference, chip_affiliatewp_current_mode() );
 
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
@@ -897,17 +897,26 @@ function chip_affiliatewp_burnt_references( $referral_id ) {
  * there has to create the row around the found instruction rather than update
  * one.
  *
- * @param object $referral    Referral object.
- * @param array  $instruction Instruction payload from CHIP.
- * @param string $reference   Reference the instruction was found under.
+ * @param object      $referral    Referral object.
+ * @param array       $instruction Instruction payload from CHIP.
+ * @param string      $reference   Reference the instruction was found under.
+ * @param string|null $mode        Optional. Mode the instruction lives in.
  * @return int Payout ID, or 0 when the row could not be created.
  */
-function chip_affiliatewp_adopt_referral_instruction( $referral, $instruction, $reference ) {
+function chip_affiliatewp_adopt_referral_instruction( $referral, $instruction, $reference, $mode = null ) {
 	$instruction_id = (int) ( $instruction['id'] ?? 0 );
 
 	if ( ! $instruction_id ) {
 		return 0;
 	}
+
+	/*
+	 * Record the mode the instruction was actually found in, not the site's
+	 * mode at adoption time. A referral submitted in test mode and adopted
+	 * after a switch to live would otherwise be recorded as live, and every
+	 * later requery would resolve a staging instruction against the live host.
+	 */
+	$mode = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
 
 	$receipt_url = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $instruction, 'receipt_url', '' ) );
 
@@ -937,7 +946,7 @@ function chip_affiliatewp_adopt_referral_instruction( $referral, $instruction, $
 			'referral_ids'   => array( (int) $referral->ID ),
 			'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
 			'poll_count'     => 0,
-			'mode'           => affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live',
+			'mode'           => $mode,
 		)
 	);
 
@@ -1362,6 +1371,14 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	}
 
 	/*
+	 * The mode is resolved once and threaded through the lookups and adoption
+	 * below. Reading the setting at each point would let a merchant's mode
+	 * switch mid-flow land the instruction and its record in different
+	 * environments.
+	 */
+	$mode = chip_affiliatewp_current_mode();
+
+	/*
 	 * The reference is the idempotency key at CHIP and is stored permanently,
 	 * so it carries an attempt number for the same reason the batch path does:
 	 * a repeat within an attempt is refused and adopted (safe after an unclear
@@ -1384,14 +1401,14 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	}
 
 	// Count existing instructions for this referral to pick the attempt number.
-	$probe = chip_affiliatewp_list_instruction_by_reference( substr( $reference, 0, 40 ) );
+	$probe = chip_affiliatewp_list_instruction_by_reference( substr( $reference, 0, 40 ), $mode );
 
 	if ( is_array( $probe ) && ! empty( $probe['id'] ) ) {
 		$probe_state = strtolower( (string) ( $probe['state'] ?? '' ) );
 
 		if ( ! in_array( $probe_state, array( 'rejected', 'deleted' ), true ) ) {
 			// A live instruction already exists for this referral: adopt it.
-			chip_affiliatewp_adopt_referral_instruction( $referral, $probe, $reference );
+			chip_affiliatewp_adopt_referral_instruction( $referral, $probe, $reference, $mode );
 
 			return true;
 		}
@@ -1404,14 +1421,14 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 
 		// Skip past any earlier dead attempts for this referral.
 		while ( $attempt < 20 ) {
-			$candidate = chip_affiliatewp_list_instruction_by_reference( $reference );
+			$candidate = chip_affiliatewp_list_instruction_by_reference( $reference, $mode );
 
 			if ( ! is_array( $candidate ) || empty( $candidate['id'] ) ) {
 				break;
 			}
 
 			if ( ! in_array( strtolower( (string) ( $candidate['state'] ?? '' ) ), array( 'rejected', 'deleted' ), true ) ) {
-				chip_affiliatewp_adopt_referral_instruction( $referral, $candidate, $reference );
+				chip_affiliatewp_adopt_referral_instruction( $referral, $candidate, $reference, $mode );
 
 				return true;
 			}
@@ -1474,7 +1491,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		 * would create a payout that can never settle. Surface the failure and
 		 * let the next attempt use a fresh reference.
 		 */
-		$existing = chip_affiliatewp_list_instruction_by_reference( substr( $reference, 0, 40 ) );
+		$existing = chip_affiliatewp_list_instruction_by_reference( substr( $reference, 0, 40 ), $mode );
 
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
@@ -1490,7 +1507,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 				return $response;
 			}
 
-			$adopted = chip_affiliatewp_adopt_referral_instruction( $referral, $existing, $reference );
+			$adopted = chip_affiliatewp_adopt_referral_instruction( $referral, $existing, $reference, $mode );
 
 			if ( $adopted ) {
 				return true;

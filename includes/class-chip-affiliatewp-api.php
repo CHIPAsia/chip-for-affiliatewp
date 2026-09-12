@@ -205,10 +205,12 @@ function chip_affiliatewp_request( $method, $path, $body = array(), $query = arr
  * recover an instruction that was already created when a submission retry
  * hits a duplicate-reference rejection.
  *
- * @param string $reference Reference value.
+ * @param string      $reference Reference value.
+ * @param string|null $mode      Optional. Mode to search in. Defaults to the
+ *                               current mode.
  * @return array|null
  */
-function chip_affiliatewp_list_instruction_by_reference( $reference ) {
+function chip_affiliatewp_list_instruction_by_reference( $reference, $mode = null ) {
 	$response = chip_affiliatewp_request(
 		'GET',
 		'/send/send_instructions',
@@ -217,7 +219,8 @@ function chip_affiliatewp_list_instruction_by_reference( $reference ) {
 			'page'      => 1,
 			'limit'     => 25,
 			'reference' => $reference,
-		)
+		),
+		$mode
 	);
 
 	if ( is_wp_error( $response ) || empty( $response['results'] ) || ! is_array( $response['results'] ) ) {
