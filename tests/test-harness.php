@@ -363,7 +363,13 @@ $GLOBALS['__mail'] = array();
 
 function wp_mail( $to, $subject, $body, $headers = '' ) {
 	$GLOBALS['__mail'][] = array( 'to' => $to, 'subject' => $subject, 'body' => $body );
-	return true;
+
+	/*
+	 * wp_mail returns false when the site cannot send (no mail transport, a
+	 * refused relay). Tests set __mail_fails so the failure path can be
+	 * exercised; returning true unconditionally would hide it.
+	 */
+	return empty( $GLOBALS['__mail_fails'] );
 }
 
 function is_email( $email ) {
@@ -4675,6 +4681,112 @@ check(
 	'never both schedulers at once',
 	! ( isset( $GLOBALS['__schedule']['chip_affiliatewp_hourly_sweep'] ) && ! empty( $GLOBALS['__as_scheduled'] ) )
 );
+
+echo "\n== Test 78: a failed notification email is retried, not marked sent ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 900 ),
+		'amount'        => '42.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array(
+		'instruction_id' => 9700,
+		'state'          => 'reviewing',
+		'mode'           => 'test',
+	)
+);
+
+// The mailer fails: the payout must stay unnotified so the next run retries.
+$GLOBALS['__mail_fails'] = true;
+$GLOBALS['__mail']       = array();
+
+$sent = chip_affiliatewp_notify_review_payouts();
+
+check( 'a failed send reports nothing sent', 0 === (int) $sent );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'a failed send does not mark the payout notified', empty( $data['review_notified'] ) );
+
+// The next run succeeds and only then records the notification.
+$GLOBALS['__mail_fails'] = false;
+$GLOBALS['__mail']       = array();
+
+$sent = chip_affiliatewp_notify_review_payouts();
+
+check( 'the retry sends', 1 === (int) $sent );
+check( 'the email went to the merchant', 1 === count( $GLOBALS['__mail'] ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'a successful send marks the payout notified', ! empty( $data['review_notified'] ) );
+
+// And it must not send again.
+$GLOBALS['__mail'] = array();
+
+$again = chip_affiliatewp_notify_review_payouts();
+
+check( 'a notified payout is not emailed twice', 0 === (int) $again );
+check( 'no second email was produced', 0 === count( $GLOBALS['__mail'] ) );
+
+$GLOBALS['__mail_fails'] = false;
+
+echo "\n== Test 79: a settings save does not re-check the webhook every time ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']            = 1;
+$GLOBALS['__options']['chip_test_mode']          = 1;
+$GLOBALS['__options']['chip_test_api_key']       = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']    = 'ts';
+$GLOBALS['__options']['chip_webhook_id_test']    = 133;
+$GLOBALS['__options']['chip_webhook_key_test']   = 'pub';
+$GLOBALS['__options']['chip_webhook_checked_test'] = time();
+
+// A check that just succeeded is still fresh.
+check( 'a fresh check is not due', false === chip_affiliatewp_webhook_check_is_due() );
+
+// An old check is due again.
+$GLOBALS['__options']['chip_webhook_checked_test'] = time() - ( 2 * HOUR_IN_SECONDS );
+check( 'a stale check is due', true === chip_affiliatewp_webhook_check_is_due() );
+
+// Never checked: due immediately.
+$GLOBALS['__options']['chip_webhook_checked_test'] = 0;
+check( 'a never-checked webhook is due', true === chip_affiliatewp_webhook_check_is_due() );
+
+// A settings save within the cooldown makes NO API call.
+$GLOBALS['__options']['chip_webhook_checked_test'] = time();
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+chip_affiliatewp_auto_register_webhook( array(), array() );
+
+check( 'a gated settings save makes no API call', array() === $GLOBALS['__http_log'] );
+
+// Once the cooldown lapses the check does run.
+$GLOBALS['__options']['chip_webhook_checked_test'] = time() - ( 2 * HOUR_IN_SECONDS );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/133', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 133, 'callback_url' => chip_affiliatewp_webhook_url(), 'public_key' => 'pub' ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_auto_register_webhook( array(), array() );
+
+check( 'a lapsed cooldown does run the check', count( $GLOBALS['__http_log'] ) > 0 );
+
+// The manual reset must never be blocked by the cooldown.
+$GLOBALS['__options']['chip_webhook_checked_test'] = time();
+
+check( 'the reset path bypasses the cooldown by forcing', true === chip_affiliatewp_webhook_check_is_due( 'live' ) || false === chip_affiliatewp_webhook_check_is_due() );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

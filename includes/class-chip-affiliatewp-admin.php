@@ -1312,6 +1312,16 @@ function chip_affiliatewp_auto_register_webhook( $old_value, $new_value ) {
 		return;
 	}
 
+	/*
+	 * This fires on every save of affwp_settings — any tab, and any plugin
+	 * writing that option — so without a gate the site makes a CHIP API call
+	 * each time. The webhook does not change between saves, so a check that
+	 * succeeded minutes ago is still valid.
+	 */
+	if ( ! chip_affiliatewp_webhook_check_is_due() ) {
+		return;
+	}
+
 	chip_affiliatewp_ensure_webhook();
 }
 add_action( 'update_option_affwp_settings', 'chip_affiliatewp_auto_register_webhook', 10, 2 );

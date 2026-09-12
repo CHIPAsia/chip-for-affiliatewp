@@ -154,6 +154,44 @@ function chip_affiliatewp_site_publicly_reachable() {
 }
 
 /**
+ * Whether enough time has passed to re-check the webhook again.
+ *
+ * The `checked` key is written whenever the webhook is confirmed or created.
+ * Reading it back turns it into a real cooldown: settings saves fire the
+ * auto-registration on every write of affwp_settings — any tab, any plugin —
+ * and re-checking a webhook that was confirmed a moment ago is a wasted CHIP
+ * API call.
+ *
+ * @param string|null $mode Optional mode. Defaults to the current mode.
+ * @return bool
+ */
+function chip_affiliatewp_webhook_check_is_due( $mode = null ) {
+	$mode = in_array( $mode, array( 'test', 'live' ), true )
+		? $mode
+		: ( affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live' );
+
+	$keys    = chip_affiliatewp_webhook_option_keys( $mode );
+	$checked = (int) affiliate_wp()->settings->get( $keys['checked'], 0 );
+
+	if ( ! $checked ) {
+		return true;
+	}
+
+	/**
+	 * Filters how long a confirmed webhook check stays fresh.
+	 *
+	 * @param int $seconds Cooldown in seconds.
+	 */
+	$cooldown = (int) apply_filters( 'chip_affiliatewp_webhook_check_cooldown', HOUR_IN_SECONDS );
+
+	if ( $cooldown < 1 ) {
+		return true;
+	}
+
+	return ( time() - $checked ) >= $cooldown;
+}
+
+/**
  * Ensures a CHIP Send webhook points at this site for the current mode.
  *
  * Idempotent: reuses an existing webhook with the same callback URL, updates
