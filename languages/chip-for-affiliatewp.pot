@@ -333,7 +333,7 @@ msgstr ""
 msgid "No bank details"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:775
+#: includes/class-chip-affiliatewp-webhooks.php:793
 msgid "No route was found matching the URL and request method."
 msgstr ""
 

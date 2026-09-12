@@ -1212,8 +1212,32 @@ $GLOBALS['__referral_rows'][11] = new Fake_Referral( 11, 3, '100.00', 'unpaid', 
 // GET_LOCK stub: return 1 immediately via direct $wpdb->get_var override.
 class Fake_WPDO {
 	public $is_mysql = true;
-	public function prepare( $q, ...$a ) { return $q; }
-	public function get_var( $q ) { return '1'; }
+	public function prepare( $q, ...$a ) {
+		/*
+		 * Substitute the placeholders the way real wpdb does. Returning the
+		 * query unchanged would hide the argument from anything that inspects
+		 * the statement.
+		 */
+		foreach ( $a as $value ) {
+			$q = preg_replace( '/%[sd]/', is_int( $value ) ? (string) $value : "'" . $value . "'", $q, 1 );
+		}
+
+		return $q;
+	}
+	public function get_var( $q ) {
+		/*
+		 * A test can hold the lock by setting __lock_held to the lock name it
+		 * wants contended, so the blocked path is exercised the way a second
+		 * worker would hit it. Otherwise the lock is free.
+		 */
+		$name = $GLOBALS['__lock_held'] ?? null;
+
+		if ( null !== $name && false !== strpos( (string) $q, $name ) ) {
+			return '0';
+		}
+
+		return '1';
+	}
 	public function query( $q ) { return true; }
 }
 $GLOBALS['wpdb'] = new Fake_WPDO();
@@ -5610,6 +5634,89 @@ chip_affiliatewp_submit_payout_locked( $ok, affwp_get_payout( $ok ) );
 $posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
 
 check( 'one cent is still submitted', 1 === count( $posts ) );
+
+echo "\n== Test 91: a racing delivery does not create a second payout ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+/*
+ * A single-referral run that submitted but never got a payout row: the webhook
+ * is what creates it. If the lock is taken after the lookup, two deliveries
+ * arriving together each find nothing and each create a row.
+ */
+$GLOBALS['__referral_rows'][1400] = new Fake_Referral( 1400, 3, '11.00', 'unpaid', 0 );
+
+$payload = array(
+	'id'        => 8800,
+	'state'     => 'executing',
+	'reference' => 'XT-R-1400',
+);
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook( $payload, 'test' );
+$after_first = count( $GLOBALS['__payout_rows'] );
+
+check( 'the first delivery created a payout', $after_first === $before + 1 );
+
+chip_affiliatewp_process_instruction_webhook( $payload, 'test' );
+
+check( 'a redelivery creates no second payout', count( $GLOBALS['__payout_rows'] ) === $after_first );
+
+$matching = array_values(
+	array_filter(
+		$GLOBALS['__payout_rows'],
+		function ( $row ) {
+			return 8800 === (int) $row->service_id;
+		}
+	)
+);
+
+check( 'exactly one payout carries the instruction', 1 === count( $matching ) );
+
+/*
+ * The decisive property: while another worker holds the lock, this delivery
+ * must do nothing at all. Under the old ordering the row was created before the
+ * lock was taken, so a concurrent delivery produced a second payout even though
+ * it then bailed out.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__referral_rows'][1401] = new Fake_Referral( 1401, 3, '11.00', 'unpaid', 0 );
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+// Pretend another worker owns the lock for this instruction.
+$GLOBALS['__lock_held'] = 'chip_affiliatewp_' . md5( 'instruction_8801' );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8801, 'state' => 'executing', 'reference' => 'XT-R-1401' ),
+	'test'
+);
+
+check( 'a blocked delivery creates no payout', count( $GLOBALS['__payout_rows'] ) === $before );
+
+$GLOBALS['__lock_held'] = null;
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8801, 'state' => 'executing', 'reference' => 'XT-R-1401' ),
+	'test'
+);
+
+check( 'the delivery runs once the lock is free', count( $GLOBALS['__payout_rows'] ) === $before + 1 );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
