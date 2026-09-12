@@ -1184,10 +1184,33 @@ function chip_affiliatewp_process_generated_batch( $batch_id ) {
 	$delay = 0;
 
 	foreach ( $payouts as $payout ) {
+		$payout_id = (int) $payout->payout_id;
+		$args      = array( 'payout_id' => $payout_id );
+
+		/*
+		 * Skip a payout that already has a submission queued. This hook fires
+		 * whenever the batch completes, which can happen more than once for the
+		 * same batch (saved again, or retried), and scheduling a second action
+		 * per payout adds rows that only ever re-read the same locked row.
+		 *
+		 * Submitting twice is not a payment risk — the submission path takes an
+		 * advisory lock and returns early once an instruction exists — but the
+		 * queue should not grow for it.
+		 */
+		if ( function_exists( 'as_has_scheduled_action' )
+			&& as_has_scheduled_action( 'chip_affiliatewp_submit_payout_action', $args, chip_affiliatewp_as_group() ) ) {
+			continue;
+		}
+
+		if ( function_exists( 'as_next_scheduled_action' )
+			&& false !== as_next_scheduled_action( 'chip_affiliatewp_submit_payout_action', $args, chip_affiliatewp_as_group() ) ) {
+			continue;
+		}
+
 		as_schedule_single_action(
 			time() + $delay,
 			'chip_affiliatewp_submit_payout_action',
-			array( 'payout_id' => (int) $payout->payout_id ),
+			$args,
 			chip_affiliatewp_as_group()
 		);
 

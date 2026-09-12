@@ -5180,6 +5180,62 @@ $data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
 check( 'the failure count keeps climbing', 49 === (int) ( $data['poll_count'] ?? 0 ) );
 check( 'at the cap no further check is queued', array() === $GLOBALS['__as_scheduled'] );
 
+echo "\n== Test 86: the batch fan-out does not queue a payout twice ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_ids = array();
+
+foreach ( array( 1000, 1001, 1002 ) as $referral_id ) {
+	$payout_ids[] = affiliate_wp()->affiliates->payouts->add(
+		array(
+			'affiliate_id'  => 3,
+			'referrals'     => array( $referral_id ),
+			'amount'        => '10.00',
+			'payout_method' => 'chip',
+			'status'        => 'processing',
+			'batch_id'      => 77,
+		)
+	);
+}
+
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_process_generated_batch( 77 );
+
+check( 'every payout is queued once', 3 === count( $GLOBALS['__as_scheduled'] ) );
+
+// The same batch reports complete again — nothing new may be queued.
+chip_affiliatewp_process_generated_batch( 77 );
+
+check( 'a repeat completion queues nothing', 3 === count( $GLOBALS['__as_scheduled'] ) );
+
+// A third time, still nothing.
+chip_affiliatewp_process_generated_batch( 77 );
+
+check( 'still nothing on a third call', 3 === count( $GLOBALS['__as_scheduled'] ) );
+
+// Once the queue drains, a repeat completion queues the work again.
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_process_generated_batch( 77 );
+
+check( 'a drained queue is refilled', 3 === count( $GLOBALS['__as_scheduled'] ) );
+
+// The batch must be the one requested: another batch queues nothing.
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_process_generated_batch( 88 );
+
+check( 'a different batch queues nothing', 0 === count( $GLOBALS['__as_scheduled'] ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
