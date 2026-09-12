@@ -534,6 +534,17 @@ function chip_affiliatewp_render_settings_panel() {
 									esc_html( chip_affiliatewp_format_money( $chip_row['amount'] ) )
 								);
 								?>
+								<?php if ( '' !== (string) ( $chip_row['note'] ?? '' ) ) : ?>
+									<span class="block text-xs text-gray-500">
+										<?php
+										printf(
+											/* translators: %s: CHIP's own note about the instruction. */
+											esc_html__( 'CHIP: %s', 'chip-for-affiliatewp' ),
+											esc_html( (string) $chip_row['note'] )
+										);
+										?>
+									</span>
+								<?php endif; ?>
 							</li>
 						<?php endforeach; ?>
 					</ul>

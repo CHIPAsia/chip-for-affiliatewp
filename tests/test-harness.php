@@ -4788,6 +4788,130 @@ $GLOBALS['__options']['chip_webhook_checked_test'] = time();
 
 check( 'the reset path bypasses the cooldown by forcing', true === chip_affiliatewp_webhook_check_is_due( 'live' ) || false === chip_affiliatewp_webhook_check_is_due() );
 
+echo "\n== Test 80: CHIP's own note reaches the merchant ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 950 ),
+		'amount'        => '33.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$note = 'Beneficiary name does not match the account holder.';
+
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array(
+		'instruction_id' => 9600,
+		'state'          => 'reviewing',
+		'mode'           => 'test',
+		'note'           => $note,
+	)
+);
+
+// The list must carry the note through, not drop it.
+$rows = chip_affiliatewp_payouts_awaiting_review();
+
+check( 'the review list has the payout', 1 === count( $rows ) );
+check( 'the note survives into the list', $note === ( $rows[0]['note'] ?? '' ) );
+
+// The email must quote it.
+$GLOBALS['__mail'] = array();
+
+chip_affiliatewp_notify_review_payouts();
+
+check( 'the merchant email was sent', 1 === count( $GLOBALS['__mail'] ) );
+check( 'the email quotes CHIP', false !== strpos( $GLOBALS['__mail'][0]['body'], $note ) );
+
+// A payout with no note must not print an empty label.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$quiet = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 951 ),
+		'amount'        => '12.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+chip_affiliatewp_update_payout_data( $quiet, array( 'instruction_id' => 9601, 'state' => 'reviewing', 'mode' => 'test' ) );
+
+$GLOBALS['__mail'] = array();
+
+chip_affiliatewp_notify_review_payouts();
+
+check( 'an email is still sent without a note', 1 === count( $GLOBALS['__mail'] ) );
+check( 'no empty CHIP line is added', false === strpos( $GLOBALS['__mail'][0]['body'], 'CHIP reports: ' . "\n" ) );
+check( 'the body does not end with an empty CHIP label', false === strpos( $GLOBALS['__mail'][0]['body'], 'CHIP reports:' ) );
+
+echo "\n== Test 81: CHIP's in-flight reason is recorded on the payout ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 970 ),
+		'amount'        => '19.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+// An in-flight instruction that CHIP already commented on.
+$reason = 'Beneficiary name does not match the account holder.';
+
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'               => 9500,
+		'state'            => 'reviewing',
+		'rejection_reason' => $reason,
+	)
+);
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the state is recorded', 'reviewing' === ( strtolower( (string) ( $data['state'] ?? '' ) ) ) );
+check( 'CHIP the reason is recorded', $reason === (string) ( $data['note'] ?? '' ) );
+
+// A later poll with no reason must not erase what CHIP already said.
+chip_affiliatewp_apply_instruction( $payout_id, array( 'id' => 9500, 'state' => 'reviewing' ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'a later poll keeps the recorded reason', $reason === (string) ( $data['note'] ?? '' ) );
+
+// The note must reach the review list the merchant sees.
+$rows = chip_affiliatewp_payouts_awaiting_review();
+$match = array();
+
+foreach ( $rows as $row ) {
+	if ( 9500 === (int) ( $row['payout_id'] ?? 0 ) || (int) $payout_id === (int) ( $row['payout_id'] ?? 0 ) ) {
+		$match = $row;
+	}
+}
+
+check( 'the payout appears in the review list', ! empty( $match ) );
+check( 'the list carries the reason', $reason === ( $match['note'] ?? '' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

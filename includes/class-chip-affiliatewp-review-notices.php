@@ -123,6 +123,13 @@ function chip_affiliatewp_payouts_awaiting_review( $limit = 20 ) {
 			'amount'       => (string) $payout->amount,
 			'state'        => strtolower( (string) $data['state'] ),
 			'since'        => (string) ( $data['last_checked'] ?? '' ),
+			/*
+			 * CHIP's own words about an in-flight instruction, when it sent
+			 * any. `rejection_reason` arrives before a final state, so it is
+			 * the earliest signal of why a payout is sitting still — the
+			 * merchant's account manager will ask for it.
+			 */
+			'note'         => (string) ( $data['note'] ?? '' ),
 		);
 	}
 
@@ -251,6 +258,21 @@ function chip_affiliatewp_notify_review_payouts() {
 			$instruction_id,
 			admin_url( 'admin.php?page=affiliate-wp-payouts' )
 		);
+
+		/*
+		 * CHIP's own words, when it sent any. Quoting it saves the account
+		 * manager a round trip: the reason is often already stated, and it is
+		 * the first thing they ask for.
+		 */
+		$note = trim( (string) ( $data['note'] ?? '' ) );
+
+		if ( '' !== $note ) {
+			$body .= "\n\n" . sprintf(
+				/* translators: %s: CHIP's own note about the instruction. */
+				__( 'CHIP reports: %s', 'chip-for-affiliatewp' ),
+				$note
+			);
+		}
 
 		$sent_ok = wp_mail( $recipient, $subject, $body );
 
