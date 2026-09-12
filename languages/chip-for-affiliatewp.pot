@@ -19,7 +19,15 @@ msgid ""
 " and try again."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1396
+#: includes/class-chip-affiliatewp-payouts.php:293
+#: includes/class-chip-affiliatewp-payouts.php:301
+msgid ""
+"A different payment already uses this reference at CHIP, so this payout "
+"cannot be sent under it. Each site sharing a CHIP account needs its own "
+"reference prefix."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-payouts.php:1474
 msgid ""
 "A payment cannot be processed for this referral since it is not marked as "
 "Unpaid."
@@ -50,7 +58,7 @@ msgstr ""
 msgid "Affiliate #%d"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:377
+#: includes/class-chip-affiliatewp-payouts.php:397
 msgid "Affiliate commission payout No.%s"
 msgstr ""
 
@@ -87,7 +95,7 @@ msgid "Bank Code"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:245
-#: includes/class-chip-affiliatewp-payouts.php:1518
+#: includes/class-chip-affiliatewp-payouts.php:1596
 msgid "Bank account is not verified yet (status: %s)."
 msgstr ""
 
@@ -149,8 +157,8 @@ msgstr ""
 msgid "CHIP Send did not return a bank account ID."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:430
-#: includes/class-chip-affiliatewp-payouts.php:1590
+#: includes/class-chip-affiliatewp-payouts.php:450
+#: includes/class-chip-affiliatewp-payouts.php:1668
 msgid "CHIP Send did not return a send instruction ID."
 msgstr ""
 
@@ -171,7 +179,7 @@ msgid ""
 "Payouts stay disabled until it is."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1072
+#: includes/class-chip-affiliatewp-payouts.php:1150
 msgid ""
 "CHIP Send has no record of instruction %s, so it can no longer be tracked. "
 "Any funds it was meant to move were not sent."
@@ -184,7 +192,7 @@ msgid ""
 " The affiliates have not been paid yet."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:863
+#: includes/class-chip-affiliatewp-payouts.php:941
 msgid "CHIP Send instruction %1$s. %2$s"
 msgstr ""
 
@@ -208,7 +216,7 @@ msgid ""
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:217
-#: includes/class-chip-affiliatewp-payouts.php:1423
+#: includes/class-chip-affiliatewp-payouts.php:1501
 msgid ""
 "CHIP Send pays out in MYR only, but this store is set to %s. Change the "
 "currency in AffiliateWP settings to send payouts."
@@ -248,7 +256,7 @@ msgstr ""
 msgid "Choose your bank."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1536
+#: includes/class-chip-affiliatewp-payouts.php:1614
 msgid "Commission for referral No.%d"
 msgstr ""
 
@@ -343,7 +351,7 @@ msgstr ""
 msgid "No route was found matching the URL and request method."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:332
+#: includes/class-chip-affiliatewp-payouts.php:352
 msgid ""
 "None of the referrals in this payout are awaiting payment any more, so "
 "nothing was sent."
@@ -380,14 +388,14 @@ msgstr ""
 msgid "Pick a bank from the list. CHIP Send can only pay to the banks shown."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1321
+#: includes/class-chip-affiliatewp-payouts.php:1399
 msgid ""
 "Please enable CHIP Send and add your API credentials before attempting to "
 "process payments."
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:127
-#: includes/class-chip-affiliatewp-payouts.php:1408
+#: includes/class-chip-affiliatewp-payouts.php:1486
 msgid ""
 "Please enter your CHIP Send API credentials in AffiliateWP → Settings → "
 "Payouts → CHIP Send before attempting to process payments."
@@ -477,13 +485,13 @@ msgstr ""
 msgid "The payload is missing a send instruction ID or state."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1608
+#: includes/class-chip-affiliatewp-payouts.php:1686
 msgid ""
 "The payout record could not be created. The referral may already have an "
 "active payout."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:350
+#: includes/class-chip-affiliatewp-payouts.php:370
 msgid "The referrals left in this payout have no payable amount."
 msgstr ""
 
@@ -492,7 +500,7 @@ msgstr ""
 msgid "The specified payout does not exist."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1392
+#: includes/class-chip-affiliatewp-payouts.php:1470
 msgid "The specified referral does not exist."
 msgstr ""
 
@@ -511,11 +519,11 @@ msgstr ""
 msgid "The webhook was removed but could not be registered again: %s"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1404
+#: includes/class-chip-affiliatewp-payouts.php:1482
 msgid "There is no affiliate connected to this referral."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1529
+#: includes/class-chip-affiliatewp-payouts.php:1607
 msgid "This affiliate account does not have a payment email."
 msgstr ""
 
@@ -553,13 +561,13 @@ msgid ""
 "This payout rounds to %s, below the smallest amount CHIP Send can transfer."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1400
+#: includes/class-chip-affiliatewp-payouts.php:1478
 msgid ""
 "This referral is already attached to a payout. Resolve that payout to pay it"
 " again."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1434
+#: includes/class-chip-affiliatewp-payouts.php:1512
 msgid ""
 "This referral rounds to %s, below the smallest amount CHIP Send can "
 "transfer."
@@ -612,7 +620,7 @@ msgstr ""
 msgid "You do not have permission to convert balance."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1317
+#: includes/class-chip-affiliatewp-payouts.php:1395
 msgid "You do not have permission to process payouts."
 msgstr ""
 

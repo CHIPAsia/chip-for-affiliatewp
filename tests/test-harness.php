@@ -3028,7 +3028,7 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 $GLOBALS['__referral_rows'][130] = new Fake_Referral( 130, 3, '7.00', 'unpaid', $payout_id );
 
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5001, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5001, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id, 'amount' => '7.00', 'bank_account_id' => 84 ) ) ) );
 $result = chip_affiliatewp_submit_payout( $payout_id );
 
 $posts = 0;
@@ -3068,7 +3068,7 @@ $done_id = affiliate_wp()->affiliates->payouts->add(
 $GLOBALS['__referral_rows'][131] = new Fake_Referral( 131, 3, '7.00', 'unpaid', $done_id );
 
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5002, 'state' => 'completed', 'reference' => 'XT-PO-' . $done_id, 'receipt_url' => 'https://www.chip-in.asia/receipts/send/done' ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5002, 'state' => 'completed', 'reference' => 'XT-PO-' . $done_id, 'amount' => '7.00', 'bank_account_id' => 84, 'receipt_url' => 'https://www.chip-in.asia/receipts/send/done' ) ) ) );
 chip_affiliatewp_submit_payout( $done_id );
 
 check( 'an adopted completed instruction pays the payout', 'paid' === affwp_get_payout( $done_id )->status );
@@ -5915,6 +5915,235 @@ chip_affiliatewp_check_payout_status( $flaky );
 
 check( 'an outage does not fail the payout', 'processing' === affwp_get_payout( $flaky )->status );
 check( 'an outage reschedules a check', ! empty( $GLOBALS['__as_scheduled'] ) );
+
+echo "\n== Test 94: another site's instruction is never adopted ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1700 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1700] = new Fake_Referral( 1700, 3, '7.00', 'unpaid', $payout_id );
+
+/*
+ * The reference resolves to an instruction for a different amount and a
+ * different recipient: another installation sharing this CHIP account minted
+ * the same reference for its own payout. Adopting it would mark these referrals
+ * paid against money that went elsewhere.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6001,
+				'state'           => 'completed',
+				'reference'       => 'XT-PO-' . $payout_id,
+				'amount'          => '999.00',
+				'bank_account_id' => 9999,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$payout = affwp_get_payout( $payout_id );
+$data   = chip_affiliatewp_payout_data( $payout );
+
+check( 'the foreign instruction is not adopted', is_wp_error( $result ) );
+check( 'its id is not stored', empty( $data['instruction_id'] ) );
+check( 'the payout did not become paid', 'paid' !== $payout->status );
+check( 'the referral was not marked paid', 'paid' !== $GLOBALS['__referral_rows'][1700]->status );
+// fail_payout wraps the reason, so it surfaces on the row as the description.
+check( 'the refusal explains the conflict', false !== strpos( (string) $payout->description, 'reference at CHIP' ) );
+check( 'the failure is classified as a data error', 'data_error' === ( $payout->failure_class ?? '' ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'nothing was sent under the conflicted reference', array() === $posts );
+
+// The amount alone is not enough: a matching amount to a different account is still foreign.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$second = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1701 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1701] = new Fake_Referral( 1701, 3, '7.00', 'unpaid', $second );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6002,
+				'state'           => 'completed',
+				'reference'       => 'XT-PO-' . $second,
+				'amount'          => '7.00',
+				'bank_account_id' => 4242,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result2 = chip_affiliatewp_submit_payout( $second );
+
+check( 'a same-amount different-recipient instruction is refused too', is_wp_error( $result2 ) );
+check( 'its id is not stored either', empty( chip_affiliatewp_payout_data( affwp_get_payout( $second ) )['instruction_id'] ) );
+
+/*
+ * Same recipient, wrong amount: only the amount comparison can catch this, so
+ * the check is exercised in isolation rather than leaning on the account match.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$fourth = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1703 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1703] = new Fake_Referral( 1703, 3, '7.00', 'unpaid', $fourth );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6004,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $fourth,
+				'amount'          => '8.00',
+				'bank_account_id' => 84,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result4 = chip_affiliatewp_submit_payout( $fourth );
+
+check( 'a matching-account different-amount instruction is refused', is_wp_error( $result4 ) );
+check( 'its id is not stored on the row either', empty( chip_affiliatewp_payout_data( affwp_get_payout( $fourth ) )['instruction_id'] ) );
+
+// The affiliate's own instruction, matching on both, is still adopted.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$third = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1702 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1702] = new Fake_Referral( 1702, 3, '7.00', 'unpaid', $third );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6003,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $third,
+				'amount'          => '7.00',
+				'bank_account_id' => 84,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result3 = chip_affiliatewp_submit_payout( $third );
+
+check( 'a genuine instruction is still adopted', true === $result3 );
+check( 'its id is stored', 6003 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $third ) )['instruction_id'] ?? 0 ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

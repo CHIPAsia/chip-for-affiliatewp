@@ -79,7 +79,7 @@ function chip_affiliatewp_classify_failure( $error_code, $error_message = '', $h
 	 * is a data problem rather than a provider one: retrying unchanged would
 	 * fail identically.
 	 */
-	if ( in_array( $code, array( 'chip_invalid_amount', 'chip_currency_unsupported' ), true ) ) {
+	if ( in_array( $code, array( 'chip_invalid_amount', 'chip_currency_unsupported', 'chip_reference_conflict' ), true ) ) {
 		return 'data_error';
 	}
 

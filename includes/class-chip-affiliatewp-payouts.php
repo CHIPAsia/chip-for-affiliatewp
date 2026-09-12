@@ -282,7 +282,27 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 			/*
 			 * Live instruction for this attempt: adopt it rather than sending
 			 * again. The instruction may have completed while we were unaware.
+			 *
+			 * Only if it is this payout's own. A reference is unique per CHIP
+			 * account rather than per site, so another installation sharing the
+			 * credentials can hold the same reference for a different payment.
 			 */
+			if ( ! chip_affiliatewp_instruction_belongs_to_payout( $payout, $existing ) ) {
+				return chip_affiliatewp_fail_payout(
+					$payout_id,
+					__( 'A different payment already uses this reference at CHIP, so this payout cannot be sent under it. Each site sharing a CHIP account needs its own reference prefix.', 'chip-for-affiliatewp' ),
+					'chip_reference_conflict'
+				);
+			}
+
+			if ( ! chip_affiliatewp_instruction_belongs_to_payout( $payout, $existing ) ) {
+				return chip_affiliatewp_fail_payout(
+					$payout_id,
+					__( 'A different payment already uses this reference at CHIP, so this payout cannot be sent under it. Each site sharing a CHIP account needs its own reference prefix.', 'chip-for-affiliatewp' ),
+					'chip_reference_conflict'
+				);
+			}
+
 			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $reference );
 
 			return true;
@@ -484,11 +504,70 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 }
 
 /**
- * Records an instruction that already exists at CHIP against a payout.
+ * Whether a found instruction actually belongs to this payout.
  *
- * Used when the reference lookup finds a live instruction before sending, or
- * when CHIP refuses a submission because the reference is taken. Adopting
- * rather than re-sending is what makes a retry after an unclear response safe.
+ * A reference is unique per CHIP merchant account, not per site. Two
+ * installations sharing one CHIP account — a staging site pointed at the same
+ * credentials, or a merchant running two stores — can therefore mint the same
+ * reference for different payouts, because the reference is built from the
+ * payout's own ID and a short site prefix. Adopting on the reference alone
+ * would attach this payout to another site's instruction: the payout would take
+ * that instruction's state, and a completed one would mark these referrals paid
+ * for money that went somewhere else.
+ *
+ * The amount and the destination account are the two things that must agree.
+ *
+ * @param object $payout      Payout row.
+ * @param array  $instruction Instruction payload from CHIP.
+ * @return bool
+ */
+function chip_affiliatewp_instruction_belongs_to_payout( $payout, $instruction ) {
+	$expected_amount = (float) chip_affiliatewp_format_amount( $payout->amount );
+	$actual_amount   = (float) chip_affiliatewp_format_amount( chip_affiliatewp_array_value( $instruction, 'amount', 0 ) );
+
+	if ( abs( $expected_amount - $actual_amount ) > 0.001 ) {
+		return false;
+	}
+
+	/*
+	 * The destination account, when CHIP states it. A payout whose bank account
+	 * does not match is paying a different recipient.
+	 */
+	$instruction_account = absint( chip_affiliatewp_array_value( $instruction, 'bank_account_id' ) );
+
+	if ( ! $instruction_account ) {
+		// Not stated: the amount agreeing is as far as this can be taken.
+		return true;
+	}
+
+	$known_account = absint( $payout->service_id );
+
+	if ( $known_account ) {
+		return $known_account === $instruction_account;
+	}
+
+	/*
+	 * A payout that was never submitted has no bank account on its row. Ask CHIP
+	 * for the account this affiliate's details resolve to and compare, so an
+	 * adoption still cannot attach a payout to another site's instruction.
+	 */
+	$affiliate_id = absint( $payout->affiliate_id );
+
+	if ( ! $affiliate_id ) {
+		return false;
+	}
+
+	$account = chip_affiliatewp_ensure_bank_account( $affiliate_id );
+
+	if ( is_wp_error( $account ) || empty( $account['id'] ) ) {
+		return false;
+	}
+
+	return absint( $account['id'] ) === $instruction_account;
+}
+
+/**
+ * Adopts an existing CHIP instruction for a payout that already has a row.
  *
  * @param int    $payout_id Payout ID.
  * @param object $payout    Payout row.
@@ -501,7 +580,6 @@ function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction, 
 
 	$data['instruction_id'] = (int) $instruction['id'];
 	$data['reference']      = (string) $reference;
-	$data['state']          = (string) chip_affiliatewp_array_value( $instruction, 'state', 'received' );
 	$data['receipt_url']    = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $instruction, 'receipt_url', '' ) );
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
 
