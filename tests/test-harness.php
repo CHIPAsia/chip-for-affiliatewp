@@ -5718,6 +5718,120 @@ chip_affiliatewp_process_instruction_webhook(
 
 check( 'the delivery runs once the lock is free', count( $GLOBALS['__payout_rows'] ) === $before + 1 );
 
+echo "\n== Test 92: corrected bank details delete the superseded CHIP record ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+// Registered under the first set of details.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 700, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$first = chip_affiliatewp_ensure_bank_account( 3 );
+
+check( 'the first registration returned an account', is_array( $first ) && 700 === (int) $first['id'] );
+
+// The affiliate corrects a mistyped account number.
+chip_affiliatewp_store_bank_details( 7, 'MBBEMYKL', '157380112230' );
+
+$superseded = chip_affiliatewp_superseded_bank_account_id( 3, 'test' );
+
+check( 'the old account is remembered as superseded', 700 === (int) $superseded );
+
+// The new details register a new account, and the old one is deleted.
+unset( $GLOBALS['__chip_bank_lookup_override'] );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 701, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts/700', 'method' => 'DELETE', 'code' => 200, 'body' => array() );
+$GLOBALS['__http_log'] = array();
+
+$second = chip_affiliatewp_ensure_bank_account( 3 );
+
+check( 'the corrected details registered', is_array( $second ) && 701 === (int) $second['id'] );
+
+$deletes = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $entry ) {
+			return 'DELETE' === ( $entry['method'] ?? '' ) && false !== strpos( (string) $entry['url'], '/bank_accounts/700' );
+		}
+	)
+);
+
+check( 'the superseded account was deleted at CHIP', 1 === count( $deletes ) );
+check( 'the marker was cleared', 0 === chip_affiliatewp_superseded_bank_account_id( 3, 'test' ) );
+
+/*
+ * An account still carrying an in-flight payout must not be deleted: CHIP's
+ * delete blocks future payments, and a transfer already executing is not
+ * something to interfere with.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 700, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+chip_affiliatewp_ensure_bank_account( 3 );
+
+// A payout is in flight against that account.
+$live = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1500 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'service_id'    => 700,
+	)
+);
+
+check( 'the account is reported in use', true === chip_affiliatewp_bank_account_is_in_use( 3, 700 ) );
+
+/*
+ * The lookup override answers every bank-account URL, so it is cleared here or
+ * it would swallow the delete and the assertion would pass for the wrong
+ * reason. A delete mock is queued so that, had the guard not stopped it, the
+ * call would have been made and logged.
+ */
+unset( $GLOBALS['__chip_bank_lookup_override'] );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts/700', 'method' => 'DELETE', 'code' => 200, 'body' => array() );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_delete_superseded_bank_account( 3, 700, 'test' );
+
+$deletes = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $entry ) {
+			return 'DELETE' === ( $entry['method'] ?? '' );
+		}
+	)
+);
+
+check( 'an in-flight account is not deleted', array() === $deletes );
+
+// A settled payout no longer protects the account.
+affiliate_wp()->affiliates->payouts->update( $live, array( 'status' => 'paid' ), '', 'payout' );
+
+check( 'a settled payout frees the account', false === chip_affiliatewp_bank_account_is_in_use( 3, 700 ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

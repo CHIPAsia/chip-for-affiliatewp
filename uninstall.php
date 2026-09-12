@@ -136,7 +136,7 @@ foreach ( $chip_option_names as $chip_option_name ) {
 
 // Remove the payout data this plugin stores against each affiliate: the cached
 // CHIP Send account record, and the bank details it was resolved from.
-foreach ( array( 'chip_bank_account', 'payment_account_number', 'payment_bank_code' ) as $chip_meta_key ) {
+foreach ( array( 'chip_bank_account', 'chip_bank_account_superseded', 'payment_account_number', 'payment_bank_code' ) as $chip_meta_key ) {
 	$chip_users = get_users(
 		array(
 			'meta_key' => $chip_meta_key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- one-off uninstall sweep.
