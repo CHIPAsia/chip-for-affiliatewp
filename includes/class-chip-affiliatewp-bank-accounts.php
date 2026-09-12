@@ -714,14 +714,13 @@ function chip_affiliatewp_store_bank_details( $user_id, $bank_code, $number ) {
 
 	/*
 	 * New details mean the cached CHIP Send account id no longer describes this
-	 * affiliate's account. Drop it so the next payout registers the new details
-	 * rather than paying the previous account.
-	 */
-	/*
-	 * Record the CHIP record this change supersedes, per mode, before the
-	 * cached one is dropped. The account cannot be deleted here — the new
-	 * details have not been registered with CHIP yet, and deleting first would
-	 * leave the affiliate with nothing payable if that registration failed.
+	 * affiliate's account. Record the record this change supersedes, per mode,
+	 * then drop the cache so the next payout registers the new details rather
+	 * than paying the previous account.
+	 *
+	 * The superseded account cannot be deleted here: the new details have not
+	 * been registered with CHIP yet, and deleting first would leave the
+	 * affiliate with nothing payable if that registration were to fail.
 	 */
 	if ( $changed ) {
 		$previous = get_user_meta( $user_id, 'chip_bank_account', true );

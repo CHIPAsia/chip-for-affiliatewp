@@ -144,6 +144,7 @@ TRANSLATIONS = {
     'A Malaysian bank account number is between 5 and 20 digits. Check the number and try again.': 'Nombor akaun bank Malaysia adalah antara 5 hingga 20 digit. Semak nombor itu dan cuba lagi.',
     'The referral amount must be greater than zero.': 'Jumlah rujukan mesti lebih daripada sifar.',
     'CHIP reports: %s': 'CHIP melaporkan: %s',
+    'CHIP Send has no record of instruction %s, so it can no longer be tracked. Any funds it was meant to move were not sent.': 'CHIP Send tiada rekod bagi instruksi %s, jadi ia tidak lagi boleh dipantau. Sebarang dana yang sepatutnya dipindahkan tidak dihantar.',
     'This payout rounds to %s, below the smallest amount CHIP Send can transfer.': 'Payout ini dibundarkan kepada %s, di bawah jumlah terkecil yang boleh dipindahkan oleh CHIP Send.',
     'This referral rounds to %s, below the smallest amount CHIP Send can transfer.': 'Rujukan ini dibundarkan kepada %s, di bawah jumlah terkecil yang boleh dipindahkan oleh CHIP Send.',
     'CHIP: %s': 'CHIP: %s',

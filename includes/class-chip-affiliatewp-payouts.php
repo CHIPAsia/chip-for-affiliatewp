@@ -589,13 +589,16 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 	 * retry would look successful while no money moved. A new attempt number
 	 * yields a reference CHIP has never seen, so the retry sends for real.
 	 *
+	 * An instruction CHIP no longer holds is in the same position: it cannot
+	 * settle, and its reference is spent.
+	 *
 	 * An instruction that is merely unverified or in flight is left alone: it
 	 * still exists at CHIP and resolves on its own, and keeping its reference
 	 * is what makes a repeat submission adopt instead of double-pay.
 	 */
 	$terminal_at_chip = in_array(
 		strtolower( (string) $error_code ),
-		array( 'chip_instruction_rejected', 'chip_instruction_deleted' ),
+		array( 'chip_instruction_rejected', 'chip_instruction_deleted', 'chip_instruction_not_found' ),
 		true
 	);
 
@@ -1045,6 +1048,37 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 	$response = chip_affiliatewp_get_instruction( (int) $data['instruction_id'], $stored_mode );
 
 	if ( is_wp_error( $response ) ) {
+		$status = function_exists( 'chip_affiliatewp_error_http_status' )
+			? (int) chip_affiliatewp_error_http_status( $response )
+			: 0;
+
+		/*
+		 * A 404 means the instruction does not exist at CHIP, and it will not
+		 * appear later — the record is gone. Treating it as a transient outage
+		 * leaves the payout requerying a dead id forever: the capped Action
+		 * Scheduler checks run out, then the hourly sweep keeps polling for the
+		 * life of the store, one API call each time, for an instruction that
+		 * can never answer.
+		 *
+		 * Fail the payout instead and release the referrals, so the merchant
+		 * sees a settled failure they can act on rather than a payout that sits
+		 * in processing indefinitely.
+		 */
+		if ( 404 === $status ) {
+			chip_affiliatewp_fail_payout(
+				$payout_id,
+				sprintf(
+					/* translators: %s: CHIP Send instruction ID. */
+					__( 'CHIP Send has no record of instruction %s, so it can no longer be tracked. Any funds it was meant to move were not sent.', 'chip-for-affiliatewp' ),
+					(string) $data['instruction_id']
+				),
+				'chip_instruction_not_found',
+				$status
+			);
+
+			return;
+		}
+
 		/*
 		 * Count the failed check too. Without it the cap below is never
 		 * reached on this path: an unreachable CHIP would reschedule a check

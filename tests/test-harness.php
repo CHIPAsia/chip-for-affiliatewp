@@ -5832,6 +5832,90 @@ affiliate_wp()->affiliates->payouts->update( $live, array( 'status' => 'paid' ),
 
 check( 'a settled payout frees the account', false === chip_affiliatewp_bank_account_is_in_use( 3, 700 ) );
 
+echo "\n== Test 93: an instruction CHIP no longer holds settles the payout ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1600 ),
+		'amount'        => '40.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1600] = new Fake_Referral( 1600, 3, '40.00', 'unpaid', $payout_id );
+
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array( 'instruction_id' => 8800, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1, 'poll_count' => 0 )
+);
+
+// CHIP answers 404: the record is gone and will never answer.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/8800', 'method' => 'GET', 'code' => 404, 'body' => array( 'message' => 'Record not found' ) );
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_check_payout_status( $payout_id );
+
+$row  = affwp_get_payout( $payout_id );
+$data = chip_affiliatewp_payout_data( $row );
+
+check( 'the payout is settled as failed', 'failed' === $row->status );
+check( 'the failure names the missing instruction', false !== strpos( (string) $row->description, '8800' ) );
+check( 'the failure is classified as needing the admin', 'admin_action_required' === ( $row->failure_class ?? '' ) );
+check( 'the dead instruction id is cleared', empty( $data['instruction_id'] ) );
+check( 'the attempt advanced so a retry can send', 2 === (int) ( $data['attempt'] ?? 0 ) );
+check( 'the referral is released to unpaid', 'unpaid' === $GLOBALS['__referral_rows'][1600]->status );
+check( 'no further check is queued', array() === $GLOBALS['__as_scheduled'] );
+
+/*
+ * A transport failure must stay retryable: only a definite 404 settles.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$flaky = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1601 ),
+		'amount'        => '40.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1601] = new Fake_Referral( 1601, 3, '40.00', 'unpaid', $flaky );
+
+chip_affiliatewp_update_payout_data(
+	$flaky,
+	array( 'instruction_id' => 8801, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1, 'poll_count' => 0 )
+);
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/8801', 'method' => 'GET', 'code' => 503, 'body' => array( 'message' => 'unavailable' ) );
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_check_payout_status( $flaky );
+
+check( 'an outage does not fail the payout', 'processing' === affwp_get_payout( $flaky )->status );
+check( 'an outage reschedules a check', ! empty( $GLOBALS['__as_scheduled'] ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
