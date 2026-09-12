@@ -75,6 +75,15 @@ function chip_affiliatewp_classify_failure( $error_code, $error_message = '', $h
 	}
 
 	/*
+	 * An amount the API cannot accept. The figures are the store's own, so this
+	 * is a data problem rather than a provider one: retrying unchanged would
+	 * fail identically.
+	 */
+	if ( in_array( $code, array( 'chip_invalid_amount', 'chip_currency_unsupported' ), true ) ) {
+		return 'data_error';
+	}
+
+	/*
 	 * CHIP rejections are terminal and usually mean the recipient's bank
 	 * details are wrong, so treat them as needing affiliate action. Anything
 	 * left is an API or transport problem with no status attached, which is

@@ -5523,6 +5523,94 @@ add_filter( 'chip_affiliatewp_reference_prefix_fallback', function () { return '
 
 check( 'a filtered prefix is alphanumeric and capped', 'ABCD' === chip_affiliatewp_reference_prefix() );
 
+echo "\n== Test 90: an amount that rounds below one cent is refused before sending ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 501, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+/*
+ * 0.004 formats to "0.00" and CHIP refuses it. The old guard only compared
+ * against zero, so this was submitted, rejected, and the payout failed with a
+ * provider error instead of a clear message.
+ */
+$tiny = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1300 ),
+		'amount'        => '0.004',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1300] = new Fake_Referral( 1300, 3, '0.004', 'unpaid', $tiny );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+chip_affiliatewp_submit_payout_locked( $tiny, affwp_get_payout( $tiny ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'a sub-cent payout is not submitted', array() === $posts );
+check( 'the payout failed', 'failed' === affwp_get_payout( $tiny )->status );
+
+$row  = affwp_get_payout( $tiny );
+$data = chip_affiliatewp_payout_data( $row );
+
+check( 'the failure names the amount', false !== strpos( (string) $row->description, '0.00' ) );
+check( 'the failure is classified as a data error', 'data_error' === ( $row->failure_class ?? '' ) );
+
+// A single referral that rounds below a cent is refused the same way.
+$GLOBALS['__options']['chip_test_mode'] = 1;
+
+$result = chip_affiliatewp_pay_single_referral( 1301, true );
+
+$GLOBALS['__referral_rows'][1301] = new Fake_Referral( 1301, 3, '0.002', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_pay_single_referral( 1301 );
+
+check( 'a sub-cent referral is refused', is_wp_error( $result ) );
+check( 'the refusal names the amount', false !== strpos( $result->get_error_message(), '0.00' ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'no instruction was sent for the referral', array() === $posts );
+
+// One cent still goes through: the guard must not block legitimate small pays.
+$ok = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1302 ),
+		'amount'        => '0.01',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1302] = new Fake_Referral( 1302, 3, '0.01', 'unpaid', $ok );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 7001, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_submit_payout_locked( $ok, affwp_get_payout( $ok ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'one cent is still submitted', 1 === count( $posts ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

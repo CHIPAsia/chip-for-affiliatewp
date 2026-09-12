@@ -187,8 +187,21 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		return true;
 	}
 
-	if ( (float) $payout->amount <= 0 ) {
-		return chip_affiliatewp_fail_payout( $payout_id, __( 'Payout amount must be greater than zero.', 'chip-for-affiliatewp' ), 'chip_invalid_amount' );
+	/*
+	 * Checked after formatting, because that is the figure CHIP is sent: a
+	 * payout of 0.001 formats to "0.00", which CHIP refuses. Catching it here
+	 * turns a rejected submission into a clear, actionable failure.
+	 */
+	if ( (float) chip_affiliatewp_format_amount( $payout->amount ) <= 0 ) {
+		return chip_affiliatewp_fail_payout(
+			$payout_id,
+			sprintf(
+				/* translators: %s: the payout amount. */
+				__( 'This payout rounds to %s, below the smallest amount CHIP Send can transfer.', 'chip-for-affiliatewp' ),
+				chip_affiliatewp_format_amount( $payout->amount )
+			),
+			'chip_invalid_amount'
+		);
 	}
 
 	/*
@@ -333,7 +346,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 			$amount  += (float) $referral->amount;
 		}
 
-		if ( $amount <= 0 ) {
+		if ( (float) chip_affiliatewp_format_amount( $amount ) <= 0 ) {
 			return chip_affiliatewp_fail_payout( $payout_id, __( 'The referrals left in this payout have no payable amount.', 'chip-for-affiliatewp' ), 'chip_invalid_amount' );
 		}
 
@@ -1374,8 +1387,15 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		);
 	}
 
-	if ( (float) $referral->amount <= 0 ) {
-		return new WP_Error( 'chip_invalid_amount', __( 'The referral amount must be greater than zero.', 'chip-for-affiliatewp' ) );
+	if ( (float) chip_affiliatewp_format_amount( $referral->amount ) <= 0 ) {
+		return new WP_Error(
+			'chip_invalid_amount',
+			sprintf(
+				/* translators: %s: the referral amount. */
+				__( 'This referral rounds to %s, below the smallest amount CHIP Send can transfer.', 'chip-for-affiliatewp' ),
+				chip_affiliatewp_format_amount( $referral->amount )
+			)
+		);
 	}
 
 	/*
