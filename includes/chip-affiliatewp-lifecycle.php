@@ -83,15 +83,21 @@ function chip_affiliatewp_unschedule_sweep() {
 /**
  * Schedules the recurring sweep on plugin activation.
  *
+ * The hook is registered from the main plugin file, not from here: WordPress
+ * fires `activate_{plugin_basename}`, so registering with this include's path
+ * would listen on a name the activation never triggers and the sweep would
+ * never be scheduled.
+ *
  * @return void
  */
 function chip_affiliatewp_activate() {
 	chip_affiliatewp_schedule_sweep();
 }
-register_activation_hook( __FILE__, 'chip_affiliatewp_activate' );
 
 /**
  * Clears the scheduled sweep on plugin deactivation.
+ *
+ * Registered from the main plugin file for the same reason as activation.
  *
  * @return void
  */

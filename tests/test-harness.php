@@ -4613,6 +4613,35 @@ check( 'uninstall clears the webhook URL secret', false !== strpos( $uninstall, 
 // The legacy single-key setting must be cleared too.
 check( 'uninstall clears the legacy public key', false !== strpos( $uninstall, "'chip_webhook_public_key'" ) );
 
+echo "\n== Test 76: the activation hook is registered from the main plugin file ==\n";
+
+$repo    = dirname( __DIR__ );
+$main    = (string) file_get_contents( $repo . '/chip-for-affiliatewp.php' );
+$life    = (string) file_get_contents( $repo . '/includes/chip-affiliatewp-lifecycle.php' );
+
+/*
+ * WordPress fires `activate_{plugin_basename}`. register_activation_hook()
+ * builds that name from the file it is given, so registering from an include
+ * listens on a name activation never triggers: the sweep would never be
+ * scheduled on activation.
+ */
+check( 'the main file registers the activation hook', false !== strpos( $main, "register_activation_hook( __FILE__" ) );
+check( 'the main file registers the deactivation hook', false !== strpos( $main, "register_deactivation_hook( __FILE__" ) );
+
+check( 'the activation hook is NOT registered from an include', false === strpos( $life, 'register_activation_hook' ) );
+check( 'the deactivation hook is NOT registered from an include', false === strpos( $life, 'register_deactivation_hook' ) );
+
+// Both callbacks must exist in the main file's scope after the require.
+check( 'the activate callback is defined in the lifecycle module', false !== strpos( $life, 'function chip_affiliatewp_activate()' ) );
+check( 'the deactivate callback is defined in the lifecycle module', false !== strpos( $life, 'function chip_affiliatewp_deactivate()' ) );
+
+// The lifecycle module must be required BEFORE the hooks are registered.
+$require_at = strpos( $main, "chip-affiliatewp-lifecycle.php'" );
+$hook_at    = strpos( $main, 'register_activation_hook(' );
+
+check( 'the lifecycle module is required', false !== $require_at );
+check( 'the hooks are registered after the require', false !== $hook_at && false !== $require_at && $hook_at > $require_at );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

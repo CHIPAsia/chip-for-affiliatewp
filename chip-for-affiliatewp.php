@@ -170,8 +170,10 @@ require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-review-not
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-admin.php';
 require_once CHIP_AFFILIATEWP_PATH . 'includes/class-chip-affiliatewp-failures.php';
 
-// Activation / deactivation hooks.
+// Activation / deactivation hooks. Both are registered here, from the file
+// WordPress names in the activate_/deactivate_ action, never from an include.
 require_once CHIP_AFFILIATEWP_PATH . 'includes/chip-affiliatewp-lifecycle.php';
+register_activation_hook( __FILE__, 'chip_affiliatewp_activate' );
 register_deactivation_hook( __FILE__, 'chip_affiliatewp_deactivate' );
 
 /**
