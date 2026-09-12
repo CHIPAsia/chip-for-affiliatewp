@@ -664,6 +664,16 @@ function affwp_get_affiliate_user_id( $affiliate_id ) {
 	return $GLOBALS['__affiliates_map'][ (int) $affiliate_id ] ?? 0;
 }
 
+function affwp_get_affiliate( $affiliate_id ) {
+	$user_id = $GLOBALS['__affiliates_map'][ (int) $affiliate_id ] ?? 0;
+
+	if ( ! $user_id ) {
+		return false;
+	}
+
+	return (object) array( 'affiliate_id' => (int) $affiliate_id, 'user_id' => (int) $user_id );
+}
+
 $GLOBALS['__notices'] = array();
 
 // Minimal stand-in for AffiliateWP's failure classifier, mirroring the
@@ -4222,6 +4232,53 @@ check( 'the created payout records its instruction', 9900 === (int) ( $data['ins
 $GLOBALS['__options']['chip_test_mode'] = 0;
 
 check( 'the created payout still knows its mode after a flip', 'test' === ( chip_affiliatewp_payout_data( affwp_get_payout( $created ) )['mode'] ?? '' ) );
+
+echo "\n== Test 70: deleting an affiliate removes the payout data we hold ==\n";
+reset_state();
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'leaving@test.dev' );
+
+// An affiliate with bank details and a resolved CHIP account.
+chip_affiliatewp_store_bank_details( 7, 'MBBEMYKL', '157380112229' );
+$GLOBALS['__options']['chip_test_mode'] = 1;
+
+chip_affiliatewp_store_bank_account(
+	3,
+	array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) )
+);
+
+check( 'bank details are stored', '157380112229' === (string) get_user_meta( 7, 'payment_account_number', true ) );
+check( 'the CHIP account is cached', ! empty( get_user_meta( 7, 'chip_bank_account', true ) ) );
+
+// The affiliate is deleted — fire the hook AffiliateWP fires, so this tests
+// that the plugin is actually listening, not just that the function works.
+$affiliate = affwp_get_affiliate( 3 );
+do_action( 'affwp_affiliate_deleted', 3, true, $affiliate );
+
+check( 'the bank account number is removed', '' === (string) get_user_meta( 7, 'payment_account_number', true ) );
+check( 'the bank code is removed', '' === (string) get_user_meta( 7, 'payment_bank_code', true ) );
+check( 'the cached CHIP account is removed', '' === (string) get_user_meta( 7, 'chip_bank_account', true ) );
+
+// The cleanup must also work when AffiliateWP does not hand over the object.
+reset_state();
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'leaving@test.dev' );
+chip_affiliatewp_store_bank_details( 7, 'MBBEMYKL', '157380112229' );
+
+do_action( 'affwp_affiliate_deleted', 3 );
+
+check( 'cleanup without the affiliate object still removes the number', '' === (string) get_user_meta( 7, 'payment_account_number', true ) );
+
+// An unknown affiliate id must not fatal or touch anyone else.
+reset_state();
+$GLOBALS['__users'][9] = new Fake_User( 9, 'other@test.dev' );
+update_user_meta( 9, 'payment_account_number', '9999000011' );
+
+do_action( 'affwp_affiliate_deleted', 0 );
+do_action( 'affwp_affiliate_deleted', 4242 );
+
+check( 'an unknown affiliate leaves other users alone', '9999000011' === (string) get_user_meta( 9, 'payment_account_number', true ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

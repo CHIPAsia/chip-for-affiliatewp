@@ -350,6 +350,45 @@ function chip_affiliatewp_forget_bank_account( $affiliate_id ) {
 }
 
 /**
+ * Removes the payout data this plugin keeps when an affiliate is deleted.
+ *
+ * AffiliateWP deletes its own meta on delete and leaves everything else, and
+ * WordPress keeps user meta unless the user row goes too — an affiliate can be
+ * deleted while the WordPress user stays. That would strand a bank account
+ * number and a cached CHIP account ID on a user who is no longer an affiliate,
+ * and a later affiliate reusing that user would inherit both.
+ *
+ * @param int             $affiliate_id Affiliate ID.
+ * @param bool            $delete_data  Whether AffiliateWP was asked to delete data.
+ * @param \AffWP\Affiliate $affiliate   Affiliate object.
+ * @return void
+ */
+function chip_affiliatewp_cleanup_deleted_affiliate( $affiliate_id, $delete_data = false, $affiliate = null ) {
+	unset( $delete_data );
+
+	$affiliate_id = absint( $affiliate_id );
+
+	if ( ! $affiliate_id ) {
+		return;
+	}
+
+	$user_id = $affiliate && ! empty( $affiliate->user_id )
+		? absint( $affiliate->user_id )
+		: affwp_get_affiliate_user_id( $affiliate_id );
+
+	if ( ! $user_id ) {
+		return;
+	}
+
+	// The affiliate's own bank details and the CHIP account resolved from them.
+	chip_affiliatewp_forget_bank_account( $affiliate_id );
+
+	delete_user_meta( $user_id, 'payment_account_number' );
+	delete_user_meta( $user_id, 'payment_bank_code' );
+}
+add_action( 'affwp_affiliate_deleted', 'chip_affiliatewp_cleanup_deleted_affiliate', 10, 3 );
+
+/**
  * Returns a stable fingerprint of the affiliate's current bank details.
  *
  * The account id is only valid for the details it was created from, so the

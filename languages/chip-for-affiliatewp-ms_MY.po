@@ -18,7 +18,7 @@ msgstr ""
 msgid "%s: bank details"
 msgstr "%s: butiran bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:484
+#: includes/class-chip-affiliatewp-bank-accounts.php:523
 msgid ""
 "A Malaysian bank account number is between 6 and 20 digits. Check the number"
 " and try again."
@@ -38,7 +38,7 @@ msgstr ""
 msgid "API Key"
 msgstr "Kunci API"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:457
+#: includes/class-chip-affiliatewp-bank-accounts.php:496
 msgid "Account number for the affiliate payout sent via CHIP Send."
 msgstr ""
 "Nombor akaun untuk pembayaran afiliasi yang dihantar melalui CHIP Send."
@@ -90,11 +90,11 @@ msgstr "Baki tidak tersedia"
 msgid "Bank"
 msgstr "Bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:453
+#: includes/class-chip-affiliatewp-bank-accounts.php:492
 msgid "Bank Account Number"
 msgstr "Nombor Akaun Bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:437
+#: includes/class-chip-affiliatewp-bank-accounts.php:476
 msgid "Bank Code"
 msgstr "Kod Bank"
 
@@ -107,7 +107,7 @@ msgstr "Akaun bank belum disahkan (status: %s)."
 msgid "Bank account number"
 msgstr "Nombor akaun bank"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:448
+#: includes/class-chip-affiliatewp-bank-accounts.php:487
 msgid "Bank code for the affiliate payout sent via CHIP Send."
 msgstr "Kod bank untuk pembayaran afiliasi yang dihantar melalui CHIP Send."
 
@@ -163,7 +163,7 @@ msgstr ""
 "Pendaftaran adalah automatik — tiada apa yang perlu dikonfigurasikan di "
 "sini."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:413
+#: includes/class-chip-affiliatewp-bank-accounts.php:452
 msgid "CHIP Send did not return a bank account ID."
 msgstr "CHIP Send tidak memulangkan ID akaun bank."
 
@@ -258,7 +258,7 @@ msgstr ""
 msgid "Choose your bank and enter the account number before saving."
 msgstr "Pilih bank anda dan masukkan nombor akaun sebelum menyimpan."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:500
+#: includes/class-chip-affiliatewp-bank-accounts.php:539
 msgid "Choose your bank."
 msgstr "Pilih bank anda."
 
@@ -312,7 +312,7 @@ msgstr "Masukkan kunci API ujian CHIP Send anda"
 msgid "Enter your CHIP Send test secret key"
 msgstr "Masukkan kunci rahsia ujian CHIP Send anda"
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:479
+#: includes/class-chip-affiliatewp-bank-accounts.php:518
 msgid "Enter your bank account number."
 msgstr "Masukkan nombor akaun bank anda."
 
@@ -401,7 +401,7 @@ msgstr ""
 "pengesahan lebih pantas dengan webhook. Simpan kredensial anda untuk "
 "mendaftarkannya secara automatik."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:504
+#: includes/class-chip-affiliatewp-bank-accounts.php:543
 msgid "Pick a bank from the list. CHIP Send can only pay to the banks shown."
 msgstr ""
 "Pilih bank dari senarai. CHIP Send hanya boleh membayar ke bank yang "
@@ -566,7 +566,7 @@ msgstr ""
 "Afiliasi ini mempunyai butiran bank disimpan dan boleh dibayar melalui CHIP "
 "Send."
 
-#: includes/class-chip-affiliatewp-bank-accounts.php:392
+#: includes/class-chip-affiliatewp-bank-accounts.php:431
 msgid "This affiliate has no bank account details on file."
 msgstr "Afiliasi ini tiada butiran akaun bank disimpan."
 
@@ -716,6 +716,6 @@ msgid "— %1$s, %2$s"
 msgstr "— %1$s, %2$s"
 
 #: includes/class-chip-affiliatewp-affiliate-area.php:115
-#: includes/class-chip-affiliatewp-bank-accounts.php:441
+#: includes/class-chip-affiliatewp-bank-accounts.php:480
 msgid "— Select bank —"
 msgstr "— Pilih bank —"
