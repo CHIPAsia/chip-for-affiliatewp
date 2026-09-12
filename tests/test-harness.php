@@ -5344,6 +5344,100 @@ chip_affiliatewp_list_instruction_by_reference( 'XT-R-1103', 'live' );
 check( 'the reference lookup hits the live host when asked', 1 === count( $GLOBALS['__http_log'] ) );
 check( 'the lookup used the live base URL', false !== strpos( (string) $GLOBALS['__http_log'][0]['url'], 'api.chip-in.asia' ) && false === strpos( (string) $GLOBALS['__http_log'][0]['url'], 'staging-api' ) );
 
+echo "\n== Test 88: every API call names its mode, and a submission stores the one it used ==\n";
+reset_state();
+
+// A. Every chip_affiliatewp_request() call in the shipped code passes a mode.
+$sources = array_merge(
+	glob( __DIR__ . '/../includes/*.php' ),
+	array( __DIR__ . '/../uninstall.php' )
+);
+
+$bare = array();
+
+foreach ( $sources as $source ) {
+	$lines = file( $source );
+	$count = count( $lines );
+
+	for ( $i = 0; $i < $count; $i++ ) {
+		if ( false === strpos( $lines[ $i ], 'chip_affiliatewp_request(' ) ) {
+			continue;
+		}
+
+		if ( false !== strpos( trim( $lines[ $i ] ), '//' ) ) {
+			continue;
+		}
+
+		// Gather the statement.
+		$stmt  = $lines[ $i ];
+		$depth = substr_count( $lines[ $i ], '(' ) - substr_count( $lines[ $i ], ')' );
+		$j     = $i;
+
+		while ( $depth > 0 && $j + 1 < $count ) {
+			$j++;
+			$stmt .= $lines[ $j ];
+			$depth += substr_count( $lines[ $j ], '(' ) - substr_count( $lines[ $j ], ')' );
+		}
+
+		if ( ! preg_match( '/\$mode|chip_affiliatewp_current_mode\(|_mode|mode:|\$stored_mode/', $stmt ) ) {
+			$bare[] = basename( $source ) . ':' . ( $i + 1 );
+		}
+	}
+}
+
+check( 'no API call omits its mode: ' . implode( ', ', $bare ), array() === $bare );
+
+// B. A submission against the live host records live, not the setting read later.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']            = 1;
+$GLOBALS['__options']['chip_test_mode']          = 0;
+$GLOBALS['__options']['chip_live_api_key']       = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']    = 'ls';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 501, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1200 ),
+		'amount'        => '26.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+// The referral is live, unpaid, and attached to this payout.
+$GLOBALS['__referral_rows'][1200] = new Fake_Referral( 1200, 3, '26.00', 'unpaid', $payout_id );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 7700, 'state' => 'received', 'reference' => 'XT-PO-' . $payout_id ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_submit_payout_locked( $payout_id, affwp_get_payout( $payout_id ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the submission was recorded', 7700 === (int) ( $data['instruction_id'] ?? 0 ) );
+check( 'the stored mode is live', 'live' === ( $data['mode'] ?? '' ) );
+
+// The POST must have gone to the live host, matching what was stored.
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $entry ) {
+			return 'POST' === ( $entry['method'] ?? '' ) && false !== strpos( (string) $entry['url'], 'send_instructions' );
+		}
+	)
+);
+
+check( 'a submission POST was made', 1 === count( $posts ) );
+check( 'the POST went to the live host', false === strpos( (string) $posts[0]['url'], 'staging-api' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

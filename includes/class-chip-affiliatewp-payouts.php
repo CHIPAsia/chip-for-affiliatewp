@@ -208,6 +208,14 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		);
 	}
 
+	/*
+	 * Resolve the mode once and use it for the submission and for the record.
+	 * Reading the setting again after the POST would let a mode change in
+	 * between store a mode the instruction does not live in — the instruction
+	 * would be at one CHIP host and every later requery aimed at the other.
+	 */
+	$mode = chip_affiliatewp_current_mode();
+
 	$bank_account = chip_affiliatewp_ensure_bank_account( $payout->affiliate_id );
 
 	if ( is_wp_error( $bank_account ) ) {
@@ -252,7 +260,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	 * handled below by advancing the attempt, so this lookup never adopts a
 	 * refused instruction.
 	 */
-	$existing = chip_affiliatewp_list_instruction_by_reference( $reference, chip_affiliatewp_current_mode() );
+	$existing = chip_affiliatewp_list_instruction_by_reference( $reference, $mode );
 
 	if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 		$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
@@ -364,7 +372,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		$body['send_recipient_receipt'] = true;
 	}
 
-	$response = chip_affiliatewp_request( 'POST', '/send/send_instructions', $body );
+	$response = chip_affiliatewp_request( 'POST', '/send/send_instructions', $body, array(), $mode );
 
 	if ( is_wp_error( $response ) ) {
 		/*
@@ -373,7 +381,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		 * or a webhook that attached the payout row first. Adopt it instead of
 		 * re-sending, which is what keeps a retry from paying twice.
 		 */
-		$existing = chip_affiliatewp_list_instruction_by_reference( $reference, chip_affiliatewp_current_mode() );
+		$existing = chip_affiliatewp_list_instruction_by_reference( $reference, $mode );
 
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
@@ -417,7 +425,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	$data['referral_ids']   = $referral_ids;
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
 	$data['poll_count']     = 0;
-	$data['mode']           = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
+	$data['mode']           = $mode;
 
 	// The instruction was accepted, so any earlier failure no longer applies.
 	unset( $data['error'], $data['error_status'] );
@@ -1481,7 +1489,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		$body['send_recipient_receipt'] = true;
 	}
 
-	$response = chip_affiliatewp_request( 'POST', '/send/send_instructions', $body );
+	$response = chip_affiliatewp_request( 'POST', '/send/send_instructions', $body, array(), $mode );
 
 	if ( is_wp_error( $response ) ) {
 		/*

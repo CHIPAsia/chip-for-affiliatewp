@@ -224,7 +224,7 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 		$stored_id = absint( affiliate_wp()->settings->get( $keys['id'], '' ) );
 
 		if ( $stored_id ) {
-			$details = chip_affiliatewp_request( 'GET', '/webhooks/' . $stored_id );
+			$details = chip_affiliatewp_request( 'GET', '/webhooks/' . $stored_id, array(), array(), $mode );
 
 			if ( is_wp_error( $details ) ) {
 				// Gone or errored; fall through to discovery below.
@@ -244,7 +244,7 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 	}
 
 	// 2. Find an existing webhook with our callback URL — never register twice.
-	$list = chip_affiliatewp_request( 'GET', '/webhooks' );
+	$list = chip_affiliatewp_request( 'GET', '/webhooks', array(), array(), $mode );
 
 	$existing_id   = 0;
 	$stale_id      = 0;
@@ -291,27 +291,27 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 	);
 
 	if ( $existing_id ) {
-		$response = chip_affiliatewp_request( 'PATCH', '/webhooks/' . $existing_id, $body );
+		$response = chip_affiliatewp_request( 'PATCH', '/webhooks/' . $existing_id, $body, array(), $mode );
 	} elseif ( $stale_id ) {
 		// Same-named webhook from an older site URL; repoint it here. The
 		// CHIP Send API PATCH endpoint only applies the name field, so a
 		// repoint requires deleting the stale webhook and creating a new
 		// one with the current callback URL.
-		$deleted = chip_affiliatewp_request( 'DELETE', '/webhooks/' . $stale_id );
+		$deleted = chip_affiliatewp_request( 'DELETE', '/webhooks/' . $stale_id, array(), array(), $mode );
 
 		if ( is_wp_error( $deleted ) ) {
 			$response = $deleted;
 		} else {
-			$response = chip_affiliatewp_request( 'POST', '/webhooks', $body );
+			$response = chip_affiliatewp_request( 'POST', '/webhooks', $body, array(), $mode );
 		}
 	} else {
-		$response = chip_affiliatewp_request( 'POST', '/webhooks', $body );
+		$response = chip_affiliatewp_request( 'POST', '/webhooks', $body, array(), $mode );
 	}
 
 	if ( is_wp_error( $response ) ) {
 		// A conflict during create means the webhook already exists; re-discover it.
 		if ( ! $existing_id && ! $stale_id ) {
-			$retry = chip_affiliatewp_request( 'GET', '/webhooks' );
+			$retry = chip_affiliatewp_request( 'GET', '/webhooks', array(), array(), $mode );
 
 			if ( ! is_wp_error( $retry ) && isset( $retry['results'] ) && is_array( $retry['results'] ) ) {
 				foreach ( $retry['results'] as $row ) {
@@ -322,7 +322,7 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 				}
 
 				if ( $existing_id ) {
-					$response = chip_affiliatewp_request( 'GET', '/webhooks/' . $existing_id );
+					$response = chip_affiliatewp_request( 'GET', '/webhooks/' . $existing_id, array(), array(), $mode );
 				}
 			}
 		}
@@ -344,7 +344,7 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 	$public_key = (string) chip_affiliatewp_array_value( $response, 'public_key', '' );
 
 	if ( '' === $public_key ) {
-		$details = chip_affiliatewp_request( 'GET', '/webhooks/' . $webhook_id );
+		$details = chip_affiliatewp_request( 'GET', '/webhooks/' . $webhook_id, array(), array(), $mode );
 
 		if ( ! is_wp_error( $details ) ) {
 			$public_key = (string) chip_affiliatewp_array_value( $details, 'public_key', '' );
