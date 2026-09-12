@@ -123,6 +123,7 @@ function chip_affiliatewp_payouts_awaiting_review( $limit = 20 ) {
 			'amount'       => (string) $payout->amount,
 			'state'        => strtolower( (string) $data['state'] ),
 			'since'        => (string) ( $data['last_checked'] ?? '' ),
+
 			/*
 			 * CHIP's own words about an in-flight instruction, when it sent
 			 * any. `rejection_reason` arrives before a final state, so it is
