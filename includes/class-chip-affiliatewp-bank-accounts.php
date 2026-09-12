@@ -82,9 +82,17 @@ function chip_affiliatewp_reference_prefix() {
 	/**
 	 * Filters the fallback reference prefix used when none is configured.
 	 *
+	 * The prefix is capped: a CHIP reference is 40 characters, and the attempt
+	 * number sits at the end of it. A prefix long enough to push the attempt
+	 * past the cut makes every retry reuse the reference CHIP has already
+	 * refused — the retry is rejected, adopts the dead instruction, and the
+	 * payout can never be paid.
+	 *
 	 * @param string $fallback Two-character prefix.
 	 */
-	return (string) apply_filters( 'chip_affiliatewp_reference_prefix_fallback', $fallback );
+	$fallback = (string) apply_filters( 'chip_affiliatewp_reference_prefix_fallback', $fallback );
+
+	return substr( strtoupper( (string) preg_replace( '/[^A-Za-z0-9]/', '', $fallback ) ), 0, 4 );
 }
 
 /**

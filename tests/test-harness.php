@@ -5438,6 +5438,68 @@ $posts = array_values(
 check( 'a submission POST was made', 1 === count( $posts ) );
 check( 'the POST went to the live host', false === strpos( (string) $posts[0]['url'], 'staging-api' ) );
 
+echo "\n== Test 89: an attempt always yields a reference CHIP has not seen ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+/*
+ * The attempt number sits at the end of a 40-character reference. If anything
+ * ahead of it is long enough to push it past the cut, every retry reuses the
+ * reference CHIP already refused: the retry is rejected, adoption finds the
+ * dead instruction, and the payout can never be paid. The prefix is therefore
+ * capped — assert that here for a range of prefixes, including hostile ones.
+ */
+/*
+ * A long prefix can only arrive through the filter: a configured value is cut
+ * to two characters, and the filter is consulted only when none is set. Drive
+ * the test through that path, which is the one that can actually be long.
+ */
+$prefixes = array( 'AA', 'ABCDEFGHIJ', str_repeat( 'A', 30 ), str_repeat( 'A', 40 ), 'a b!c@d#e$f%g^h&i*j(k)l' );
+
+foreach ( $prefixes as $filtered ) {
+	$GLOBALS['__options']['chip_reference_prefix'] = '';
+
+	add_filter( 'chip_affiliatewp_reference_prefix_fallback', function () use ( $filtered ) { return $filtered; } );
+
+	/* translators: no-op so the loop body reads the same for both paths. */
+
+	$first  = chip_affiliatewp_instruction_reference( 12345, 1 );
+	$second = chip_affiliatewp_instruction_reference( 12345, 2 );
+
+	check(
+		'attempt 1 and 2 differ for a filtered prefix of ' . strlen( $filtered ) . ' chars',
+		$first !== $second
+	);
+
+	check(
+		'references stay within 40 characters for a filtered prefix of ' . strlen( $filtered ) . ' chars',
+		strlen( $first ) <= 40 && strlen( $second ) <= 40
+	);
+
+	// Per-referral retries must differ for the same reason.
+	$base  = chip_affiliatewp_reference_prefix() . '-R-987654321';
+	$ref_a = substr( $base, 0, 40 );
+	$ref_b = substr( $base . '-2', 0, 40 );
+
+	check(
+		'a referral retry differs for a filtered prefix of ' . strlen( $filtered ) . ' chars',
+		$ref_a !== $ref_b
+	);
+}
+
+// A configured prefix keeps the historical two-character form.
+$GLOBALS['__options']['chip_reference_prefix'] = 'MY';
+
+check( 'a configured prefix is used as before', 'MY' === chip_affiliatewp_reference_prefix() );
+
+// The hostile fallback is normalised, not stored raw.
+$GLOBALS['__options']['chip_reference_prefix'] = '';
+
+add_filter( 'chip_affiliatewp_reference_prefix_fallback', function () { return 'a-b!c@d#'; } );
+
+check( 'a filtered prefix is alphanumeric and capped', 'ABCD' === chip_affiliatewp_reference_prefix() );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
