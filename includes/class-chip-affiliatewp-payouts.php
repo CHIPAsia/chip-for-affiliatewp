@@ -1163,11 +1163,16 @@ function chip_affiliatewp_sweep_processing_payouts() {
 		$data    = chip_affiliatewp_payout_data( $payout );
 		$against = chip_affiliatewp_parse_utc( chip_affiliatewp_array_value( $data, 'last_checked', '' ) );
 
-		$window = chip_affiliatewp_state_needs_review( (string) ( $data['state'] ?? '' ) )
+		/*
+		 * Named for the cooldown, not the query window above: reusing $window
+		 * here would silently discard the row limit after the first iteration,
+		 * and anything reading it later would get seconds instead of rows.
+		 */
+		$cooldown_for_payout = chip_affiliatewp_state_needs_review( (string) ( $data['state'] ?? '' ) )
 			? $review_cooldown
 			: $cooldown;
 
-		if ( $against && ( time() - $against ) < $window ) {
+		if ( $against && ( time() - $against ) < $cooldown_for_payout ) {
 			continue;
 		}
 
