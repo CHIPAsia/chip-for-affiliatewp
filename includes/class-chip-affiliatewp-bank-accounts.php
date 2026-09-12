@@ -217,8 +217,9 @@ function chip_affiliatewp_get_bank_account( $affiliate_id ) {
  * current bank details. Anything else — changed details, a deleted account, a
  * record written before fingerprints existed — falls through to a fresh lookup.
  *
- * @param int    $affiliate_id Affiliate ID.
- * @param string $reference    Expected CHIP reference.
+ * @param int         $affiliate_id Affiliate ID.
+ * @param string      $reference    Expected CHIP reference.
+ * @param string|null $mode         Optional. Mode the record belongs to.
  * @return array|null Stored record, or null when it must be re-fetched.
  */
 function chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference, $mode = null ) {
@@ -358,8 +359,8 @@ function chip_affiliatewp_forget_bank_account( $affiliate_id ) {
  * number and a cached CHIP account ID on a user who is no longer an affiliate,
  * and a later affiliate reusing that user would inherit both.
  *
- * @param int             $affiliate_id Affiliate ID.
- * @param bool            $delete_data  Whether AffiliateWP was asked to delete data.
+ * @param int              $affiliate_id Affiliate ID.
+ * @param bool             $delete_data  Whether AffiliateWP was asked to delete data.
  * @param \AffWP\Affiliate $affiliate   Affiliate object.
  * @return void
  */

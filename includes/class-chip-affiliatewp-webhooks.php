@@ -419,6 +419,7 @@ function chip_affiliatewp_handle_webhook( $request ) {
 		return new WP_Error( 'chip_webhook_missing_signature', __( 'Missing signature.', 'chip-for-affiliatewp' ), array( 'status' => 401 ) );
 	}
 
+	// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- unwraps the RSA signature for openssl_verify(), not obfuscation.
 	$signature_bytes = (string) base64_decode( $signature, true );
 
 	if ( '' === $signature_bytes ) {
@@ -552,7 +553,8 @@ function chip_affiliatewp_forget_cached_bank_account_from_webhook( $payload ) {
  * Resolution order: the instruction ID stored in payout metadata first, then
  * the deterministic reference embedded in the instruction.
  *
- * @param array $payload Webhook payload.
+ * @param array  $payload       Webhook payload.
+ * @param string $verified_mode Mode whose signature verified the delivery.
  * @return void
  */
 function chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode = '' ) {

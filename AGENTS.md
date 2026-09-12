@@ -13,6 +13,10 @@ to completion.
 
 - **Pure PHP** WordPress plugin — no JS build step, no Composer runtime deps.
 - Minimum PHP 7.1, minimum WordPress 7.1.
+- Minimum AffiliateWP 2.36 (`CHIP_AFFILIATEWP_MIN_AFFWP`). The payment-method
+  registry, single-referral payout handlers, and the payout metadata API are all
+  2.36 features; an older release is detected at runtime and reported as an
+  outdated dependency rather than a silently missing payout method.
 - Text domain: `chip-for-affiliatewp`, declared via the `Text Domain` and
   `Domain Path` plugin headers. Translations load just in time; there is no
   `load_plugin_textdomain()` call (WordPress 4.6+ loads from the headers, and
@@ -98,7 +102,7 @@ The real endpoint still verifies the CHIP RSA signature on every delivery.
 php -f tests/test-harness.php
 ```
 
-Standalone stub harness (no WordPress needed): 307 checks covering checksum
+Standalone stub harness (no WordPress needed): 510 checks covering checksum
 signing, amount formatting, webhook signature verification (valid, tampered,
 missing), webhook reset ownership, payout state transitions,
 idempotency/replay, failed-payout healing, eligibility re-checks, currency

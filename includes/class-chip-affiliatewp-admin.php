@@ -493,14 +493,7 @@ function chip_affiliatewp_render_settings_panel() {
 						<?php
 						printf(
 							/* translators: %d: number of payouts. */
-							esc_html(
-								_n(
-									'%d payout is waiting on CHIP',
-									'%d payouts are waiting on CHIP',
-									$chip_review_count,
-									'chip-for-affiliatewp'
-								)
-							),
+							esc_html( _n( '%d payout is waiting on CHIP', '%d payouts are waiting on CHIP', $chip_review_count, 'chip-for-affiliatewp' ) ),
 							(int) $chip_review_count
 						);
 						?>

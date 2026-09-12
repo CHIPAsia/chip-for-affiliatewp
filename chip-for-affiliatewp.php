@@ -40,16 +40,100 @@ define( 'CHIP_AFFILIATEWP_PATH', plugin_dir_path( CHIP_AFFILIATEWP_FILE ) );
 require_once CHIP_AFFILIATEWP_PATH . 'includes/chip-affiliatewp-functions.php';
 
 /**
- * Checks that AffiliateWP is present before the plugin wires itself up.
+ * The minimum AffiliateWP release this plugin can work on.
  *
- * Every hook and helper in this plugin resolves through AffiliateWP's API, so
- * loading without it would fatal on the first call. Bail out cleanly and tell
- * the merchant what to install instead.
+ * The payment-method registry, the single-referral payout handlers, and the
+ * payout metadata API are all 2.36 features. On an older release the method
+ * simply never appears, which looks like a broken install rather than an
+ * outdated dependency.
+ */
+define( 'CHIP_AFFILIATEWP_MIN_AFFWP', '2.36' );
+
+/**
+ * Returns the installed AffiliateWP version.
  *
- * @return bool True when AffiliateWP is available.
+ * Filterable so a site (or a test harness) can report the version explicitly
+ * without redefining AffiliateWP's own constant.
+ *
+ * @return string Version string, or an empty string when unknown.
+ */
+function chip_affiliatewp_affwp_version() {
+	$version = defined( 'AFFILIATEWP_VERSION' ) ? (string) AFFILIATEWP_VERSION : '';
+
+	/**
+	 * Filters the AffiliateWP version this plugin measures against.
+	 *
+	 * @param string $version Installed version, or an empty string.
+	 */
+	return (string) apply_filters( 'chip_affiliatewp_affwp_version', $version );
+}
+
+/**
+ * Whether AffiliateWP is active and new enough.
+ *
+ * @return bool
  */
 function chip_affiliatewp_dependencies_met() {
-	return class_exists( 'Affiliate_WP' ) || function_exists( 'affiliate_wp' );
+	if ( ! class_exists( 'Affiliate_WP' ) && ! function_exists( 'affiliate_wp' ) ) {
+		return false;
+	}
+
+	$version = chip_affiliatewp_affwp_version();
+
+	// An unknown version is not treated as outdated: the plugin works on what
+	// it can detect, and a missing constant is not evidence of an old release.
+	if ( '' !== $version && version_compare( $version, CHIP_AFFILIATEWP_MIN_AFFWP, '<' ) ) {
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * Whether AffiliateWP is active but too old to support this plugin.
+ *
+ * @return bool
+ */
+function chip_affiliatewp_dependency_outdated() {
+	if ( ! class_exists( 'Affiliate_WP' ) && ! function_exists( 'affiliate_wp' ) ) {
+		return false;
+	}
+
+	$version = chip_affiliatewp_affwp_version();
+
+	if ( '' === $version ) {
+		return false;
+	}
+
+	return version_compare( $version, CHIP_AFFILIATEWP_MIN_AFFWP, '<' );
+}
+
+/**
+ * Warns when AffiliateWP is present but older than this plugin supports.
+ *
+ * @return void
+ */
+function chip_affiliatewp_outdated_dependency_notice() {
+	if ( ! chip_affiliatewp_dependency_outdated() || ! current_user_can( 'activate_plugins' ) ) {
+		return;
+	}
+
+	$args = array(
+		'installed' => chip_affiliatewp_affwp_version(),
+		'required'  => CHIP_AFFILIATEWP_MIN_AFFWP,
+	);
+
+	printf(
+		'<div class="notice notice-error"><p>%s</p></div>',
+		esc_html(
+			sprintf(
+				/* translators: 1: installed AffiliateWP version, 2: required version */
+				__( 'CHIP Send for AffiliateWP needs AffiliateWP %2$s or newer. You have %1$s, so the payout method is unavailable. Update AffiliateWP to use CHIP Send payouts.', 'chip-for-affiliatewp' ),
+				$args['installed'],
+				$args['required']
+			)
+		)
+	);
 }
 
 /**
@@ -58,7 +142,7 @@ function chip_affiliatewp_dependencies_met() {
  * @return void
  */
 function chip_affiliatewp_missing_dependency_notice() {
-	if ( chip_affiliatewp_dependencies_met() || ! current_user_can( 'activate_plugins' ) ) {
+	if ( chip_affiliatewp_dependencies_met() || chip_affiliatewp_dependency_outdated() || ! current_user_can( 'activate_plugins' ) ) {
 		return;
 	}
 
@@ -70,6 +154,7 @@ function chip_affiliatewp_missing_dependency_notice() {
 
 if ( ! chip_affiliatewp_dependencies_met() ) {
 	add_action( 'admin_notices', 'chip_affiliatewp_missing_dependency_notice' );
+	add_action( 'admin_notices', 'chip_affiliatewp_outdated_dependency_notice' );
 
 	return;
 }

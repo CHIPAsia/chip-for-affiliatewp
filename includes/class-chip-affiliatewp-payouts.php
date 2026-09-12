@@ -541,12 +541,12 @@ function chip_affiliatewp_recount_batch_for_payout( $payout_id ) {
  * The payout's referrals are released back to unpaid so the payout can be
  * retried after whatever the problem was has been fixed.
  *
- * @param int         $payout_id  Payout ID.
- * @param string      $reason     Human-readable failure reason.
- * @param string      $error_code Optional. Machine-readable error code used for
- *                                failure classification. Default empty string.
- * @param int|null    $http_status Optional. HTTP status from the API response,
- *                                when the failure came from one. Default null.
+ * @param int      $payout_id  Payout ID.
+ * @param string   $reason     Human-readable failure reason.
+ * @param string   $error_code Optional. Machine-readable error code used for
+ *                             failure classification. Default empty string.
+ * @param int|null $http_status Optional. HTTP status from the API response,
+ *                             when the failure came from one. Default null.
  * @return WP_Error
  */
 function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $http_status = null ) {
@@ -953,11 +953,12 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 		return;
 	}
 
-	// A failed payout that carries an instruction must reconcile instead of
-	// being retried: the instruction may have completed after a transient
-	// failure (timeout between us and CHIP). Requery and let apply_instruction
-	// heal the record so the affiliate cannot be paid twice.
 	/*
+	 * A failed payout carrying an instruction must reconcile instead of being
+	 * retried: the instruction may have completed after a transient failure
+	 * (timeout between us and CHIP). Requery and let apply_instruction heal the
+	 * record so the affiliate cannot be paid twice.
+	 *
 	 * Requery against the mode this payout was SUBMITTED in, not the site-wide
 	 * setting. A merchant flipping to Test Mode would otherwise poll a live
 	 * instruction against staging: the ID does not exist there, so the payout
@@ -1062,7 +1063,7 @@ function chip_affiliatewp_sweep_processing_payouts() {
 	 */
 	$review_cooldown = (int) apply_filters( 'chip_affiliatewp_review_requery_cooldown', 6 * HOUR_IN_SECONDS );
 
-	$checked  = 0;
+	$checked = 0;
 
 	foreach ( $payouts as $payout ) {
 		if ( $checked >= $limit ) {

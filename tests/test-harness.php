@@ -28,6 +28,9 @@ function add_action( $hook, $cb, $prio = 10, $args = 1 ) {
 	$GLOBALS['__actions'][ $hook ][] = $cb;
 }
 
+// The dependency-floor tests drive the AffiliateWP version through this global.
+$GLOBALS['__affwp_version'] = '2.36.2';
+
 function add_filter( $hook, $cb, $prio = 10, $args = 1 ) {
 	$GLOBALS['__filters'][ $hook ][] = $cb;
 }
@@ -821,7 +824,29 @@ if ( ! defined( 'OPENSSL_ALGO_SHA512' ) ) {
 if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', __DIR__ . '/' );
 }
+
+/*
+ * AffiliateWP's version constant, as a real install defines it. Tests that
+ * exercise the dependency floor change $GLOBALS['__affwp_version'] instead of
+ * redefining this, since a constant cannot be redefined.
+ */
+if ( ! defined( 'AFFILIATEWP_VERSION' ) ) {
+	define( 'AFFILIATEWP_VERSION', $GLOBALS['__affwp_version'] ?? '2.36.2' );
+}
+
 require __DIR__ . '/../chip-for-affiliatewp.php';
+
+/*
+ * One filter drives the version the plugin measures against, reading a global
+ * so each test can set it without redefining AffiliateWP's constant.
+ */
+add_filter(
+	'chip_affiliatewp_affwp_version',
+	function ( $version ) {
+		return $GLOBALS['__affwp_version'] ?? $version;
+	},
+	1
+);
 
 // ---------------------------------------------------------------------------
 // Fake REST request
@@ -4434,6 +4459,58 @@ $GLOBALS['__http_log'] = array();
 chip_affiliatewp_pay_single_referral( 302 );
 
 check( 'an MYR store does reach the API', count( $GLOBALS['__http_log'] ) > 0 );
+
+echo "\n== Test 74: an outdated AffiliateWP is reported, not silently ignored ==\n";
+
+// The plugin depends on AffiliateWP 2.36 APIs. On an older release the payout
+// method simply never appears, which reads as a broken install.
+check( 'the minimum version constant is defined', defined( 'CHIP_AFFILIATEWP_MIN_AFFWP' ) );
+check( 'the minimum is 2.36', '2.36' === CHIP_AFFILIATEWP_MIN_AFFWP );
+
+// AffiliateWP present and new enough: dependencies are met.
+$GLOBALS['__affwp_version'] = '2.36.2';
+check( 'a current AffiliateWP satisfies the dependency', true === chip_affiliatewp_dependencies_met() );
+check( 'a current AffiliateWP is not flagged as outdated', false === chip_affiliatewp_dependency_outdated() );
+
+// Older than the floor: dependencies are NOT met, and the reason is reported.
+$GLOBALS['__affwp_version'] = '2.33.0';
+check( '2.33 does not satisfy the dependency', false === chip_affiliatewp_dependencies_met() );
+check( '2.33 is flagged as outdated', true === chip_affiliatewp_dependency_outdated() );
+
+// The floor itself is accepted.
+$GLOBALS['__affwp_version'] = '2.36';
+check( 'exactly 2.36 satisfies the dependency', true === chip_affiliatewp_dependencies_met() );
+
+// Newer patch releases are accepted.
+$GLOBALS['__affwp_version'] = '2.37.1';
+check( 'a newer release satisfies the dependency', true === chip_affiliatewp_dependencies_met() );
+
+// An unknown version (constant absent) must not block activation.
+$GLOBALS['__affwp_version'] = null;
+check( 'an unknown version does not block', true === chip_affiliatewp_dependencies_met() );
+check( 'an unknown version is not flagged as outdated', false === chip_affiliatewp_dependency_outdated() );
+
+// The outdated notice must produce the merchant-facing message.
+$GLOBALS['__affwp_version'] = '2.33.0';
+$GLOBALS['__current_user_can'] = true;
+ob_start();
+chip_affiliatewp_outdated_dependency_notice();
+$notice = ob_get_clean();
+
+check( 'the outdated notice renders', '' !== trim( $notice ) );
+check( 'the notice names the installed version', false !== strpos( $notice, '2.33.0' ) );
+check( 'the notice names the required version', false !== strpos( $notice, '2.36' ) );
+check( 'the notice mentions the payout method is unavailable', false !== strpos( $notice, 'unavailable' ) );
+
+// A current install must render nothing.
+$GLOBALS['__affwp_version'] = '2.36.2';
+ob_start();
+chip_affiliatewp_outdated_dependency_notice();
+$clean = ob_get_clean();
+
+check( 'no notice on a current install', '' === trim( $clean ) );
+
+$GLOBALS['__affwp_version'] = '2.36.2';
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
