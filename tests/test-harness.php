@@ -5127,6 +5127,59 @@ $row  = affwp_get_payout( $paid );
 check( 'a paid payout keeps its receipt', $receipt === (string) ( $data['receipt_url'] ?? '' ) );
 check( 'a paid payout keeps its invoice link', false !== strpos( (string) $row->service_invoice_link, 'receipts' ) );
 
+echo "\n== Test 85: a failed requery is counted, so the retry cap applies ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 998 ),
+		'amount'        => '29.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array( 'instruction_id' => 9100, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1 )
+);
+
+// CHIP is unreachable: the requery returns an error, not a state.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/9100', 'method' => 'GET', 'code' => 503, 'body' => array( 'message' => 'unavailable' ) );
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_run_scheduled_check( $payout_id );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'a failed check is counted', 1 === (int) ( $data['poll_count'] ?? 0 ) );
+check( 'a failed check is rescheduled while under the cap', ! empty( $GLOBALS['__as_scheduled'] ) );
+
+// At the cap, no further check is queued — the hourly sweep takes over.
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array( 'instruction_id' => 9100, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1, 'poll_count' => 48 )
+);
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/9100', 'method' => 'GET', 'code' => 503, 'body' => array( 'message' => 'unavailable' ) );
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_run_scheduled_check( $payout_id );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'the failure count keeps climbing', 49 === (int) ( $data['poll_count'] ?? 0 ) );
+check( 'at the cap no further check is queued', array() === $GLOBALS['__as_scheduled'] );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

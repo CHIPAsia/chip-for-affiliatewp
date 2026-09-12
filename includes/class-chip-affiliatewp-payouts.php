@@ -1015,11 +1015,21 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 	$response = chip_affiliatewp_get_instruction( (int) $data['instruction_id'], $stored_mode );
 
 	if ( is_wp_error( $response ) ) {
-		$data['poll_count']   = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );
+		/*
+		 * Count the failed check too. Without it the cap below is never
+		 * reached on this path: an unreachable CHIP would reschedule a check
+		 * every five minutes indefinitely, accumulating Action Scheduler rows
+		 * for a payout that is going nowhere. Counting failures means the
+		 * same cap ends this path, and the hourly sweep takes over.
+		 */
+		$attempts = (int) chip_affiliatewp_array_value( $data, 'poll_count', 0 );
+
+		$data['poll_count']   = $attempts + 1;
 		$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
+
 		chip_affiliatewp_update_payout_data( $payout_id, $data );
 
-		if ( $reschedule ) {
+		if ( $reschedule && $attempts < 48 ) {
 			chip_affiliatewp_schedule_check( $payout_id, 300 );
 		}
 
