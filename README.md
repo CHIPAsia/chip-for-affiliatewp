@@ -15,7 +15,7 @@ Pay your affiliates' commissions as [CHIP Send](https://docs.chip-in.asia/chip-s
 
 ## Compatibility
 
-- [AffiliateWP](https://affiliatewp.com/) 2.33+ (uses the payout-method and batch processor APIs)
+- [AffiliateWP](https://affiliatewp.com/) 2.36+ (the payment-method registry, the single-referral payout handlers, and the payout metadata API are 2.36 features; an older release is detected and reported rather than failing quietly)
 - PHP 7.1+
 
 ## Installation
