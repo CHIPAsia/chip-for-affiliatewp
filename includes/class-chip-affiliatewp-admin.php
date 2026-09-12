@@ -747,6 +747,9 @@ function chip_affiliatewp_render_settings_panel() {
 							<p class="mt-2 text-sm text-gray-600">
 							<?php esc_html_e( 'Two characters used to prefix CHIP Send references.', 'chip-for-affiliatewp' ); ?>
 							</p>
+							<p class="mt-2 text-sm text-gray-600">
+							<?php esc_html_e( 'Make this different on every site that uses the same CHIP account. References are what stop a payout being sent twice, and two sites with the same prefix can collide, so the second site would have its payout refused rather than paid.', 'chip-for-affiliatewp' ); ?>
+							</p>
 						</div>
 					</div>
 				</div>
