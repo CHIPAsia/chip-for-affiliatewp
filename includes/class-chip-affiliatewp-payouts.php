@@ -515,7 +515,9 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
  * that instruction's state, and a completed one would mark these referrals paid
  * for money that went somewhere else.
  *
- * The amount and the destination account are the two things that must agree.
+ * The amount, and the destination account when both sides state one, are what
+ * must agree. The instruction id is not used here: a payout adopting an
+ * instruction has not recorded one yet, which is the whole point of adopting.
  *
  * @param object $payout      Payout row.
  * @param array  $instruction Instruction payload from CHIP.
@@ -530,8 +532,11 @@ function chip_affiliatewp_instruction_belongs_to_payout( $payout, $instruction )
 	}
 
 	/*
-	 * The destination account, when CHIP states it. A payout whose bank account
-	 * does not match is paying a different recipient.
+	 * The destination account. A payout whose bank account does not match is
+	 * paying a different recipient.
+	 *
+	 * The row does not carry the account id — its service_id is the instruction
+	 * id — so it is asked for when needed rather than read here.
 	 */
 	$instruction_account = absint( chip_affiliatewp_array_value( $instruction, 'bank_account_id' ) );
 
@@ -540,17 +545,17 @@ function chip_affiliatewp_instruction_belongs_to_payout( $payout, $instruction )
 		return true;
 	}
 
-	$known_account = absint( $payout->service_id );
+	/*
+	 * If the payout already names the same instruction, the destination is
+	 * settled: this is the instruction it was submitted under.
+	 */
+	$known_instruction = absint( chip_affiliatewp_array_value( $instruction, 'id' ) );
+	$recorded          = absint( $payout->service_id );
 
-	if ( $known_account ) {
-		return $known_account === $instruction_account;
+	if ( $recorded && $known_instruction && $recorded === $known_instruction ) {
+		return true;
 	}
 
-	/*
-	 * A payout that was never submitted has no bank account on its row. Ask CHIP
-	 * for the account this affiliate's details resolve to and compare, so an
-	 * adoption still cannot attach a payout to another site's instruction.
-	 */
 	$affiliate_id = absint( $payout->affiliate_id );
 
 	if ( ! $affiliate_id ) {

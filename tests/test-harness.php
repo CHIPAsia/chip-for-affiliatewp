@@ -6145,6 +6145,93 @@ $result3 = chip_affiliatewp_submit_payout( $third );
 check( 'a genuine instruction is still adopted', true === $result3 );
 check( 'its id is stored', 6003 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $third ) )['instruction_id'] ?? 0 ) );
 
+echo "\n== Test 95: a payout may re-adopt the instruction it was submitted under ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1800 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1800] = new Fake_Referral( 1800, 3, '7.00', 'unpaid', $payout_id );
+
+/*
+ * This payout was submitted before: the row carries the instruction id in
+ * service_id. Re-finding that same instruction must be accepted, or a retry
+ * after an unclear response could never reconcile.
+ */
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array( 'instruction_id' => 7001, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1 )
+);
+
+affiliate_wp()->affiliates->payouts->update(
+	$payout_id,
+	array( 'service_id' => 7001 ),
+	'',
+	'payout'
+);
+
+$payout = affwp_get_payout( $payout_id );
+
+check(
+	'its own instruction is recognised as its own',
+	true === chip_affiliatewp_instruction_belongs_to_payout(
+		$payout,
+		array(
+			'id'              => 7001,
+			'amount'          => '7.00',
+			'bank_account_id' => 9999,
+			'state'           => 'executing',
+		)
+	)
+);
+
+// And the full path still adopts rather than re-sending.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 7001,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $payout_id,
+				'amount'          => '7.00',
+				'bank_account_id' => 9999,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'a resubmission adopts its own live instruction', true === $result );
+check( 'and sends nothing new', array() === $posts );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
