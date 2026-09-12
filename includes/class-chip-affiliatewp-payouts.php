@@ -420,7 +420,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	$data['mode']           = affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live';
 
 	// The instruction was accepted, so any earlier failure no longer applies.
-	unset( $data['error'] );
+	unset( $data['error'], $data['error_status'] );
 
 	chip_affiliatewp_update_payout_data( $payout_id, $data );
 
@@ -485,7 +485,7 @@ function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction, 
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
 
 	// The instruction exists, so any earlier failure note no longer applies.
-	unset( $data['error'] );
+	unset( $data['error'], $data['error_status'] );
 
 	chip_affiliatewp_update_payout_data( $payout_id, $data );
 
@@ -582,6 +582,14 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 		unset( $data['instruction_id'] );
 		$data['attempt'] = chip_affiliatewp_payout_attempt( $data ) + 1;
 	}
+
+	/*
+	 * A failed payout has left review for good: the instruction is dead and the
+	 * payout will not move again without a retry. Clear the in-review state so
+	 * it does not describe a stay that is over — and so a later retry that gets
+	 * parked again is reported as the fresh problem it is.
+	 */
+	unset( $data['review_notified'], $data['note'] );
 
 	if ( $payout ) {
 		/*
@@ -741,7 +749,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	 * retried in the first place.
 	 */
 	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) ) {
-		unset( $data['error'] );
+		unset( $data['error'], $data['error_status'] );
 	}
 
 	/*
@@ -757,6 +765,17 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 		unset( $data['note'] );
 	} else {
 		$data['note'] = $note;
+	}
+
+	/*
+	 * The review notification is per stay in review, not per payout. Leaving
+	 * review (settling, or being refused) ends the current stay, so the flag is
+	 * cleared: a payout that returns to review later is a fresh problem with a
+	 * fresh reason, and the merchant must be told about it. Keeping the flag
+	 * would silently suppress that second notification.
+	 */
+	if ( ! chip_affiliatewp_state_needs_review( $state ) ) {
+		unset( $data['review_notified'] );
 	}
 
 	if ( ! empty( $instruction['id'] ) ) {

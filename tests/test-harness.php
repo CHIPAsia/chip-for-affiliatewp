@@ -4925,6 +4925,135 @@ foreach ( $rows as $row ) {
 check( 'the payout appears in the review list', ! empty( $match ) );
 check( 'the list carries the reason', $reason === ( $match['note'] ?? '' ) );
 
+echo "\n== Test 82: leaving review re-arms the notification ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 980 ),
+		'amount'        => '55.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+// First stay in review: the merchant is told once.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array( 'id' => 9400, 'state' => 'reviewing', 'rejection_reason' => 'First problem.' )
+);
+
+$GLOBALS['__mail'] = array();
+chip_affiliatewp_notify_review_payouts();
+
+check( 'the first stay is reported', 1 === count( $GLOBALS['__mail'] ) );
+check( 'the flag is set after notifying', ! empty( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['review_notified'] ) );
+
+// A second run in the same stay stays quiet.
+$GLOBALS['__mail'] = array();
+chip_affiliatewp_notify_review_payouts();
+
+check( 'the same stay is not reported twice', 0 === count( $GLOBALS['__mail'] ) );
+
+// The instruction settles: the stay in review is over.
+chip_affiliatewp_apply_instruction( $payout_id, array( 'id' => 9400, 'state' => 'completed' ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'the payout is paid', 'paid' === affwp_get_payout( $payout_id )->status );
+check( 'leaving review clears the notified flag', empty( $data['review_notified'] ) );
+
+// A later instruction, parked for a different reason, must be reported.
+$retry = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 981 ),
+		'amount'        => '21.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+chip_affiliatewp_apply_instruction(
+	$retry,
+	array( 'id' => 9401, 'state' => 'reviewing', 'rejection_reason' => 'Second problem.' )
+);
+
+$GLOBALS['__mail'] = array();
+chip_affiliatewp_notify_review_payouts();
+
+check( 'a new stay is reported', 1 === count( $GLOBALS['__mail'] ) );
+check( 'the new reason is quoted', false !== strpos( $GLOBALS['__mail'][0]['body'], 'Second problem.' ) );
+
+// A refusal also ends the stay.
+reset_state();
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$refused = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 982 ),
+		'amount'        => '17.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+chip_affiliatewp_apply_instruction( $refused, array( 'id' => 9402, 'state' => 'reviewing', 'rejection_reason' => 'Parked.' ) );
+$GLOBALS['__mail'] = array();
+chip_affiliatewp_notify_review_payouts();
+
+check( 'the refused payout was reported while parked', 1 === count( $GLOBALS['__mail'] ) );
+
+chip_affiliatewp_apply_instruction( $refused, array( 'id' => 9402, 'state' => 'rejected', 'rejection_reason' => 'Refused.' ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $refused ) );
+check( 'a refusal clears the notified flag too', empty( $data['review_notified'] ) );
+check( 'a refusal clears the stale note', empty( $data['note'] ) );
+
+echo "\n== Test 83: a recovered payout leaves no failure state behind ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 990 ),
+		'amount'        => '64.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+// A transient failure records the reason and the HTTP status together.
+chip_affiliatewp_fail_payout( $payout_id, 'Temporary outage.', 'chip_server_error', 503 );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'the failure is recorded', 'Temporary outage.' === (string) ( $data['error'] ?? '' ) );
+check( 'the status is recorded with it', 503 === (int) ( $data['error_status'] ?? 0 ) );
+
+// The instruction later completes and the payout settles.
+chip_affiliatewp_apply_instruction( $payout_id, array( 'id' => 9300, 'state' => 'completed' ) );
+
+$data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+check( 'the payout is paid', 'paid' === affwp_get_payout( $payout_id )->status );
+check( 'the failure reason is cleared', empty( $data['error'] ) );
+check( 'the failure status is cleared with it', empty( $data['error_status'] ) );
+
+// Neither key may linger on a successful payout.
+check( 'no orphaned status', ! isset( $data['error_status'] ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
