@@ -4381,6 +4381,60 @@ check( 'an empty account is refused', is_wp_error( chip_affiliatewp_validate_acc
 // Separators are tolerated on input.
 check( 'a separated account is accepted', true === chip_affiliatewp_validate_account_number( '1234-567 890' ) );
 
+echo "\n== Test 73: the single-referral path refuses a non-MYR store ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliates'][3]    = (object) array( 'affiliate_id' => 3, 'user_id' => 7, 'payment_email' => '' );
+$GLOBALS['__affiliate_meta'][3] = array();
+
+$GLOBALS['__referral_rows'][300] = new Fake_Referral( 300, 3, '25.00', 'unpaid', 0 );
+
+// A store that is not MYR must be refused before any money moves.
+$GLOBALS['__options']['currency'] = 'USD';
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$refused = chip_affiliatewp_pay_single_referral( 300 );
+
+check( 'a USD store is refused', is_wp_error( $refused ) );
+check( 'the refusal names the currency', is_wp_error( $refused ) && 'chip_currency_unsupported' === $refused->get_error_code() );
+check( 'the refusal mentions USD', is_wp_error( $refused ) && false !== strpos( $refused->get_error_message(), 'USD' ) );
+check( 'no HTTP call was made for a USD store', array() === $GLOBALS['__http_log'] );
+
+// The referral must not be touched.
+check( 'the referral stays unpaid', 'unpaid' === $GLOBALS['__referral_rows'][300]->status );
+
+// A zero-amount referral is refused too.
+$GLOBALS['__options']['currency'] = 'MYR';
+$GLOBALS['__referral_rows'][301] = new Fake_Referral( 301, 3, '0.00', 'unpaid', 0 );
+$GLOBALS['__http_log'] = array();
+
+$zero = chip_affiliatewp_pay_single_referral( 301 );
+
+check( 'a zero-amount referral is refused', is_wp_error( $zero ) );
+check( 'the zero refusal is about the amount', is_wp_error( $zero ) && 'chip_invalid_amount' === $zero->get_error_code() );
+check( 'no HTTP call was made for a zero amount', array() === $GLOBALS['__http_log'] );
+
+// Sanity: an MYR store with a real amount DOES proceed to the API.
+$GLOBALS['__referral_rows'][302] = new Fake_Referral( 302, 3, '25.00', 'unpaid', 0 );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_pay_single_referral( 302 );
+
+check( 'an MYR store does reach the API', count( $GLOBALS['__http_log'] ) > 0 );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

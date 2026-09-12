@@ -1261,6 +1261,28 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	}
 
 	/*
+	 * CHIP Send only settles MYR, and the API takes a bare number with no
+	 * currency field — a store configured in USD would send "100.00" that CHIP
+	 * reads as RM100. The batch path refuses this too; without the same check
+	 * here, paying a single referral from the Referrals screen would quietly
+	 * send the wrong amount.
+	 */
+	if ( 'MYR' !== chip_affiliatewp_currency() ) {
+		return new WP_Error(
+			'chip_currency_unsupported',
+			sprintf(
+				/* translators: %s: the store's currency code. */
+				__( 'CHIP Send pays out in MYR only, but this store is set to %s. Change the currency in AffiliateWP settings to send payouts.', 'chip-for-affiliatewp' ),
+				chip_affiliatewp_currency()
+			)
+		);
+	}
+
+	if ( (float) $referral->amount <= 0 ) {
+		return new WP_Error( 'chip_invalid_amount', __( 'The referral amount must be greater than zero.', 'chip-for-affiliatewp' ) );
+	}
+
+	/*
 	 * The reference is the idempotency key at CHIP and is stored permanently,
 	 * so it carries an attempt number for the same reason the batch path does:
 	 * a repeat within an attempt is refused and adopted (safe after an unclear
