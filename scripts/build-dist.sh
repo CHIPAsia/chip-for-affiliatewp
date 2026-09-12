@@ -14,6 +14,7 @@ zip -rq "dist/chip-for-affiliatewp.$VERSION.zip" \
   readme.txt \
   includes \
   languages \
+  assets \
   \
   -x "*.DS_Store"
 

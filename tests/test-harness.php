@@ -4280,6 +4280,67 @@ do_action( 'affwp_affiliate_deleted', 4242 );
 
 check( 'an unknown affiliate leaves other users alone', '9999000011' === (string) get_user_meta( 9, 'payment_account_number', true ) );
 
+echo "\n== Test 71: every asset the code loads is shipped in the dist ==\n";
+
+// Anything the plugin loads at runtime from its own directory must survive the
+// build, or the released zip ships a broken screen.
+$plugin_root = dirname( __DIR__ );
+$build_script = $plugin_root . '/scripts/build-dist.sh';
+$build_source = file_get_contents( $build_script );
+
+check( 'the build script exists', false !== $build_source );
+
+// Collect the relative paths the code references via CHIP_AFFILIATEWP_URL.
+$php_sources = array_merge(
+	glob( $plugin_root . '/*.php' ),
+	glob( $plugin_root . '/includes/*.php' )
+);
+
+$referenced = array();
+
+foreach ( $php_sources as $source_path ) {
+	$source = file_get_contents( $source_path );
+
+	if ( preg_match_all( "/CHIP_AFFILIATEWP_URL\s*\.\s*'([^']+)'/", $source, $hits ) ) {
+		foreach ( $hits[1] as $relative ) {
+			$referenced[ $relative ] = basename( $source_path );
+		}
+	}
+}
+
+check( 'the code references at least one asset', ! empty( $referenced ) );
+
+foreach ( $referenced as $relative => $from ) {
+	$top_level = explode( '/', ltrim( $relative, '/' ) )[0];
+	$on_disk   = file_exists( $plugin_root . '/' . $relative );
+
+	check( 'referenced asset exists on disk: ' . $relative . ' (' . $from . ')', $on_disk );
+
+	/*
+	 * The build script lists whole directories, one per line, each ending in a
+	 * trailing backslash. Match the directory as its own line so a mention in a
+	 * comment cannot satisfy the check.
+	 */
+	$shipped = false;
+
+	foreach ( preg_split( '/\R/', $build_source ) as $build_line ) {
+		if ( trim( rtrim( trim( $build_line ), '\\' ) ) === $top_level ) {
+			$shipped = true;
+			break;
+		}
+	}
+
+	check( 'referenced asset is shipped by the build: ' . $top_level, $shipped );
+}
+
+// The languages directory must ship, or translations never load.
+check( 'the build ships the languages directory', false !== strpos( $build_source, 'languages' ) );
+
+// Development-only directories must NOT ship.
+foreach ( array( 'tests', 'scripts', 'vendor' ) as $dev_only ) {
+	check( 'the build does not ship ' . $dev_only, ! preg_match( '/^\s*' . $dev_only . '\s*\\/m', $build_source ) );
+}
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
