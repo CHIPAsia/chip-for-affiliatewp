@@ -231,11 +231,13 @@ function chip_affiliatewp_sanitize_note( $note ) {
  * answer 422 and the payout fail. Normalize to the allowed set before sending,
  * then trim to the API's length budget.
  *
- * @param string $text  Raw description.
- * @param int    $limit Maximum length after sanitizing.
+ * @param string $text     Raw description.
+ * @param int    $limit    Maximum length after sanitizing.
+ * @param string $fallback Used when nothing survives sanitizing, so the
+ *                         description still says which payout it belongs to.
  * @return string Safe description, never empty.
  */
-function chip_affiliatewp_sanitize_description( $text, $limit = 140 ) {
+function chip_affiliatewp_sanitize_description( $text, $limit = 140, $fallback = '' ) {
 	$text = (string) $text;
 
 	// Map common typography to its ASCII equivalent first so meaning survives.
@@ -255,7 +257,17 @@ function chip_affiliatewp_sanitize_description( $text, $limit = 140 ) {
 	$text = trim( preg_replace( '/\s+/', ' ', $text ) );
 
 	if ( '' === $text ) {
-		$text = 'Affiliate commission payout';
+		/*
+		 * Nothing survived: the store wrote it in a script the allow-list
+		 * cannot carry, or in punctuation alone. Fall back to something that
+		 * still identifies the payout, because a description of "Affiliate
+		 * commission payout" answers nothing when it is the first thing the
+		 * merchant sees at CHIP.
+		 */
+		$fallback = trim( preg_replace( '/\s+/', ' ', (string) $fallback ) );
+		$fallback = trim( (string) preg_replace( '/[^A-Za-z0-9 ._\-@()\/]/', ' ', $fallback ) );
+
+		$text = '' !== $fallback ? $fallback : 'Affiliate commission payout';
 	}
 
 	return chip_affiliatewp_substr( $text, $limit );

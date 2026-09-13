@@ -627,10 +627,12 @@ function wp_list_pluck( $list, $key ) {
 class Fake_User {
 	public $ID;
 	public $user_email;
+	public $user_login;
 
-	public function __construct( $id, $email ) {
+	public function __construct( $id, $email, $login = '' ) {
 		$this->ID         = $id;
 		$this->user_email = $email;
+		$this->user_login = '' !== $login ? $login : 'user' . $id;
 	}
 }
 
@@ -4450,7 +4452,7 @@ check( 'the build ships the languages directory', false !== strpos( $build_sourc
 
 // Development-only directories must NOT ship.
 foreach ( array( 'tests', 'scripts', 'vendor' ) as $dev_only ) {
-	check( 'the build does not ship ' . $dev_only, ! preg_match( '/^\s*' . $dev_only . '\s*\\/m', $build_source ) );
+	check( 'the build does not ship ' . $dev_only, ! preg_match( '/^\s*' . preg_quote( $dev_only, '/' ) . '\s*$/m', $build_source ) );
 }
 
 /*
@@ -4637,8 +4639,13 @@ foreach ( glob( $repo . '/includes/*.php' ) as $path ) {
 		}
 	}
 
-	// $input['name'] = ... inside the options sanitizer
-	if ( preg_match_all( "/\\$input\[\s*'([a-z0-9_]+)'\s*\]/", $src, $hits ) ) {
+	/*
+	 * $input['name'] = ... inside the options sanitizer. Only assignments
+	 * count: the same array is read and unset() in there, and a key that is
+	 * explicitly cleared before storage is never persisted, so uninstall has
+	 * nothing to remove.
+	 */
+	if ( preg_match_all( '/\$input\[\s*\'([a-z0-9_]+)\'\s*\]\s*=/', $src, $hits ) ) {
 		foreach ( $hits[1] as $name ) {
 			$written[ $name ] = basename( $path );
 		}
@@ -7088,6 +7095,67 @@ check(
 );
 
 check( 'states are matched case-insensitively', true === chip_affiliatewp_state_is_terminal( 'REJECted' ) );
+
+echo "\n== Test 109: a description in another script still identifies the payout ==\n";
+reset_state();
+
+/*
+ * The API carries a subset of ASCII. A store that writes its referral
+ * descriptions in Chinese, Japanese or Arabic produces one that sanitizes to
+ * nothing - and the API refuses a description shorter than one character, so
+ * the payout would fail over wording, not over money.
+ */
+foreach ( array( '日本語の注文', '订单', '***', '   ', 'طلبية' ) as $written ) {
+	$fallback = 'Affiliate commission payout No.5';
+	$result   = chip_affiliatewp_sanitize_description( $written, 140, $fallback );
+
+	check( 'a non-Latin description still says which payout it is', $fallback === $result );
+	check( 'and it is not empty', '' !== $result );
+}
+
+// The API minimum is one character; assert against it rather than a proxy.
+check(
+	'every description clears the one-character minimum',
+	1 <= strlen( chip_affiliatewp_sanitize_description( '日本語', 140, 'Payout No.5' ) )
+);
+
+// A usable description is still used, and is still normalized.
+check(
+	'a usable description is kept',
+	'Order No.42 coffee' === chip_affiliatewp_sanitize_description( 'Order #42 coffee', 140, 'fallback' )
+);
+
+check(
+	'the fallback is not used when text survives',
+	'fallback' !== chip_affiliatewp_sanitize_description( 'Order #42 coffee', 140, 'fallback' )
+);
+
+// The length budget still applies to what is sent.
+check(
+	'a long description is still trimmed to the budget',
+	140 === strlen( chip_affiliatewp_sanitize_description( str_repeat( 'a', 300 ), 140, 'fallback' ) )
+);
+
+check(
+	'the fallback is also trimmed to the budget',
+	140 === strlen( chip_affiliatewp_sanitize_description( '日本語', 140, str_repeat( 'b', 300 ) ) )
+);
+
+// With no fallback supplied the generic one still applies, so the argument is
+// additive rather than a new way to send nothing.
+check(
+	'the generic fallback still applies without one supplied',
+	'Affiliate commission payout' === chip_affiliatewp_sanitize_description( '日本語' )
+);
+
+/*
+ * And the call sites pass one: the description the merchant sees at CHIP should
+ * name the payout, not just say a commission happened.
+ */
+$payouts_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check( 'the payout path passes a fallback', false !== strpos( $payouts_src, '$referral_fallback' ) );
+check( 'the referral path builds a named fallback', false !== strpos( $payouts_src, "'Commission for referral No.%d'" ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
