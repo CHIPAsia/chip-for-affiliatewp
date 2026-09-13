@@ -150,6 +150,28 @@ foreach ( array( 'chip_bank_account', 'chip_bank_account_superseded', 'payment_a
 	}
 }
 
+/*
+ * Remove the payout meta this plugin stores against each payout.
+ *
+ * `chip_payout_data` carries the CHIP instruction id, the reference, and CHIP's
+ * own note about the instruction — payout-level records that outlive the plugin
+ * otherwise. The payouts are read through AffiliateWP's own store rather than a
+ * hand-written query, so this keeps working if the schema moves.
+ */
+if ( class_exists( 'Affiliate_WP' ) && function_exists( 'affwp_delete_payout_meta' ) ) {
+	$chip_payouts = affiliate_wp()->affiliates->payouts->get_payouts(
+		array(
+			'payout_method' => 'chip',
+			'number'        => 5000,
+			'fields'        => 'ids',
+		)
+	);
+
+	foreach ( (array) $chip_payouts as $chip_payout_id ) {
+		affwp_delete_payout_meta( (int) $chip_payout_id, 'chip_payout_data' );
+	}
+}
+
 // Clear cached account summaries and queued notices.
 global $wpdb;
 
@@ -167,11 +189,25 @@ foreach ( $chip_transients as $chip_transient ) {
 	delete_transient( $chip_key );
 }
 
-// Clear scheduled actions owned by the plugin.
-if ( function_exists( 'as_unschedule_all_actions' ) ) {
-	as_unschedule_all_actions( 'chip_affiliatewp_submit_payout_action' );
-	as_unschedule_all_actions( 'chip_affiliatewp_run_check_action' );
-	as_unschedule_all_actions( 'chip_affiliatewp_hourly_sweep' );
-}
+/*
+ * Clear scheduled actions owned by the plugin.
+ *
+ * The hook names are the ones the plugin actually schedules. `uninstall.php`
+ * cannot call the plugin's own helper (it is not loaded), so the list is kept
+ * here in step with `chip_affiliatewp_unschedule_sweep()`. A name that does not
+ * exist is silently deleted from nothing, leaving the real actions behind to
+ * fire callbacks for a plugin that is gone.
+ */
+$chip_scheduled_hooks = array(
+	'chip_affiliatewp_submit_payout_action',
+	'chip_affiliatewp_check_payout_status',
+	'chip_affiliatewp_hourly_sweep',
+);
 
-wp_clear_scheduled_hook( 'chip_affiliatewp_hourly_sweep' );
+foreach ( $chip_scheduled_hooks as $chip_scheduled_hook ) {
+	wp_clear_scheduled_hook( $chip_scheduled_hook );
+
+	if ( function_exists( 'as_unschedule_all_actions' ) ) {
+		as_unschedule_all_actions( $chip_scheduled_hook );
+	}
+}

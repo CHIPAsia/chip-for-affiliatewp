@@ -6631,6 +6631,52 @@ chip_affiliatewp_process_instruction_webhook(
 check( 'an unpaid referral is still materialised', count( $GLOBALS['__payout_rows'] ) === $before + 1 );
 check( 'and it is paid by the delivery', 'paid' === $GLOBALS['__referral_rows'][2201]->status );
 
+echo "\n== Test 102: the scheduled hooks named at uninstall are real ==\n";
+reset_state();
+
+$plugin_root = dirname( __DIR__ );
+
+$uninstall_src  = (string) file_get_contents( $plugin_root . '/uninstall.php' );
+$lifecycle_src  = (string) file_get_contents( $plugin_root . '/includes/chip-affiliatewp-lifecycle.php' );
+$payouts_src    = (string) file_get_contents( $plugin_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+/*
+ * A hook name that does not exist unschedules nothing, silently: the real
+ * actions stay behind and fire callbacks for a plugin that is gone. The names
+ * in uninstall.php must therefore be the names the plugin schedules.
+ */
+// The hook name is passed on its own line, so the pattern spans newlines.
+preg_match_all( "/as_schedule_[a-z_]+\\(.*?'(chip_affiliatewp_[a-z_]+)'/s", $payouts_src . $lifecycle_src, $scheduled );
+preg_match_all( "/wp_schedule_event\\(.*?'(chip_affiliatewp_[a-z_]+)'/s", $lifecycle_src, $recurring );
+
+$real_hooks = array_values( array_unique( array_merge( $scheduled[1], $recurring[1] ) ) );
+
+check( 'the plugin schedules something', ! empty( $real_hooks ) );
+
+/*
+ * Only the names in the sweep list matter; the file also mentions functions and
+ * option keys, which are not hooks.
+ */
+preg_match( '/\$chip_scheduled_hooks\s*=\s*array\(([^)]*)\)/s', $uninstall_src, $list_match );
+
+check( 'uninstall has a scheduled-hook list', ! empty( $list_match[1] ) );
+
+preg_match_all( "/'(chip_affiliatewp_[a-z_]+)'/", (string) ( $list_match[1] ?? '' ), $cleared );
+
+$cleared_hooks = array_values( array_unique( $cleared[1] ) );
+
+foreach ( $real_hooks as $real_hook ) {
+	check(
+		'uninstall clears the real hook ' . $real_hook,
+		in_array( $real_hook, $cleared_hooks, true )
+	);
+}
+
+check(
+	'uninstall names no hook that does not exist',
+	array() === array_values( array_diff( $cleared_hooks, $real_hooks ) )
+);
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
