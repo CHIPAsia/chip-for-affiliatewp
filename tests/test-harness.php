@@ -8613,6 +8613,166 @@ check( 'a replayed delivery leaves the payout paid', 'paid' === affwp_get_payout
 check( 'a replayed delivery leaves the referral paid', 'paid' === $GLOBALS['__referral_rows'][3300]->status );
 
 
+echo "\n== Test 124: a completed batch queues each payout once ==\n";
+reset_state();
+
+/*
+ * `affwp_batch_generate_payouts_completed` fires whenever a batch completes,
+ * and a batch can complete more than once - saved again, retried, or resumed.
+ * The handler fans out one Action Scheduler action per payout, so without the
+ * dedupe a re-fired hook grows the queue with rows that only ever re-read the
+ * same locked payout.
+ *
+ * Submitting twice is not a payment risk (the submission path locks and returns
+ * early once an instruction exists), but the queue should not grow for it - and
+ * a batch of a thousand payouts makes that visible.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+$batch_id = 77;
+$ids      = array();
+
+foreach ( array( 3400, 3401, 3402 ) as $i => $referral_id ) {
+	$pid = affiliate_wp()->affiliates->payouts->add(
+		array(
+			'affiliate_id'  => 3,
+			'referrals'     => array( $referral_id ),
+			'amount'        => '10.00',
+			'payout_method' => 'chip',
+			'status'        => 'processing',
+			'batch_id'      => $batch_id,
+		)
+	);
+
+	$ids[] = $pid;
+
+	$GLOBALS['__referral_rows'][ $referral_id ] = new Fake_Referral( $referral_id, 3, '10.00', 'unpaid', $pid );
+}
+
+// A payout in another batch, and one not on CHIP, must both be left alone.
+$other = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3499 ),
+		'amount'        => '10.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'batch_id'      => 88,
+	)
+);
+
+$manual = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3498 ),
+		'amount'        => '10.00',
+		'payout_method' => 'manual',
+		'status'        => 'processing',
+		'batch_id'      => $batch_id,
+	)
+);
+
+$GLOBALS['__as'] = array();
+
+chip_affiliatewp_process_generated_batch( $batch_id );
+
+$first = array_values(
+	array_filter(
+		$GLOBALS['__as'],
+		function ( $e ) {
+			return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+		}
+	)
+);
+
+check( 'each payout in the batch was queued', 3 === count( $first ) );
+
+// The hook fires again: the queue must not grow.
+chip_affiliatewp_process_generated_batch( $batch_id );
+
+$second = array_values(
+	array_filter(
+		$GLOBALS['__as'],
+		function ( $e ) {
+			return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+		}
+	)
+);
+
+check( 'a re-fired batch adds nothing to the queue', count( $first ) === count( $second ) );
+
+// The payouts queued are the batch's own.
+$queued = array();
+
+foreach ( $second as $entry ) {
+	$queued[] = (int) ( $entry[2]['payout_id'] ?? 0 );
+}
+
+sort( $queued );
+$expected = $ids;
+sort( $expected );
+
+check( 'the batch\'s own payouts were queued', $expected === $queued );
+check( 'another batch is not queued', ! in_array( $other, $queued, true ) );
+check( 'a non-CHIP payout is not queued', ! in_array( $manual, $queued, true ) );
+
+// Staggering: submissions are spread so bank-account lookups do not pile up.
+$times = array_map( function ( $e ) { return (int) $e[0]; }, $second );
+
+check( 'submissions are staggered, not simultaneous', count( array_unique( $times ) ) === count( $times ) );
+
+// A batch with no credentials queues nothing, rather than half a batch.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']     = 1;
+$GLOBALS['__options']['chip_test_mode']   = 1;
+$GLOBALS['__options']['chip_test_api_key']    = '';
+$GLOBALS['__options']['chip_test_secret_key'] = '';
+
+$pid = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3500 ),
+		'amount'        => '10.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'batch_id'      => 99,
+	)
+);
+
+$GLOBALS['__referral_rows'][3500] = new Fake_Referral( 3500, 3, '10.00', 'unpaid', $pid );
+$GLOBALS['__as'] = array();
+
+chip_affiliatewp_process_generated_batch( 99 );
+
+$queued_without_creds = array_filter(
+	$GLOBALS['__as'],
+	function ( $e ) {
+		return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+	}
+);
+
+check( 'no credentials means nothing is queued', array() === $queued_without_creds );
+
+// A batch id of zero cannot match anything and must not queue the world.
+$GLOBALS['__as'] = array();
+
+chip_affiliatewp_process_generated_batch( 0 );
+
+$queued_zero = array_filter(
+	$GLOBALS['__as'],
+	function ( $e ) {
+		return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+	}
+);
+
+check( 'a zero batch id queues nothing', array() === $queued_zero );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
