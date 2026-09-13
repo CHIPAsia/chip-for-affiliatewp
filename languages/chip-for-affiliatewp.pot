@@ -95,7 +95,7 @@ msgid "Bank Code"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:245
-#: includes/class-chip-affiliatewp-payouts.php:1602
+#: includes/class-chip-affiliatewp-payouts.php:1631
 msgid "Bank account is not verified yet (status: %s)."
 msgstr ""
 
@@ -158,7 +158,7 @@ msgid "CHIP Send did not return a bank account ID."
 msgstr ""
 
 #: includes/class-chip-affiliatewp-payouts.php:450
-#: includes/class-chip-affiliatewp-payouts.php:1674
+#: includes/class-chip-affiliatewp-payouts.php:1703
 msgid "CHIP Send did not return a send instruction ID."
 msgstr ""
 
@@ -234,6 +234,12 @@ msgid ""
 "are requeried hourly — but confirmations arrive faster with the webhook."
 msgstr ""
 
+#: includes/class-chip-affiliatewp-payouts.php:1577
+msgid ""
+"CHIP has refused every reference tried for this referral (%d so far). "
+"Contact your CHIP account manager about the recipient before trying again."
+msgstr ""
+
 #: includes/class-chip-affiliatewp-review-notices.php:273
 msgid "CHIP reports: %s"
 msgstr ""
@@ -256,7 +262,7 @@ msgstr ""
 msgid "Choose your bank."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1620
+#: includes/class-chip-affiliatewp-payouts.php:1649
 msgid "Commission for referral No.%d"
 msgstr ""
 
@@ -493,7 +499,7 @@ msgstr ""
 msgid "The payload is missing a send instruction ID or state."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1692
+#: includes/class-chip-affiliatewp-payouts.php:1721
 msgid ""
 "The payout record could not be created. The referral may already have an "
 "active payout."
@@ -531,7 +537,7 @@ msgstr ""
 msgid "There is no affiliate connected to this referral."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-payouts.php:1613
+#: includes/class-chip-affiliatewp-payouts.php:1642
 msgid "This affiliate account does not have a payment email."
 msgstr ""
 

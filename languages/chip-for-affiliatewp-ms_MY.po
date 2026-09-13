@@ -110,7 +110,7 @@ msgid "Bank Code"
 msgstr "Kod Bank"
 
 #: includes/class-chip-affiliatewp-payouts.php:245
-#: includes/class-chip-affiliatewp-payouts.php:1602
+#: includes/class-chip-affiliatewp-payouts.php:1631
 msgid "Bank account is not verified yet (status: %s)."
 msgstr "Akaun bank belum disahkan (status: %s)."
 
@@ -179,7 +179,7 @@ msgid "CHIP Send did not return a bank account ID."
 msgstr "CHIP Send tidak memulangkan ID akaun bank."
 
 #: includes/class-chip-affiliatewp-payouts.php:450
-#: includes/class-chip-affiliatewp-payouts.php:1674
+#: includes/class-chip-affiliatewp-payouts.php:1703
 msgid "CHIP Send did not return a send instruction ID."
 msgstr "CHIP Send tidak memulangkan ID arahan penghantaran."
 
@@ -276,6 +276,15 @@ msgstr ""
 "Webhook CHIP Send belum disediakan (%1$s). Pembayaran tetap berfungsi — "
 "status disemak setiap jam — tetapi pengesahan lebih pantas dengan webhook."
 
+#: includes/class-chip-affiliatewp-payouts.php:1577
+msgid ""
+"CHIP has refused every reference tried for this referral (%d so far). "
+"Contact your CHIP account manager about the recipient before trying again."
+msgstr ""
+"CHIP telah menolak setiap rujukan yang dicuba untuk referral ini (%d setakat"
+" ini). Hubungi pengurus akaun CHIP anda tentang penerima sebelum mencuba "
+"lagi."
+
 #: includes/class-chip-affiliatewp-review-notices.php:273
 msgid "CHIP reports: %s"
 msgstr "CHIP melaporkan: %s"
@@ -300,7 +309,7 @@ msgstr "Pilih bank anda dan masukkan nombor akaun sebelum menyimpan."
 msgid "Choose your bank."
 msgstr "Pilih bank anda."
 
-#: includes/class-chip-affiliatewp-payouts.php:1620
+#: includes/class-chip-affiliatewp-payouts.php:1649
 msgid "Commission for referral No.%d"
 msgstr "Komisen untuk rujukan No.%d"
 
@@ -558,7 +567,7 @@ msgstr "Bank itu tidak disokong"
 msgid "The payload is missing a send instruction ID or state."
 msgstr "Muatan tiada ID atau keadaan arahan penghantaran (send instruction)."
 
-#: includes/class-chip-affiliatewp-payouts.php:1692
+#: includes/class-chip-affiliatewp-payouts.php:1721
 msgid ""
 "The payout record could not be created. The referral may already have an "
 "active payout."
@@ -602,7 +611,7 @@ msgstr "Webhook telah dibuang tetapi tidak dapat didaftarkan semula: %s"
 msgid "There is no affiliate connected to this referral."
 msgstr "Tiada afiliasi dikaitkan dengan rujukan ini."
 
-#: includes/class-chip-affiliatewp-payouts.php:1613
+#: includes/class-chip-affiliatewp-payouts.php:1642
 msgid "This affiliate account does not have a payment email."
 msgstr "Akaun afiliasi ini tiada e-mel pembayaran."
 

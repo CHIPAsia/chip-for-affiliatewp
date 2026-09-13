@@ -6951,6 +6951,88 @@ check(
 	false !== strpos( $admin_src, "'content' => esc_html(" )
 );
 
+echo "\n== Test 107: a referral with every reference burnt is refused ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$GLOBALS['__referral_rows'][2300] = new Fake_Referral( 2300, 3, '9.00', 'unpaid', 0 );
+
+/*
+ * Every reference up to the ceiling has already been refused. Submitting one
+ * again fails identically and burns another, so the referral could never be
+ * paid and nothing would say why.
+ */
+$burnt = array( 'XT-R-2300' );
+
+for ( $i = 2; $i <= 50; $i++ ) {
+	$burnt[] = 'XT-R-2300-' . $i;
+}
+
+affwp_update_referral_meta( 2300, 'chip_burnt_references', $burnt );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_pay_single_referral( 2300 );
+
+check( 'an exhausted referral is refused', is_wp_error( $result ) );
+check( 'the refusal names the cause', 'chip_reference_exhausted' === $result->get_error_code() );
+check( 'the message says how many were tried', false !== strpos( $result->get_error_message(), '50' ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'nothing was submitted under a burnt reference', array() === $posts );
+
+/*
+ * A referral with a free reference still pays, so the ceiling does not block
+ * the ordinary case.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$GLOBALS['__referral_rows'][2301] = new Fake_Referral( 2301, 3, '9.00', 'unpaid', 0 );
+
+// Only the first two are burnt; a third is free.
+affwp_update_referral_meta( 2301, 'chip_burnt_references', array( 'XT-R-2301', 'XT-R-2301-2' ) );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8001, 'state' => 'executing', 'reference' => 'XT-R-2301-3' ) );
+$GLOBALS['__http_log'] = array();
+
+$ok = chip_affiliatewp_pay_single_referral( 2301 );
+
+check( 'a referral with a free reference still pays', true === $ok );
+
+$sent = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+if ( ! empty( $sent ) ) {
+	$body = json_decode( (string) $sent[0]['body'], true );
+
+	check( 'the free reference was used', 'XT-R-2301-3' === ( $body['reference'] ?? '' ) );
+}
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

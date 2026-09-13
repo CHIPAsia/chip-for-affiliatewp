@@ -1545,10 +1545,39 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	$reference      = $base_reference;
 	$burnt          = chip_affiliatewp_burnt_references( $referral_id );
 
+	/**
+	 * Filters how many burnt references are skipped before giving up.
+	 *
+	 * Each refusal burns one reference for this referral. The sweep below walks
+	 * past the burnt ones, and it needs a ceiling: CHIP refuses a reference
+	 * permanently, so an unbounded walk would issue one API call per burnt
+	 * reference on every submission.
+	 *
+	 * @param int $limit Maximum attempt number to reach.
+	 */
+	$attempt_limit = max( 2, absint( apply_filters( 'chip_affiliatewp_reference_attempt_limit', 50 ) ) );
+
 	// Skip any reference CHIP has already refused for this referral.
-	while ( $attempt < 20 && in_array( $reference, $burnt, true ) ) {
+	while ( $attempt < $attempt_limit && in_array( $reference, $burnt, true ) ) {
 		++$attempt;
 		$reference = substr( $base_reference . '-' . $attempt, 0, 40 );
+	}
+
+	/*
+	 * Every reference up to the ceiling is spent, so there is nothing left to
+	 * send under. Say so rather than submitting a reference CHIP has already
+	 * refused: that fails identically, and each attempt burns another one, so
+	 * the referral would never be paid and nothing would explain why.
+	 */
+	if ( $attempt >= $attempt_limit && in_array( $reference, $burnt, true ) ) {
+		return new WP_Error(
+			'chip_reference_exhausted',
+			sprintf(
+				/* translators: %d: number of attempts tried. */
+				__( 'CHIP has refused every reference tried for this referral (%d so far). Contact your CHIP account manager about the recipient before trying again.', 'chip-for-affiliatewp' ),
+				$attempt_limit
+			)
+		);
 	}
 
 	// Count existing instructions for this referral to pick the attempt number.
@@ -1571,7 +1600,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		$reference = substr( $base_reference . '-' . $attempt, 0, 40 );
 
 		// Skip past any earlier dead attempts for this referral.
-		while ( $attempt < 20 ) {
+		while ( $attempt < $attempt_limit ) {
 			$candidate = chip_affiliatewp_list_instruction_by_reference( $reference, $mode );
 
 			if ( ! is_array( $candidate ) || empty( $candidate['id'] ) ) {
