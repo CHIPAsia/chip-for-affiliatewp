@@ -8411,6 +8411,88 @@ check(
 // And the helper it relies on exists in AffiliateWP.
 check( 'uninstall guards on the core helper', false !== strpos( $uninstall, 'affwp_delete_referral_meta' ) );
 
+echo "\n== Test 122: the request signature matches CHIP Send's published vector ==\n";
+reset_state();
+
+/*
+ * CHIP Send's documentation publishes a worked example: for a given epoch, API
+ * key and secret, the checksum is a specific hex string. That is the only
+ * external check on the signing implementation - a wrong concatenation order,
+ * the wrong hash, or the arguments swapped between key and message all produce
+ * a plausible-looking hex string that CHIP rejects with Unauthorized.
+ *
+ * The plugin sets:
+ *   checksum = hash_hmac( 'sha512', $epoch . $api_key, $secret_key )
+ */
+$epoch      = '1689826456';
+$api_key    = 'e0645c9e-fcf2-4f29-a327-202f7ed3d969';
+$secret_key = 'a118729e-4243-4145-83b3-0b8cb213fe8e';
+
+$expected = '45bee62dba8087ab1e7e767d92f8d6e26f8bd19ee5fd2fef6386bb9425976498a86ffdbddb7a49919998e993c20626196ea652320f438a9528d2b8c9d19ec266';
+
+$actual = hash_hmac( 'sha512', $epoch . $api_key, $secret_key );
+
+check( 'the published checksum vector reproduces', hash_equals( $expected, $actual ) );
+
+// The signing string is epoch then API key, concatenated with no separator.
+check( 'the signing string is epoch followed by the api key', $epoch . $api_key === '1689826456e0645c9e-fcf2-4f29-a327-202f7ed3d969' );
+
+/* A swapped key/message pair gives a different string, which is the mistake
+ * this vector catches. */
+check(
+	'a swapped key and message does not reproduce the vector',
+	! hash_equals( $expected, hash_hmac( 'sha512', $secret_key, $epoch . $api_key ) )
+);
+
+check(
+	'a different hash algorithm does not reproduce the vector',
+	! hash_equals( $expected, hash_hmac( 'sha256', $epoch . $api_key, $secret_key ) )
+);
+
+check(
+	'a separator between the parts does not reproduce the vector',
+	! hash_equals( $expected, hash_hmac( 'sha512', $epoch . ':' . $api_key, $secret_key ) )
+);
+
+/*
+ * And the plugin's own client sends exactly these headers - asserted against
+ * the real request rather than the formula, so a change in the client is caught
+ * too.
+ */
+$GLOBALS['__options']['chip_test_api_key']    = $api_key;
+$GLOBALS['__options']['chip_test_secret_key'] = $secret_key;
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_request( 'GET', '/send/send_instructions', array(), array(), 'test' );
+
+check( 'a request was made', 1 === count( $GLOBALS['__http_log'] ) );
+
+$sent    = $GLOBALS['__http_log'][0];
+$headers = $sent['headers'] ?? array();
+
+check( 'the request carries an epoch header', ! empty( $headers['epoch'] ) );
+check( 'the request carries a checksum header', ! empty( $headers['checksum'] ) );
+check(
+	'the authorization header is a bearer token',
+	'Bearer ' . $api_key === (string) ( $headers['Authorization'] ?? '' )
+);
+
+// Recompute the checksum from the headers the client actually sent.
+$recomputed = hash_hmac( 'sha512', (string) $headers['epoch'] . $api_key, $secret_key );
+
+check( 'the checksum sent matches the formula', hash_equals( $recomputed, (string) $headers['checksum'] ) );
+
+check( 'the epoch is a unix timestamp', ctype_digit( (string) $headers['epoch'] ) );
+check( 'the epoch is recent', abs( time() - (int) $headers['epoch'] ) < 60 );
+
+// The secret must never travel in a header.
+$header_blob = strtolower( (string) wp_json_encode( $headers ) );
+
+check( 'the secret is not sent', false === strpos( $header_blob, strtolower( $secret_key ) ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
