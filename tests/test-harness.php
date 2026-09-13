@@ -8091,6 +8091,151 @@ $po  = (string) file_get_contents( dirname( __DIR__ ) . '/languages/chip-for-aff
 check( 'the catalogue exists', '' !== $pot && '' !== $po );
 check( 'the Malay catalogue is not a stub', strlen( $po ) > 5000 );
 
+echo "\n== Test 119: the compiled catalogue matches the source catalogue ==\n";
+reset_state();
+
+/*
+ * WordPress reads the compiled .mo, not the .po. Saving only the .po leaves the
+ * shipped .mo at whatever it held the last time it was built by hand, so a
+ * string translates in the source and stays English at runtime. That is exactly
+ * what had happened: ten entries were in the .po and absent from the .mo.
+ *
+ * The two files are compared by reading their msgid lists the way a .mo reader
+ * does - the binary is parsed here rather than shelled out to msgfmt, so the
+ * test runs anywhere the plugin does.
+ */
+$languages = dirname( __DIR__ ) . '/languages';
+$po_file   = $languages . '/chip-for-affiliatewp-ms_MY.po';
+$mo_file   = $languages . '/chip-for-affiliatewp-ms_MY.mo';
+
+check( 'the source catalogue exists', file_exists( $po_file ) );
+check( 'the compiled catalogue exists', file_exists( $mo_file ) );
+
+/*
+ * Read the .mo's string table: a 32-bit magic, a count, then count pairs of
+ * (length, offset) pointing into the string table.
+ */
+function chip_test_mo_msgids( $file ) {
+	$data = (string) file_get_contents( $file );
+
+	if ( strlen( $data ) < 12 ) {
+		return array();
+	}
+
+	$magic = unpack( 'V', substr( $data, 0, 4 ) )[1];
+
+	// 0x950412de little-endian, or byte-swapped.
+	$swap = 0xde120495 === $magic;
+
+	$read = function ( $offset ) use ( $data, $swap ) {
+		$raw = substr( $data, $offset, 4 );
+		if ( 4 !== strlen( $raw ) ) {
+			return 0;
+		}
+		$v = unpack( 'V', $raw )[1];
+		return $swap ? (int) ( ( $v >> 24 & 0xFF ) | ( $v >> 8 & 0xFF00 ) | ( $v << 8 & 0xFF0000 ) | ( $v << 24 & 0xFF000000 ) ) : $v;
+	};
+
+	$count     = $read( 8 );
+	$orig_base = $read( 12 );
+
+	$ids = array();
+
+	for ( $i = 0; $i < $count; $i++ ) {
+		$len    = $read( $orig_base + $i * 8 );
+		$str_at = $read( $orig_base + $i * 8 + 4 );
+
+		if ( $len > 0 ) {
+			$ids[] = substr( $data, $str_at, $len );
+		}
+	}
+
+	return $ids;
+}
+
+$mo_ids = chip_test_mo_msgids( $mo_file );
+
+check( 'the compiled catalogue has entries', count( $mo_ids ) > 100 );
+
+// Read the .po's msgids: lines starting with msgid, skipping the header.
+$po_src = (string) file_get_contents( $po_file );
+
+/*
+ * Read the .po's msgids. A long msgid is wrapped across several lines, each
+ * continuation being a bare quoted string, so lines after `msgid` are joined
+ * until the next directive.
+ */
+$po_lines   = explode( "\n", $po_src );
+$po_msgids  = array();
+$current    = null;
+
+foreach ( $po_lines as $po_line ) {
+	$po_line = rtrim( $po_line, "\r" );
+
+	if ( 0 === strpos( $po_line, 'msgid ' ) ) {
+		if ( null !== $current ) {
+			$id = stripcslashes( $current );
+			if ( '' !== $id ) {
+				$po_msgids[] = $id;
+			}
+		}
+
+		$current = trim( trim( substr( $po_line, 6 ) ), '"' );
+		continue;
+	}
+
+	// A continuation: a bare quoted line.
+	if ( null !== $current && preg_match( '/^"(.*)"\s*$/', $po_line, $cont ) ) {
+		$current .= stripcslashes( $cont[1] );
+		continue;
+	}
+
+	// Any other directive ends the current msgid.
+	if ( '' !== $po_line && 0 !== strpos( $po_line, '#' ) && 0 !== strpos( $po_line, 'msgid' ) ) {
+		if ( null !== $current ) {
+			$id = stripcslashes( $current );
+			if ( '' !== $id ) {
+				$po_msgids[] = $id;
+			}
+			$current = null;
+		}
+	}
+}
+
+if ( null !== $current ) {
+	$id = stripcslashes( $current );
+	if ( '' !== $id ) {
+		$po_msgids[] = $id;
+	}
+}
+
+check( 'the source catalogue has entries', count( $po_msgids ) > 100 );
+
+/*
+ * Every translatable string in the source must be in the compiled file, or it
+ * ships in English.
+ */
+$missing = array_values( array_diff( $po_msgids, $mo_ids ) );
+
+check(
+	'no translated string is missing from the compiled catalogue (' . count( $missing ) . ' missing)',
+	array() === $missing
+);
+
+// And the compiled file carries nothing the source does not, which would mean
+// the two were built from different trees.
+$stale = array_values( array_diff( $mo_ids, $po_msgids ) );
+
+check(
+	'the compiled catalogue carries no stale strings (' . count( $stale ) . ' stale)',
+	array() === $stale
+);
+
+// The builder must write the .mo, not just the .po.
+$builder = (string) file_get_contents( dirname( __DIR__ ) . '/scripts/build-translations.py' );
+
+check( 'the builder compiles the catalogue', false !== strpos( $builder, '.mo' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

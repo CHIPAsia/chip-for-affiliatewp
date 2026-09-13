@@ -303,8 +303,17 @@ def main():
     pot.save(BASE + 'languages/chip-for-affiliatewp.pot')
     po.save(BASE + 'languages/chip-for-affiliatewp-ms_MY.po')
 
+    # WordPress reads the compiled catalogue, not the .po. Saving only the .po
+    # leaves the shipped .mo at whatever it held when it was last built by hand,
+    # so new strings translate in the source and stay English at runtime.
+    mo = polib.MOFile()
+    for entry in po:
+        mo.append(polib.MOEntry(msgid=entry.msgid, msgstr=entry.msgstr))
+    mo.save(BASE + 'languages/chip-for-affiliatewp-ms_MY.mo')
+
     print(f'extracted: {len(occurrences)} unique msgids')
     print(f'ms_MY translated: {len(po)} entries')
+    print(f'ms_MY compiled: {len(mo)} entries')
     print(f'untranslated: {len(untranslated)}')
     for m in untranslated:
         print('  MISS:', m[:90])
