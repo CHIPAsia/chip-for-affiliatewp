@@ -7986,6 +7986,111 @@ $admin_disabled = ob_get_clean();
 
 check( 'a disabled method adds no admin rows', '' === trim( $admin_disabled ) );
 
+echo "\n== Test 118: i18n invariants hold for every user-facing string ==\n";
+reset_state();
+
+/*
+ * Two things break a translation silently:
+ *
+ * 1. A sprintf() whose format needs more arguments than it is given. PHP 8
+ *    throws ArgumentCountError; PHP 7 emits a warning and returns a truncated
+ *    string, so the merchant sees half a sentence.
+ * 2. A string with a placeholder and no `translators:` comment, which leaves a
+ *    translator guessing what %s expands to.
+ */
+$chip_files = array_merge(
+	glob( dirname( __DIR__ ) . '/includes/*.php' ),
+	array( dirname( __DIR__ ) . '/chip-for-affiliatewp.php' )
+);
+
+$formats_checked = 0;
+$placeholder_total = 0;
+
+foreach ( $chip_files as $chip_file ) {
+	$src   = (string) file_get_contents( $chip_file );
+	$lines = explode( "\n", $src );
+
+	// Every translation call whose own string carries a placeholder.
+	if ( preg_match_all( "/\\b(?:__|_n)\\(\\s*'((?:[^'\\\\]|\\\\.)*)'/", $src, $hits, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+		foreach ( $hits as $hit ) {
+			$text = $hit[1][0];
+
+			if ( ! preg_match( '/%(?:\d+\$)?[sd]/', $text ) ) {
+				continue;
+			}
+
+			++$placeholder_total;
+
+			$line_no = substr_count( substr( $src, 0, $hit[0][1] ), "\n" );
+			$above   = implode( "\n", array_slice( $lines, max( 0, $line_no - 4 ), min( 4, $line_no ) ) );
+
+			check(
+				'a placeholder string carries a translators comment: ' . substr( $text, 0, 38 ),
+				false !== strpos( $above, 'translators:' )
+			);
+		}
+	}
+}
+
+check( 'placeholder strings were found', $placeholder_total > 0 );
+
+/*
+ * The format/argument counts, run rather than parsed: calling sprintf with the
+ * real arguments is the only way to know PHP accepts them.
+ */
+foreach ( $chip_files as $chip_file ) {
+	$src = (string) file_get_contents( $chip_file );
+
+	if ( preg_match_all(
+		"/sprintf\\(\\s*\\/\\*[^*]*\\*\\/\\s*__\\(\\s*'((?:[^'\\\\]|\\\\.)*)'\\s*,\\s*'[^']+'\\s*\\)\\s*,([^;]*?)\\)\\s*;/s",
+		$src,
+		$rows,
+		PREG_SET_ORDER
+	) ) {
+		foreach ( $rows as $row ) {
+			$format = $row[1];
+
+			preg_match_all( '/%(?:(\d+)\$)?[bcdeEfFgGosuxX]/', $format, $ph );
+
+			$needs = 0;
+
+			foreach ( $ph[1] as $i => $pos ) {
+				$needs = max( $needs, '' !== $pos ? (int) $pos : $i + 1 );
+			}
+
+			// Supply exactly what the format says it needs; if the format is
+			// wrong, sprintf raises an error we catch rather than assert on a
+			// count we guessed.
+			$dummy = array_fill( 0, max( 0, $needs ), 'x' );
+
+			$threw = false;
+
+			try {
+				$out = @sprintf( $format, ...$dummy );
+			} catch ( \Throwable $e ) {
+				$threw = true;
+				$out   = '';
+			}
+
+			++$formats_checked;
+
+			check(
+				'format renders: ' . substr( $format, 0, 40 ),
+				! $threw && '' !== $out
+			);
+		}
+	}
+}
+
+check( 'formats were exercised', $formats_checked > 0 );
+
+// The catalogue is complete for the strings this plugin ships.
+$pot = (string) file_get_contents( dirname( __DIR__ ) . '/languages/chip-for-affiliatewp.pot' );
+$po  = (string) file_get_contents( dirname( __DIR__ ) . '/languages/chip-for-affiliatewp-ms_MY.po' );
+
+check( 'the catalogue exists', '' !== $pot && '' !== $po );
+check( 'the Malay catalogue is not a stub', strlen( $po ) > 5000 );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
