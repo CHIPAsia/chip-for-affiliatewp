@@ -880,8 +880,14 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	 * is resolved, so a note we already hold has to be replaced or cleared to
 	 * match what CHIP is saying now — keeping it would show the merchant a
 	 * reason that has since been fixed, and they would chase it again.
+	 *
+	 * The field is unbounded at the source — CHIP allows up to 64 KiB — and the
+	 * note is stored on the payout meta, rendered in the admin review list, and
+	 * quoted in the merchant email. An outsized reason would bloat all three,
+	 * so it is trimmed to something a person can actually read.
 	 */
 	$note = trim( (string) chip_affiliatewp_array_value( $instruction, 'rejection_reason', '' ) );
+	$note = chip_affiliatewp_sanitize_note( $note );
 
 	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) || '' === $note ) {
 		unset( $data['note'] );

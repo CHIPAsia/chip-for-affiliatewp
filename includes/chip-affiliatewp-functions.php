@@ -184,6 +184,41 @@ function chip_affiliatewp_safe_receipt_url( $url ) {
 }
 
 /**
+ * Trims CHIP's own note about an instruction to something displayable.
+ *
+ * The field is free text up to 64 KiB, and the note is stored on the payout,
+ * rendered in the admin review list, and quoted in the merchant email. Control
+ * characters are removed too: it is shown inline and mailed as plain text, and a
+ * stray control character would corrupt both.
+ *
+ * @param string $note Raw note from CHIP.
+ * @return string
+ */
+function chip_affiliatewp_sanitize_note( $note ) {
+	$note = (string) $note;
+
+	// Anything that would break a single-line display or a plain-text email.
+	$note = (string) preg_replace( '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $note );
+
+	// Tabs and newlines become spaces: the note is shown inline.
+	$note = (string) preg_replace( '/\s+/', ' ', $note );
+	$note = trim( $note );
+
+	/**
+	 * Filters how long a CHIP note may be before it is trimmed.
+	 *
+	 * @param int $limit Maximum characters.
+	 */
+	$limit = (int) apply_filters( 'chip_affiliatewp_note_limit', 500 );
+
+	if ( $limit > 0 ) {
+		$note = chip_affiliatewp_substr( $note, $limit );
+	}
+
+	return trim( $note );
+}
+
+/**
  * Sanitizes a description for the CHIP Send API.
  *
  * CHIP Send rejects any character outside a fixed allow-list:

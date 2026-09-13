@@ -6351,6 +6351,85 @@ chip_affiliatewp_check_payout_status( $payout_id );
 check( 'the recovered instruction pays the payout', 'paid' === affwp_get_payout( $payout_id )->status );
 check( 'the recovered instruction pays the referral', 'paid' === $GLOBALS['__referral_rows'][1900]->status );
 
+echo "\n== Test 97: an outsized note from CHIP is trimmed ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 2000 ),
+		'amount'        => '20.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][2000] = new Fake_Referral( 2000, 3, '20.00', 'unpaid', $payout_id );
+
+/*
+ * CHIP allows up to 64 KiB in rejection_reason. The note is stored on the
+ * payout, listed in the admin, and quoted in the merchant email, so an outsized
+ * reason would bloat all three.
+ */
+$huge = str_repeat( 'Recipient bank declined the transfer. ', 1600 );
+
+check( 'the raw note really is oversized', strlen( $huge ) > 40000 );
+
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'               => 9500,
+		'state'            => 'reviewing',
+		'rejection_reason' => $huge,
+	)
+);
+
+$stored = (string) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['note'] ?? '' );
+
+check( 'the note is stored', '' !== $stored );
+check( 'the stored note is bounded', strlen( $stored ) <= 500 );
+check( 'it still begins with the original wording', 0 === strpos( $stored, 'Recipient bank declined' ) );
+
+// Control characters and newlines do not reach storage either.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'               => 9500,
+		'state'            => 'reviewing',
+		'rejection_reason' => "Needs\nattention\tfrom\x07 the bank manager",
+	)
+);
+
+$stored2 = (string) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['note'] ?? '' );
+
+check( 'control characters are stripped', false === strpos( $stored2, "\x07" ) );
+check( 'newlines become spaces', false === strpos( $stored2, "\n" ) );
+check( 'the note still reads', false !== strpos( $stored2, 'Needs attention from the bank manager' ) );
+
+// A normal note is left alone.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'               => 9500,
+		'state'            => 'reviewing',
+		'rejection_reason' => 'Account name does not match.',
+	)
+);
+
+check(
+	'ordinary notes pass through unchanged',
+	'Account name does not match.' === ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['note'] ?? '' )
+);
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
