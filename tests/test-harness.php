@@ -8236,6 +8236,103 @@ $builder = (string) file_get_contents( dirname( __DIR__ ) . '/scripts/build-tran
 
 check( 'the builder compiles the catalogue', false !== strpos( $builder, '.mo' ) );
 
+echo "\n== Test 120: the catalogue covers every translatable string ==\n";
+reset_state();
+
+/*
+ * The extractor read __() and the esc_* family, but not _n(). Plural strings
+ * never reached the catalogue, so they stayed English on the site - and nothing
+ * compared the source against the catalogue, so the gap was invisible.
+ *
+ * This walks the source for every translation call, including the plural forms
+ * whose arguments sit on their own lines, and asserts each string is in the
+ * compiled catalogue.
+ */
+$chip_plugin = dirname( __DIR__ );
+$source_strings = array();
+
+foreach ( glob( $chip_plugin . '/includes/*.php' ) as $chip_file ) {
+	$src = (string) file_get_contents( $chip_file );
+
+	// __() and the esc_* family.
+	if ( preg_match_all(
+		"/\\b(?:__|esc_html__|esc_attr__|esc_html_e|esc_attr_e|_e|_x)\\(\\s*'((?:[^'\\\\]|\\\\.)*)'/",
+		$src,
+		$hits
+	) ) {
+		foreach ( $hits[1] as $text ) {
+			$source_strings[ $text ] = true;
+		}
+	}
+
+	// _n() across lines: singular and plural are both translatable.
+	if ( preg_match_all(
+		"/_n\\(\\s*'((?:[^'\\\\]|\\\\.)*)'\\s*,\\s*'((?:[^'\\\\]|\\\\.)*)'/s",
+		$src,
+		$plurals,
+		PREG_SET_ORDER
+	) ) {
+		foreach ( $plurals as $pair ) {
+			$source_strings[ $pair[1] ] = true;
+			$source_strings[ $pair[2] ] = true;
+		}
+	}
+}
+
+unset( $source_strings[''] );
+
+check( 'translatable strings were found', count( $source_strings ) > 100 );
+
+// The compiled catalogue's msgids, read from its string table.
+$mo_file = $chip_plugin . '/languages/chip-for-affiliatewp-ms_MY.mo';
+
+$mo_data = (string) file_get_contents( $mo_file );
+$mo_count = unpack( 'V', substr( $mo_data, 8, 4 ) )[1];
+$mo_base  = unpack( 'V', substr( $mo_data, 12, 4 ) )[1];
+
+$mo_ids = array();
+
+for ( $i = 0; $i < $mo_count; $i++ ) {
+	$len = unpack( 'V', substr( $mo_data, $mo_base + $i * 8, 4 ) )[1];
+	$at  = unpack( 'V', substr( $mo_data, $mo_base + $i * 8 + 4, 4 ) )[1];
+
+	if ( $len > 0 ) {
+		$mo_ids[] = substr( $mo_data, $at, $len );
+	}
+}
+
+check( 'the compiled catalogue has entries', count( $mo_ids ) > 100 );
+
+$missing = array();
+
+foreach ( array_keys( $source_strings ) as $text ) {
+	if ( ! in_array( $text, $mo_ids, true ) ) {
+		$missing[] = $text;
+	}
+}
+
+check(
+	'every translatable string is in the catalogue (' . count( $missing ) . ' missing)',
+	array() === $missing
+);
+
+if ( ! empty( $missing ) ) {
+	foreach ( array_slice( $missing, 0, 5 ) as $one ) {
+		echo '        - ' . substr( $one, 0, 72 ) . "\n";
+	}
+}
+
+// The extractor must handle plurals: if it stops, the count drops and this
+// fails rather than quietly shipping English.
+$builder = (string) file_get_contents( $chip_plugin . '/scripts/build-translations.py' );
+
+check( 'the extractor reads plural calls', false !== strpos( $builder, '_n_re' ) );
+
+check(
+	'the extractor scans plurals file-wide, not line by line',
+	false !== strpos( $builder, 're.S' )
+);
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

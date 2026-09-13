@@ -14,6 +14,14 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 "X-Domain: chip-for-affiliatewp\n"
 
+#: includes/class-chip-affiliatewp-admin.php:512
+msgid "%d payout is waiting on CHIP"
+msgstr "%d pembayaran menunggu CHIP"
+
+#: includes/class-chip-affiliatewp-admin.php:512
+msgid "%d payouts are waiting on CHIP"
+msgstr "%d pembayaran menunggu CHIP"
+
 #: includes/class-chip-affiliatewp-admin.php:1158
 msgid "%s: bank details"
 msgstr "%s: butiran bank"
@@ -326,9 +334,25 @@ msgstr ""
 msgid "Connected"
 msgstr "Bersambung"
 
+#: includes/class-chip-affiliatewp-admin.php:387
+msgid "Conversion requested. %d approver has been emailed to approve it."
+msgstr "Penukaran diminta. %d pelulus telah di-e-mel untuk meluluskannya."
+
+#: includes/class-chip-affiliatewp-admin.php:387
+msgid "Conversion requested. %d approvers have been emailed to approve it."
+msgstr "Penukaran diminta. %d pelulus telah di-e-mel untuk meluluskannya."
+
 #: includes/class-chip-affiliatewp-admin.php:390
 msgid "Conversion requested. The new budget appears once CHIP processes it."
 msgstr "Penukaran diminta. Bajet baharu akan muncul sebaik CHIP memprosesnya."
+
+#: includes/class-chip-affiliatewp-admin.php:896
+msgid "Converting balance into a payout budget needs %d approval."
+msgstr "Menukar baki kepada bajet pembayaran memerlukan %d kelulusan."
+
+#: includes/class-chip-affiliatewp-admin.php:896
+msgid "Converting balance into a payout budget needs %d approvals."
+msgstr "Menukar baki kepada bajet pembayaran memerlukan %d kelulusan."
 
 #: includes/class-chip-affiliatewp-affiliate-area.php:98
 msgid "Currently paying to %1$s %2$s. Change it below if that is wrong."
@@ -495,6 +519,14 @@ msgstr "Sedia"
 #: includes/class-chip-affiliatewp-admin.php:749
 msgid "Reference Prefix"
 msgstr "Awalan Rujukan"
+
+#: includes/class-chip-affiliatewp-admin.php:451
+msgid "Removed %1$d %2$s webhook and registered it again."
+msgstr "Membuang %1$d webhook %2$s dan mendaftarkannya semula."
+
+#: includes/class-chip-affiliatewp-admin.php:451
+msgid "Removed %1$d %2$s webhooks and registered one again."
+msgstr "Membuang %1$d webhook %2$s dan mendaftarkan satu semula."
 
 #: includes/class-chip-affiliatewp-admin.php:939
 #: includes/class-chip-affiliatewp-admin.php:944

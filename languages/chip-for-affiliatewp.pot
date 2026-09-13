@@ -9,6 +9,14 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Domain: chip-for-affiliatewp\n"
 
+#: includes/class-chip-affiliatewp-admin.php:512
+msgid "%d payout is waiting on CHIP"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:512
+msgid "%d payouts are waiting on CHIP"
+msgstr ""
+
 #: includes/class-chip-affiliatewp-admin.php:1158
 msgid "%s: bank details"
 msgstr ""
@@ -277,8 +285,24 @@ msgstr ""
 msgid "Connected"
 msgstr ""
 
+#: includes/class-chip-affiliatewp-admin.php:387
+msgid "Conversion requested. %d approver has been emailed to approve it."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:387
+msgid "Conversion requested. %d approvers have been emailed to approve it."
+msgstr ""
+
 #: includes/class-chip-affiliatewp-admin.php:390
 msgid "Conversion requested. The new budget appears once CHIP processes it."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:896
+msgid "Converting balance into a payout budget needs %d approval."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:896
+msgid "Converting balance into a payout budget needs %d approvals."
 msgstr ""
 
 #: includes/class-chip-affiliatewp-affiliate-area.php:98
@@ -430,6 +454,14 @@ msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:749
 msgid "Reference Prefix"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:451
+msgid "Removed %1$d %2$s webhook and registered it again."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:451
+msgid "Removed %1$d %2$s webhooks and registered one again."
 msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:939

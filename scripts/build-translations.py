@@ -233,17 +233,40 @@ def extract():
         path = BASE + rel
         src = open(path).read()
         lines = src.split('\n')
+
+        # Plural calls span lines, so they are matched against the whole file.
+        _n_re = re.compile(r"_n\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'", re.S)
         for i, line in enumerate(lines, 1):
             # skip purely comment lines but still capture __() where present
             for m in re.finditer(r"__\(\s*'((?:[^'\\]|\\.)*)'", line):
                 msgid = m.group(1)
                 occurrences.setdefault(msgid, []).append(f'{rel}:{i}')
-            for m in re.finditer(r"(?:esc_html_e|esc_html__|esc_html|_e)\(\s*'((?:[^'\\]|\\.)*)'", line):
+            for m in re.finditer(r"(?:esc_html_e|esc_html__|esc_attr_e|esc_attr__|_e)\(\s*'((?:[^'\\]|\\.)*)'", line):
                 msgid = m.group(1)
                 if msgid not in occurrences or 'esc' in line:
                     occurrences.setdefault(msgid, [])
                     if f'{rel}:{i}' not in occurrences[msgid]:
                         occurrences[msgid].append(f'{rel}:{i}')
+
+            # Plural forms: the singular and plural are both translatable, and
+            # _n() was not being read at all, so those strings never reached the
+            # catalogue and stayed English on the site. The arguments routinely
+            # sit on their own lines, so the scan is over the whole file rather
+            # than one line.
+            for m in _n_re.finditer(src):
+                for msgid in (m.group(1), m.group(2)):
+                    line_no = src[:m.start()].count('\n') + 1
+                    occurrences.setdefault(msgid, [])
+                    if f'{rel}:{line_no}' not in occurrences[msgid]:
+                        occurrences[msgid].append(f'{rel}:{line_no}')
+
+            # Context forms: the context is a translator hint, the string is the
+            # msgid.
+            for m in re.finditer(r"(?:_x|_nx)\(\s*'((?:[^'\\]|\\.)*)'", line):
+                msgid = m.group(1)
+                occurrences.setdefault(msgid, [])
+                if f'{rel}:{i}' not in occurrences[msgid]:
+                    occurrences[msgid].append(f'{rel}:{i}')
 
 
 def occurrence_tuples():
