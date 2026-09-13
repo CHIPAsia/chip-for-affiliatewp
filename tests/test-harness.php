@@ -6430,6 +6430,51 @@ check(
 	'Account name does not match.' === ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['note'] ?? '' )
 );
 
+echo "\n== Test 98: readiness rejects details CHIP will refuse ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__affiliates_map'][3]         = 7;
+$GLOBALS['__users'][7]                  = new Fake_User( 7, 'affiliate@test.dev' );
+
+// Nothing on file: not ready.
+check( 'no details at all is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+// A valid pair: ready.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+check( 'a valid pair is ready', true === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+/*
+ * Details can reach the database without passing the affiliate-area form: the
+ * core fields are editable from the affiliate screen, and imports and earlier
+ * versions write them directly. A payout built on those fails after the batch
+ * exists.
+ */
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '123';
+
+check( 'a too-short account is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '15738011222999999999999999';
+
+check( 'a too-long account is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+$GLOBALS['__user_meta'][7]['payment_account_number'] = 'not-a-number';
+
+check( 'a non-numeric account is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'NOPE';
+
+check( 'an unknown bank code is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+// Another method is never touched.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '123';
+
+check( 'another method is passed through', true === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'paypal', 3 ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
