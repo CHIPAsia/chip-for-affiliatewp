@@ -727,7 +727,35 @@ function affwp_get_affiliate_usable_payout_method( $affiliate_id ) {
 }
 
 function affwp_get_affiliate_name( $affiliate_id ) {
-	return 'Test Affiliate ' . $affiliate_id;
+	/*
+	 * Mirrors the core behaviour that matters here: the name is built from the
+	 * user's first and last name, and an account with neither returns an empty
+	 * string. Returning a stand-in name unconditionally would hide that.
+	 */
+	$uid = affwp_get_affiliate_user_id( $affiliate_id );
+	$u   = isset( $GLOBALS['__users'][ $uid ] ) ? $GLOBALS['__users'][ $uid ] : false;
+
+	if ( ! $u ) {
+		return '';
+	}
+
+	$first = isset( $GLOBALS['__user_meta'][ $uid ]['first_name'] ) ? trim( (string) $GLOBALS['__user_meta'][ $uid ]['first_name'] ) : '';
+	$last  = isset( $GLOBALS['__user_meta'][ $uid ]['last_name'] ) ? trim( (string) $GLOBALS['__user_meta'][ $uid ]['last_name'] ) : '';
+
+	if ( '' !== $first && '' !== $last ) {
+		return $first . ' ' . $last;
+	}
+
+	if ( '' !== $first ) {
+		return $first;
+	}
+
+	if ( '' !== $last ) {
+		return $last;
+	}
+
+	// No name on the account: core returns an empty string.
+	return '';
 }
 
 function affwp_get_affiliate_payment_email( $affiliate_id ) {
@@ -6739,6 +6767,79 @@ check(
 	'an unreadable API response is transient',
 	'transient' === chip_affiliatewp_classify_failure( 'chip_instruction_failed', 'CHIP Send did not return a send instruction ID.', null )
 );
+
+echo "\n== Test 104: a nameless affiliate still gets a payable account ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+// No name at all: the ordinary state of an account made with an email only.
+$GLOBALS['__user_meta'][7]['first_name'] = '';
+$GLOBALS['__user_meta'][7]['last_name']  = '';
+
+$name = chip_affiliatewp_bank_account_name( 3 );
+
+check( 'a name is produced for an unnamed affiliate', '' !== $name );
+check( 'the name is not blank space', '' !== trim( $name ) );
+check( 'the name is bounded', strlen( $name ) <= 128 );
+
+// CHIP requires at least one character, which is the point.
+check( 'the name satisfies the API minimum', strlen( $name ) >= 1 );
+
+// A real name is still used as-is.
+$GLOBALS['__user_meta'][7]['first_name'] = 'Ahmad';
+$GLOBALS['__user_meta'][7]['last_name']  = 'Razali';
+
+check(
+	'a real name is used unchanged',
+	'Ahmad Razali' === chip_affiliatewp_bank_account_name( 3 )
+);
+
+// And an overlong name is still trimmed.
+$GLOBALS['__user_meta'][7]['first_name'] = str_repeat( 'N', 400 );
+$GLOBALS['__user_meta'][7]['last_name']  = '';
+
+check( 'an overlong name is trimmed', 128 === strlen( chip_affiliatewp_bank_account_name( 3 ) ) );
+
+// The registration itself sends a non-empty name.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__user_meta'][7]['first_name']             = '';
+$GLOBALS['__user_meta'][7]['last_name']              = '';
+
+unset( $GLOBALS['__chip_bank_lookup_override'] );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 880, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_log'] = array();
+
+$account = chip_affiliatewp_ensure_bank_account( 3 );
+
+check( 'registration succeeded without a name', is_array( $account ) && 880 === (int) $account['id'] );
+
+$post = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'a registration was sent', 1 === count( $post ) );
+
+$sent = json_decode( (string) $post[0]['body'], true );
+
+check( 'the sent name is not empty', ! empty( $sent['name'] ) );
+check( 'the sent name is a string', is_string( $sent['name'] ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

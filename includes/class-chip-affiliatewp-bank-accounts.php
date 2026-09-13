@@ -501,6 +501,49 @@ function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
 }
 
 /**
+ * The name to register a recipient bank account under.
+ *
+ * `affwp_get_affiliate_name()` returns an empty string when the user has no
+ * first or last name set, which is the ordinary state of an account created
+ * with an email address and a password. CHIP requires a name of at least one
+ * character, so passing it through unchanged makes account registration fail
+ * and the affiliate unpayable. Fall back to the login, then the email, and
+ * finally to something explicitly usable.
+ *
+ * @param int $affiliate_id Affiliate ID.
+ * @return string
+ */
+function chip_affiliatewp_bank_account_name( $affiliate_id ) {
+	$affiliate_id = absint( $affiliate_id );
+	$name         = trim( (string) affwp_get_affiliate_name( $affiliate_id ) );
+
+	if ( '' !== $name ) {
+		return chip_affiliatewp_substr( $name, 128 );
+	}
+
+	$user_id = function_exists( 'affwp_get_affiliate_user_id' ) ? absint( affwp_get_affiliate_user_id( $affiliate_id ) ) : 0;
+	$user    = $user_id ? get_userdata( $user_id ) : false;
+
+	if ( $user ) {
+		$login = trim( (string) $user->user_login );
+
+		if ( '' !== $login ) {
+			return chip_affiliatewp_substr( $login, 128 );
+		}
+
+		$email = trim( (string) $user->user_email );
+
+		if ( '' !== $email ) {
+			return chip_affiliatewp_substr( $email, 128 );
+		}
+	}
+
+	// Nothing identifying on file. CHIP needs a non-empty name; name it so the
+	// merchant can see which affiliate the account belongs to.
+	return sprintf( 'Affiliate %d', $affiliate_id );
+}
+
+/**
  * Adds the affiliate's bank account on CHIP Send, or returns the existing one.
  *
  * The unique per-details reference makes the submission idempotent: CHIP
@@ -542,7 +585,7 @@ function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
 		array(
 			'account_number' => $details['account_number'],
 			'bank_code'      => $details['bank_code'],
-			'name'           => chip_affiliatewp_substr( (string) affwp_get_affiliate_name( $affiliate_id ), 128 ),
+			'name'           => chip_affiliatewp_bank_account_name( $affiliate_id ),
 			'reference'      => chip_affiliatewp_bank_reference( $affiliate_id ),
 		),
 		array(),
