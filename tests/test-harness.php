@@ -7392,6 +7392,139 @@ if ( 1 === count( $new_keys ) ) {
 	check( 'the recovered payout is processing', 'processing' === $row->status );
 }
 
+echo "\n== Test 113: a reassigned referral is not paid from the old payout ==\n";
+reset_state();
+
+/*
+ * AffiliateWP lets an admin reassign a referral to a different affiliate
+ * (affwp_update_referral with an affiliate_id). The payout's recipient bank
+ * account belongs to the affiliate the payout was built for, so paying here
+ * would move the reassigned commission into the wrong person's account - and
+ * the status check alone does not catch it: the referral is still unpaid, and
+ * still unattached to any payout.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+// Affiliate 3 has usable bank details, so the only thing wrong is ownership.
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// The payout is for affiliate 3, but its referral now belongs to affiliate 8.
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3000 ),
+		'amount'        => '50.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3000] = new Fake_Referral( 3000, 8, '50.00', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'the payout is refused', is_wp_error( $result ) );
+/*
+ * The pre-check that asks CHIP whether the reference already exists is a GET,
+ * and read-only. What must not happen is a submission.
+ */
+$sent_posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' );
+		}
+	)
+);
+
+check( 'no instruction was submitted', array() === $sent_posts );
+
+
+/*
+ * The failure is recorded as a payout failure, so assert on the reason the
+ * merchant is shown rather than the wrapper code.
+ */
+check(
+	'the reason says the referrals are no longer payable',
+	false !== strpos( $result->get_error_message(), 'awaiting payment any more' )
+);
+
+/*
+ * The cause is recorded as the payout's failure reason, which is what the
+ * merchant's list shows. (`error_status` holds an HTTP status, not the code.)
+ */
+$stored_payout = affwp_get_payout( $payout_id );
+$stored        = chip_affiliatewp_payout_data( $stored_payout );
+
+check(
+	'the payout records the specific cause',
+	false !== strpos( (string) ( $stored['error'] ?? '' ), 'awaiting payment any more' )
+);
+
+check(
+	'the failed payout is listed as failed',
+	'failed' === $stored_payout->status
+);
+
+// And the payout really did not go out under that reference.
+check(
+	'the payout was not marked paid',
+	'paid' !== affwp_get_payout( $payout_id )->status
+);
+
+// A referral that still belongs to the payout's affiliate does go out, so the
+// check is the reason rather than something else failing.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_ok = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3001 ),
+		'amount'        => '50.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3001] = new Fake_Referral( 3001, 3, '50.00', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8200, 'state' => 'executing' ) );
+$GLOBALS['__http_log'] = array();
+
+$ok = chip_affiliatewp_submit_payout( $payout_ok );
+
+check( 'a referral still owned by the payout pays normally', true === $ok );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'exactly one instruction was sent for the good payout', 1 === count( $posts ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

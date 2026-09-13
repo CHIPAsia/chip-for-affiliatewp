@@ -340,6 +340,18 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 			continue;
 		}
 
+		/*
+		 * The referral must still belong to the affiliate this payout is for.
+		 * AffiliateWP lets an admin reassign a referral to another affiliate
+		 * (`affwp_update_referral` with an `affiliate_id`), and the payout's
+		 * recipient account belongs to the affiliate it was built for: paying
+		 * here would move the reassigned commission into the wrong person's
+		 * bank account.
+		 */
+		if ( absint( $referral->affiliate_id ) !== absint( $payout->affiliate_id ) ) {
+			continue;
+		}
+
 		// 0 means "not attached to any payout"; anything else must be this one.
 		if ( ! empty( $referral->payout_id ) && absint( $referral->payout_id ) !== absint( $payout_id ) ) {
 			continue;
