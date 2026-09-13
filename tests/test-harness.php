@@ -7224,6 +7224,64 @@ $result = chip_affiliatewp_request_budget_allocation( 1.00, 'test' );
 check( 'the allocation succeeded', ! is_wp_error( $result ) );
 check( 'the cached summary was dropped', false === get_transient( $key ) );
 
+echo "\n== Test 111: no array key is built without a consumer ==\n";
+reset_state();
+
+/*
+ * Test 105 covers payout meta. The same waste happens one level up: an array
+ * assembled for the review list carried a `since` timestamp that no reader
+ * ever asked for - and a value nobody reads is a value nobody notices going
+ * stale.
+ *
+ * This checks the keys each module builds into a returned or stored array,
+ * against every key the plugin reads anywhere.
+ */
+$chip_plugin_dir = dirname( __DIR__ );
+$all_src         = '';
+
+foreach ( glob( $chip_plugin_dir . '/includes/*.php' ) as $chip_file ) {
+	$all_src .= (string) file_get_contents( $chip_file );
+}
+
+/*
+ * Keys assembled into a structured array: 'key' => value, where the array is
+ * returned, cached, or handed to a helper. Template rendering arrays are
+ * excluded by requiring the key to be a plain identifier and the assignment to
+ * live in a `$found[] =` / `$row =` / `return array(` context.
+ */
+preg_match_all( '/\$found\[\] = array\(\s*\n(.*?)\n\t*\);/s', $all_src, $found_blocks );
+
+$built = array();
+
+foreach ( $found_blocks[1] as $block ) {
+	if ( preg_match_all( "/'([a-z_0-9]+)'\s*=>/", $block, $keys ) ) {
+		foreach ( $keys[1] as $key ) {
+			$built[ $key ] = true;
+		}
+	}
+}
+
+check( 'keys were found in the review-list builder', ! empty( $built ) );
+
+// Where each of those keys is read.
+$unread = array();
+
+foreach ( array_keys( $built ) as $key ) {
+	// A read is an access that is not the assignment itself.
+	$pattern = '/\[[[:space:]]*\'' . preg_quote( $key, '/' ) . '\'[[:space:]]*\]/';
+
+	if ( ! preg_match( $pattern, $all_src ) ) {
+		$unread[] = $key;
+	}
+}
+
+check(
+	'every review-list key has a reader (unread: ' . implode( ', ', $unread ) . ')',
+	array() === $unread
+);
+
+check( 'the dead timestamp key is gone', ! isset( $built['since'] ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

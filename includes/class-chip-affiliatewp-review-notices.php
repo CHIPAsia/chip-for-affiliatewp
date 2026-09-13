@@ -177,7 +177,6 @@ function chip_affiliatewp_payouts_awaiting_review( $limit = 20 ) {
 			'affiliate_id' => (int) $payout->affiliate_id,
 			'amount'       => (string) $payout->amount,
 			'state'        => strtolower( (string) $data['state'] ),
-			'since'        => (string) ( $data['last_checked'] ?? '' ),
 
 			/*
 			 * CHIP's own words about an in-flight instruction, when it sent

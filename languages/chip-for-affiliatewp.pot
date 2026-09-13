@@ -241,7 +241,7 @@ msgid ""
 "Contact your CHIP account manager about the recipient before trying again."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-review-notices.php:328
+#: includes/class-chip-affiliatewp-review-notices.php:327
 msgid "CHIP reports: %s"
 msgstr ""
 
@@ -662,7 +662,7 @@ msgid ""
 " little while; you will be paid as soon as it completes."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-review-notices.php:302
+#: includes/class-chip-affiliatewp-review-notices.php:301
 msgid "[%s] A CHIP Send payout needs your attention"
 msgstr ""
 

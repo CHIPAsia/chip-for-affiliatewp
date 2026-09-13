@@ -286,7 +286,7 @@ msgstr ""
 " ini). Hubungi pengurus akaun CHIP anda tentang penerima sebelum mencuba "
 "lagi."
 
-#: includes/class-chip-affiliatewp-review-notices.php:328
+#: includes/class-chip-affiliatewp-review-notices.php:327
 msgid "CHIP reports: %s"
 msgstr "CHIP melaporkan: %s"
 
@@ -756,7 +756,7 @@ msgstr ""
 "Komisen anda dihantar ke %1$s %2$s. Pengesahan akaun bank mungkin mengambil "
 "masa; anda akan dibayar sebaik sahaja ia selesai."
 
-#: includes/class-chip-affiliatewp-review-notices.php:302
+#: includes/class-chip-affiliatewp-review-notices.php:301
 msgid "[%s] A CHIP Send payout needs your attention"
 msgstr "[%s] Satu pembayaran CHIP Send memerlukan perhatian anda"
 
