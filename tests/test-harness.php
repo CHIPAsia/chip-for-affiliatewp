@@ -8333,6 +8333,84 @@ check(
 	false !== strpos( $builder, 're.S' )
 );
 
+echo "\n== Test 121: uninstall removes every meta key the plugin writes ==\n";
+reset_state();
+
+/*
+ * A meta key that outlives an uninstall is not just clutter. Burnt references
+ * suppress a fresh reference, a cached bank account carries the previous
+ * affiliate's account number, and payout meta holds CHIP's own notes - so each
+ * one changes behaviour on a later reinstall.
+ *
+ * Every write is discovered from the source, so a key added later is covered
+ * without anyone remembering to update this test.
+ */
+$chip_root = dirname( __DIR__ );
+
+$write_patterns = array(
+	"/update_user_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_referral_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_affiliate_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_payout_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_referral_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+);
+
+$written = array();
+
+foreach ( glob( $chip_root . '/includes/*.php' ) as $chip_file ) {
+	$src = (string) file_get_contents( $chip_file );
+
+	foreach ( $write_patterns as $pattern ) {
+		if ( preg_match_all( $pattern, $src, $hits ) ) {
+			foreach ( $hits[1] as $key ) {
+				$written[ $key ] = true;
+			}
+		}
+	}
+}
+
+check( 'meta keys were found in the source', ! empty( $written ) );
+
+$uninstall = (string) file_get_contents( $chip_root . '/uninstall.php' );
+
+$not_cleaned = array();
+
+foreach ( array_keys( $written ) as $key ) {
+	// Either named in the uninstall sweep, or deleted through a helper that the
+	// uninstall calls with the key.
+	if ( false === strpos( $uninstall, "'" . $key . "'" ) ) {
+		$not_cleaned[] = $key;
+	}
+}
+
+check(
+	'every meta key is removed at uninstall (' . implode( ', ', $not_cleaned ) . ')',
+	array() === $not_cleaned
+);
+
+// The keys that must be there, spelled out so a rename is caught too.
+foreach ( array( 'chip_bank_account', 'chip_payout_data', 'payment_account_number', 'payment_bank_code', 'chip_burnt_references' ) as $expected ) {
+	check( 'uninstall clears ' . $expected, false !== strpos( $uninstall, "'" . $expected . "'" ) );
+}
+
+/*
+ * The referral-meta sweep must read the table name from AffiliateWP: on a
+ * network with AFFILIATE_WP_NETWORK_WIDE the table carries no site prefix, and
+ * a literal name would find nothing and leave the rows behind.
+ */
+check(
+	'the referral-meta sweep uses AffiliateWP\'s table name',
+	false !== strpos( $uninstall, 'referral_meta->table_name' )
+);
+
+check(
+	'the referral-meta sweep does not hard-code a prefixed table',
+	false === strpos( $uninstall, "{\$wpdb->prefix}affiliate_wp_referralmeta" )
+);
+
+// And the helper it relies on exists in AffiliateWP.
+check( 'uninstall guards on the core helper', false !== strpos( $uninstall, 'affwp_delete_referral_meta' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

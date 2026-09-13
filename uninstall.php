@@ -172,6 +172,36 @@ if ( class_exists( 'Affiliate_WP' ) && function_exists( 'affwp_delete_payout_met
 	}
 }
 
+/*
+ * Remove the referral meta this plugin stores.
+ *
+ * `chip_burnt_references` records the references CHIP has refused for a
+ * referral. Left behind, it would suppress a fresh reference on a later
+ * reinstall, so the first attempt for an affected referral would reuse a
+ * reference CHIP has permanently refused.
+ *
+ * The table name is read from AffiliateWP rather than spelled out: on a network
+ * with `AFFILIATE_WP_NETWORK_WIDE` the meta table carries no site prefix, and a
+ * literal name would find nothing and silently leave the rows behind.
+ */
+if ( class_exists( 'Affiliate_WP' ) && function_exists( 'affwp_delete_referral_meta' ) && ! empty( affiliate_wp()->referral_meta->table_name ) ) {
+	global $wpdb;
+
+	$chip_meta_table = affiliate_wp()->referral_meta->table_name;
+
+	$chip_referral_ids = $wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off uninstall sweep, nothing to cache.
+		$wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- the table name comes from AffiliateWP itself.
+			"SELECT referral_id FROM {$chip_meta_table} WHERE meta_key = %s",
+			'chip_burnt_references'
+		)
+	);
+
+	foreach ( (array) $chip_referral_ids as $chip_referral_id ) {
+		affwp_delete_referral_meta( (int) $chip_referral_id, 'chip_burnt_references' );
+	}
+}
+
 // Clear cached account summaries and queued notices.
 global $wpdb;
 
