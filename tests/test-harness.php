@@ -8493,6 +8493,126 @@ $header_blob = strtolower( (string) wp_json_encode( $headers ) );
 
 check( 'the secret is not sent', false === strpos( $header_blob, strtolower( $secret_key ) ) );
 
+echo "\n== Test 123: the webhook endpoint fails closed and is idempotent ==\n";
+reset_state();
+
+/*
+ * The endpoint accepts data from outside, so its failures must be on the safe
+ * side: anything that is not a verified delivery changes nothing. And because
+ * CHIP's payloads carry no nonce or timestamp, a replay is indistinguishable
+ * from a retry - so the handler has to be idempotent rather than rely on
+ * freshness.
+ */
+$cp_keypair = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+openssl_pkey_export( $cp_keypair, $cp_priv );
+$cp_pub = openssl_pkey_get_details( $cp_keypair )['key'];
+
+$GLOBALS['__options']['chip_payouts']              = 1;
+$GLOBALS['__options']['chip_test_mode']            = 1;
+$GLOBALS['__options']['chip_test_api_key']         = 'k';
+$GLOBALS['__options']['chip_test_secret_key']      = 's';
+$GLOBALS['__options']['chip_reference_prefix']     = 'XT';
+$GLOBALS['__options']['currency']                  = 'MYR';
+$GLOBALS['__options']['chip_webhook_public_key']   = $cp_pub;
+$GLOBALS['__options']['chip_webhook_secret']       = 'fixedharnesssecret000000000000000000';
+$GLOBALS['__options']['chip_webhook_checked_test'] = time();
+
+$cp_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3300 ),
+		'amount'        => '40.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'service_id'    => 8500,
+		'description'   => wp_json_encode( array( 'instruction_id' => 8500, 'reference' => 'XT-PO-501' ) ),
+	)
+);
+
+$GLOBALS['__referral_rows'][3300] = new Fake_Referral( 3300, 3, '40.00', 'unpaid', $cp_payout );
+
+chip_affiliatewp_update_payout_data(
+	$cp_payout,
+	array(
+		'instruction_id' => 8500,
+		'mode'           => 'test',
+		'state'          => 'executing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
+	)
+);
+
+$GLOBALS['wpdb'] = new Fake_WPDO();
+
+$cp_body = wp_json_encode( array( 'id' => 8500, 'state' => 'completed', 'reference' => 'XT-PO-501' ) );
+
+function cp_sign( $raw, $key ) {
+	openssl_sign( $raw, $sig, $key, OPENSSL_ALGO_SHA512 );
+	return base64_encode( $sig );
+}
+
+function cp_request( $raw, $signature ) {
+	$r = new Fake_Request();
+	$r->body = $raw;
+	$r->headers['HTTP_X_SIGNATURE'] = $signature;
+	$r->headers['HTTP_EVENT_TYPE']  = 'send_instruction_status';
+	return $r;
+}
+
+// A tampered body fails and the payout is untouched.
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body . 'x', cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'a tampered body is refused', is_wp_error( $cp_resp ) );
+check( 'the payout is untouched after a bad signature', 'processing' === affwp_get_payout( $cp_payout )->status );
+check( 'the referral is untouched', 'unpaid' === $GLOBALS['__referral_rows'][3300]->status );
+
+// No signature at all.
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, '' ) );
+
+check( 'a missing signature is refused', is_wp_error( $cp_resp ) );
+check( 'the payout is untouched after a missing signature', 'processing' === affwp_get_payout( $cp_payout )->status );
+
+// Undecodable base64 must not pass for a signature.
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, '!!!not-base64!!!' ) );
+
+check( 'undecodable base64 is refused', is_wp_error( $cp_resp ) );
+check( 'the payout is untouched after undecodable base64', 'processing' === affwp_get_payout( $cp_payout )->status );
+
+// No configured key: refuse in a way CHIP will retry rather than give up on.
+$GLOBALS['__options']['chip_webhook_public_key'] = '';
+
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'an unconfigured endpoint refuses', is_wp_error( $cp_resp ) );
+check( 'it asks for a retry rather than a rejection', 503 === (int) ( $cp_resp->get_error_data()['status'] ?? 0 ) );
+check( 'the payout is untouched while unconfigured', 'processing' === affwp_get_payout( $cp_payout )->status );
+
+// Configured again: the valid delivery applies.
+$GLOBALS['__options']['chip_webhook_public_key'] = $cp_pub;
+
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'a valid delivery is accepted', is_array( $cp_resp ) );
+check( 'the payout completed', 'paid' === affwp_get_payout( $cp_payout )->status );
+check( 'the referral is paid', 'paid' === $GLOBALS['__referral_rows'][3300]->status );
+
+/*
+ * Replay: the same signed delivery again. There is no nonce in the payload, so
+ * the handler has to be idempotent - paying twice here would be a second bank
+ * transfer for one commission.
+ */
+$cp_rows = count( $GLOBALS['__payout_rows'] );
+$cp_log  = count( $GLOBALS['__http_log'] );
+
+$cp_r2 = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+$cp_r3 = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'a replayed delivery is acknowledged', is_array( $cp_r2 ) && is_array( $cp_r3 ) );
+check( 'a replayed delivery creates no payout', $cp_rows === count( $GLOBALS['__payout_rows'] ) );
+check( 'a replayed delivery sends nothing', $cp_log === count( $GLOBALS['__http_log'] ) );
+check( 'a replayed delivery leaves the payout paid', 'paid' === affwp_get_payout( $cp_payout )->status );
+check( 'a replayed delivery leaves the referral paid', 'paid' === $GLOBALS['__referral_rows'][3300]->status );
+
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
