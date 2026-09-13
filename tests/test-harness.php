@@ -6567,6 +6567,70 @@ $posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { r
 
 check( 'an unrepresentable payout amount is not submitted', array() === $posts );
 
+echo "\n== Test 101: a paid referral gets no second payout from a webhook ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+/*
+ * A referral already paid, with no payout on record: its status was set
+ * directly, or it predates payouts. Materialising a payout for it would give
+ * the retry path a row to resubmit, sending a second instruction for one
+ * commission.
+ */
+$GLOBALS['__referral_rows'][2200] = new Fake_Referral( 2200, 3, '15.00', 'paid', 0 );
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9600, 'state' => 'completed', 'reference' => 'XT-R-2200' ),
+	'test'
+);
+
+check( 'no payout is created for a paid referral', count( $GLOBALS['__payout_rows'] ) === $before );
+check( 'the referral stays paid', 'paid' === $GLOBALS['__referral_rows'][2200]->status );
+
+// The same delivery repeated changes nothing either.
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9600, 'state' => 'completed', 'reference' => 'XT-R-2200' ),
+	'test'
+);
+
+check( 'a redelivery still creates nothing', count( $GLOBALS['__payout_rows'] ) === $before );
+
+/*
+ * An unpaid referral with no payout is still materialised: that is the ordinary
+ * single-referral case the recovery path exists for.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$GLOBALS['__referral_rows'][2201] = new Fake_Referral( 2201, 3, '15.00', 'unpaid', 0 );
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9601, 'state' => 'completed', 'reference' => 'XT-R-2201' ),
+	'test'
+);
+
+check( 'an unpaid referral is still materialised', count( $GLOBALS['__payout_rows'] ) === $before + 1 );
+check( 'and it is paid by the delivery', 'paid' === $GLOBALS['__referral_rows'][2201]->status );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

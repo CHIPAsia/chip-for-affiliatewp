@@ -670,6 +670,16 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 
 			if ( $referral && ! empty( $referral->payout_id ) ) {
 				$payout_id = absint( $referral->payout_id );
+			} elseif ( $referral && 'paid' === $referral->status ) {
+				/*
+				 * Already paid, but with no payout on record — a referral whose
+				 * status was set directly, or carried over from before payouts
+				 * existed. Nothing is owed for it, and materialising a payout
+				 * here would give the retry path a row to resubmit: it would
+				 * send a second instruction and move the money twice for one
+				 * commission. Acknowledge the delivery and leave it alone.
+				 */
+				return;
 			} elseif ( $referral ) {
 				// Single-referral run: the payout row was never created. Create it now.
 				$payout_id = affwp_add_payout(
