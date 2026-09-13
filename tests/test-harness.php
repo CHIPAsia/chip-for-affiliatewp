@@ -7157,6 +7157,73 @@ $payouts_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class
 check( 'the payout path passes a fallback', false !== strpos( $payouts_src, '$referral_fallback' ) );
 check( 'the referral path builds a named fallback', false !== strpos( $payouts_src, "'Commission for referral No.%d'" ) );
 
+echo "\n== Test 110: a transient is written and dropped under one key ==\n";
+reset_state();
+
+/*
+ * A cache written under one spelling and cleared under another is never
+ * invalidated: the stale value survives until it expires, which is how a
+ * converted balance keeps showing the pre-conversion figure.
+ */
+$account_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-account.php' );
+
+check(
+	'the key is spelled once, inside its helper',
+	1 === substr_count( $account_src, "chip_affiliatewp_account_' . ( 'test'" )
+);
+
+check(
+	'the key helper is used',
+	false !== strpos( $account_src, 'chip_affiliatewp_account_cache_key(' )
+);
+
+check( 'the helper is used more than once', 1 < substr_count( $account_src, 'chip_affiliatewp_account_cache_key(' ) );
+
+// The helper itself.
+check(
+	'test mode gets its own key',
+	'chip_affiliatewp_account_test' === chip_affiliatewp_account_cache_key( 'test' )
+);
+
+check(
+	'live mode gets its own key',
+	'chip_affiliatewp_account_live' === chip_affiliatewp_account_cache_key( 'live' )
+);
+
+check(
+	'an unknown mode resolves to live',
+	chip_affiliatewp_account_cache_key( 'live' ) === chip_affiliatewp_account_cache_key( 'staging' )
+);
+
+check(
+	'case does not create a third key',
+	chip_affiliatewp_account_cache_key( 'live' ) === chip_affiliatewp_account_cache_key( 'TEST' )
+);
+
+/*
+ * And the drop actually reaches the key the read used: a conversion must not
+ * leave the old summary behind.
+ */
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+
+$key = chip_affiliatewp_account_cache_key( 'test' );
+
+set_transient( $key, array( 'current_balance' => '111.00' ), 300 );
+
+check( 'a summary is cached', is_array( get_transient( $key ) ) );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_limits', 'method' => 'POST', 'code' => 200, 'body' => array( 'approvals_required' => 1 ) );
+$GLOBALS['__http_log'] = array();
+
+$result = chip_affiliatewp_request_budget_allocation( 1.00, 'test' );
+
+check( 'the allocation succeeded', ! is_wp_error( $result ) );
+check( 'the cached summary was dropped', false === get_transient( $key ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

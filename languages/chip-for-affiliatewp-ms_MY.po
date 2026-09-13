@@ -138,7 +138,7 @@ msgstr "Kedua-dua medan diperlukan"
 msgid "CHIP Send"
 msgstr "CHIP Send"
 
-#: includes/class-chip-affiliatewp-account.php:44
+#: includes/class-chip-affiliatewp-account.php:43
 #: includes/class-chip-affiliatewp-api.php:139
 #: includes/class-chip-affiliatewp-webhooks.php:215
 msgid "CHIP Send API credentials are not configured."
@@ -348,7 +348,7 @@ msgstr "E-mel resit CHIP kepada afiliasi bagi setiap pembayaran"
 msgid "Enable CHIP Send"
 msgstr "Aktifkan CHIP Send"
 
-#: includes/class-chip-affiliatewp-account.php:115
+#: includes/class-chip-affiliatewp-account.php:127
 msgid "Enter an amount greater than zero."
 msgstr "Masukkan jumlah yang lebih besar daripada sifar."
 
