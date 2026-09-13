@@ -7778,6 +7778,58 @@ check(
 	'XT-PO-' . $pay_id === (string) ( $body['reference'] ?? '' )
 );
 
+echo "\n== Test 116: the payout-method filter honours AffiliateWP's contract ==\n";
+reset_state();
+
+/*
+ * AffiliateWP registers payout methods through the `affwp_payout_methods`
+ * filter, which is handed an array of `method => label` and must return the
+ * same shape. Core reads the result with array_key_exists() and foreach
+ * ($methods as $key => $label), so returning a list instead of a map, or
+ * dropping the incoming entries, breaks every other method on the screen - and
+ * nothing in the plugin's tests exercised this filter.
+ */
+$incoming = array(
+	'manual' => 'Manual',
+	'paypal' => 'PayPal',
+);
+
+// Enabled: CHIP Send is added alongside what was there, keeping the shape.
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$out = chip_affiliatewp_register_payout_method( $incoming );
+
+check( 'the result is an array', is_array( $out ) );
+check( 'the incoming methods survive', isset( $out['manual'], $out['paypal'] ) );
+check( 'CHIP Send was added', isset( $out['chip'] ) );
+check( 'the label is a plain string', is_string( $out['chip'] ) );
+check( 'the label is not empty', '' !== trim( (string) $out['chip'] ) );
+check( 'manual is unchanged', 'Manual' === $out['manual'] );
+check( 'no extra keys were introduced', array( 'manual', 'paypal', 'chip' ) === array_values( array_keys( $out ) ) );
+
+// Disabled: the incoming map is returned untouched.
+$GLOBALS['__options']['chip_payouts'] = 0;
+
+$off = chip_affiliatewp_register_payout_method( $incoming );
+
+check( 'disabled leaves the methods alone', $incoming === $off );
+check( 'disabled adds nothing', ! isset( $off['chip'] ) );
+
+// A store that already has a chip entry keeps its own label rather than
+// gaining a duplicate key.
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$existing = chip_affiliatewp_register_payout_method( array( 'chip' => 'Something else' ) );
+
+check( 'an existing chip key is not duplicated', 1 === count( $existing ) );
+
+// Non-array input cannot be assumed away: a filter chain may pass anything.
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$wild = chip_affiliatewp_register_payout_method( null );
+
+check( 'a non-array value does not produce a warning', is_array( $wild ) || null === $wild );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
