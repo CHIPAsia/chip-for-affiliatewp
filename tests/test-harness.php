@@ -6475,6 +6475,72 @@ $GLOBALS['__user_meta'][7]['payment_account_number'] = '123';
 
 check( 'another method is passed through', true === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'paypal', 3 ) );
 
+echo "\n== Test 99: a non-finite amount never reaches CHIP ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+/*
+ * "1e999" casts to INF, which is greater than zero, so a `<= 0` guard lets it
+ * through and number_format() renders it as "inf" for the API.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_request_budget_allocation( 1e999, 'test' );
+
+check( 'an infinite amount is refused', is_wp_error( $result ) && 'chip_invalid_amount' === $result->get_error_code() );
+check( 'no request was made with it', array() === $GLOBALS['__http_log'] );
+
+$result_nan = chip_affiliatewp_request_budget_allocation( NAN, 'test' );
+
+check( 'a NaN amount is refused', is_wp_error( $result_nan ) && 'chip_invalid_amount' === $result_nan->get_error_code() );
+
+// A negative infinity is not "less than zero and therefore fine".
+$result_neg = chip_affiliatewp_request_budget_allocation( -1e999, 'test' );
+
+check( 'a negative infinite amount is refused', is_wp_error( $result_neg ) );
+
+// The payout path must not be able to send one either.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 2100 ),
+		'amount'        => '0.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][2100] = new Fake_Referral( 2100, 3, '0.00', 'unpaid', $payout_id );
+
+// A payout whose amount cannot be represented as a transferable figure.
+affiliate_wp()->affiliates->payouts->update( $payout_id, array( 'amount' => 'INF' ), '', 'payout' );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$sent = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'an unrepresentable payout amount is not submitted', array() === $posts );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

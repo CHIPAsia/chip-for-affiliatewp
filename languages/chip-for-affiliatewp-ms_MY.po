@@ -338,7 +338,7 @@ msgstr "E-mel resit CHIP kepada afiliasi bagi setiap pembayaran"
 msgid "Enable CHIP Send"
 msgstr "Aktifkan CHIP Send"
 
-#: includes/class-chip-affiliatewp-account.php:108
+#: includes/class-chip-affiliatewp-account.php:115
 msgid "Enter an amount greater than zero."
 msgstr "Masukkan jumlah yang lebih besar daripada sifar."
 

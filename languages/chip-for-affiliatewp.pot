@@ -292,7 +292,7 @@ msgstr ""
 msgid "Enable CHIP Send"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-account.php:108
+#: includes/class-chip-affiliatewp-account.php:115
 msgid "Enter an amount greater than zero."
 msgstr ""
 

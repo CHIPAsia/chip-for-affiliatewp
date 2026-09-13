@@ -104,7 +104,14 @@ function chip_affiliatewp_parse_account_summary( $response ) {
 function chip_affiliatewp_request_budget_allocation( $amount, $mode = 'live' ) {
 	$amount = round( (float) $amount, 2 );
 
-	if ( $amount <= 0 ) {
+	/*
+	 * A non-finite value passes a `<= 0` test — INF is greater than zero — and
+	 * number_format() renders it as "inf", so it would be sent to CHIP as an
+	 * amount. Requesting the balance conversion is the merchant's own screen,
+	 * but the ceiling check above is skipped whenever the summary cannot be
+	 * read (an API outage), so this cannot be left to it.
+	 */
+	if ( ! is_finite( $amount ) || $amount <= 0 ) {
 		return new WP_Error( 'chip_invalid_amount', __( 'Enter an amount greater than zero.', 'chip-for-affiliatewp' ) );
 	}
 
