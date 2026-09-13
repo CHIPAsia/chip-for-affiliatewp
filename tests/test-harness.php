@@ -144,6 +144,36 @@ function esc_url( $text ) {
 	return $text;
 }
 
+/**
+ * The escaping helpers that echo rather than return, mirroring WordPress: they
+ * emit the escaped value. The forms use these, so rendering them in a test
+ * needs the same behaviour.
+ */
+function esc_html_e( $text, $domain = null ) {
+	echo esc_html( $text );
+}
+
+function esc_attr_e( $text, $domain = null ) {
+	echo esc_attr( $text );
+}
+
+function esc_html__s( $text, $domain = null ) {
+	return esc_html( $text );
+}
+
+/**
+ * Mirrors WordPress: emits ` selected='selected'` when the two values match.
+ */
+function selected( $selected, $current = true, $display = true ) {
+	$result = ( (string) $selected === (string) $current ) ? " selected='selected'" : '';
+
+	if ( $display ) {
+		echo $result;
+	}
+
+	return $result;
+}
+
 function wp_json_encode( $data ) {
 	return json_encode( $data );
 }
@@ -321,6 +351,15 @@ $GLOBALS['__current_user_can'] = true;
 $GLOBALS['__die_message']      = '';
 $GLOBALS['__redirected']       = '';
 
+/**
+ * Mirrors WordPress: produces a nonce for an action. The harness's verifier
+ * accepts the literal 'good-nonce', which is what the save-handler tests feed
+ * it, so this returns that for every action.
+ */
+function wp_create_nonce( $action = -1 ) {
+	return 'good-nonce';
+}
+
 function wp_verify_nonce( $nonce, $action = '' ) {
 	return 'good-nonce' === $nonce ? 1 : false;
 }
@@ -343,8 +382,22 @@ function wp_parse_url( $url, $component = -1 ) {
 	return parse_url( $url, $component );
 }
 
+/**
+ * Mirrors WordPress: emits the nonce field. Returning nothing would make a form
+ * look nonce-less to any test that inspects the rendered markup.
+ */
 function wp_nonce_field( $action = '', $name = '_wpnonce', $echo = true ) {
-	return '';
+	$field = sprintf(
+		'<input type="hidden" id="%1$s" name="%1$s" value="%2$s" />',
+		esc_attr( $name ),
+		esc_attr( wp_create_nonce( $action ) )
+	);
+
+	if ( $echo ) {
+		echo $field;
+	}
+
+	return $field;
 }
 
 function current_user_can( $cap ) {
@@ -645,6 +698,19 @@ class Fake_User {
 		$this->ID         = $id;
 		$this->user_email = $email;
 		$this->user_login = '' !== $login ? $login : 'user' . $id;
+	}
+}
+
+/**
+ * The affiliate object AffiliateWP passes to affwp_edit_affiliate_end.
+ */
+class Fake_Affiliate {
+	public $affiliate_id;
+	public $user_id;
+
+	public function __construct( $affiliate_id, $user_id = 0 ) {
+		$this->affiliate_id = (int) $affiliate_id;
+		$this->user_id      = (int) $user_id;
 	}
 }
 
@@ -7829,6 +7895,96 @@ $GLOBALS['__options']['chip_payouts'] = 1;
 $wild = chip_affiliatewp_register_payout_method( null );
 
 check( 'a non-array value does not produce a warning', is_array( $wild ) || null === $wild );
+
+echo "\n== Test 117: the bank-detail forms honour their hook contracts ==\n";
+reset_state();
+
+/*
+ * Two hooks render the bank-detail form:
+ *
+ *   affwp_edit_affiliate_end( \AffWP\Affiliate $affiliate )     admin screen
+ *   affwp_affiliate_dashboard_payments_section( $affiliate_id, $affiliate_user_id )
+ *
+ * Neither had a test. A signature that does not match what core passes fails
+ * silently: the form either renders nothing or renders for the wrong affiliate.
+ */
+$bank_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-bank-accounts.php' );
+$area_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-affiliate-area.php' );
+
+check(
+	'the admin form is registered for one argument',
+	false !== strpos( $bank_src, "add_action( 'affwp_edit_affiliate_end', 'chip_affiliatewp_affiliate_bank_fields'" )
+);
+
+check(
+	'the affiliate-area form is registered for two arguments',
+	false !== strpos( $area_src, "add_action( 'affwp_affiliate_dashboard_payments_section', 'chip_affiliatewp_affiliate_bank_form', 10, 2 )" )
+);
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__current_affiliate_id'] = 3;
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+
+// The section only renders for affiliates actually paid through CHIP Send.
+// The affiliate-area form, called the way core calls it.
+ob_start();
+chip_affiliatewp_affiliate_bank_form( 3, 7 );
+$rendered = ob_get_clean();
+
+check( 'the area form renders', '' !== trim( $rendered ) );
+check( 'it renders a bank-code field', false !== strpos( $rendered, 'payment_bank_code' ) );
+check( 'it renders an account-number field', false !== strpos( $rendered, 'payment_account_number' ) );
+check( 'it carries a nonce', false !== strpos( $rendered, 'chip_affiliatewp_bank_nonce' ) );
+
+/*
+ * Called with no arguments — core may or may not supply them — it must fall back
+ * to the session rather than render for affiliate 0.
+ */
+ob_start();
+chip_affiliatewp_affiliate_bank_form();
+$without_args = ob_get_clean();
+
+check( 'the area form works without arguments', '' !== trim( $without_args ) );
+check( 'the fallback rendered the same form', false !== strpos( $without_args, 'payment_bank_code' ) );
+
+// Disabled: nothing renders at all.
+$GLOBALS['__options']['chip_payouts'] = 0;
+
+ob_start();
+chip_affiliatewp_affiliate_bank_form( 3, 7 );
+$disabled = ob_get_clean();
+
+check( 'a disabled method renders nothing', '' === trim( $disabled ) );
+
+// The admin form takes an affiliate object, as core passes one.
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$affiliate = new Fake_Affiliate( 3, 7 );
+
+ob_start();
+chip_affiliatewp_affiliate_bank_fields( $affiliate );
+$admin_rendered = ob_get_clean();
+
+check( 'the admin form renders for an affiliate object', '' !== trim( $admin_rendered ) );
+check( 'it renders the bank fields', false !== strpos( $admin_rendered, 'payment_bank_code' ) );
+check( 'it renders the saved account number', false !== strpos( $admin_rendered, '157380112229' ) );
+
+// And with the method off, the admin screen gains no rows.
+$GLOBALS['__options']['chip_payouts'] = 0;
+
+ob_start();
+chip_affiliatewp_affiliate_bank_fields( $affiliate );
+$admin_disabled = ob_get_clean();
+
+check( 'a disabled method adds no admin rows', '' === trim( $admin_disabled ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
