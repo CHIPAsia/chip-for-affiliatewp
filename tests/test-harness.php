@@ -819,6 +819,14 @@ function affwp_get_payout( $payout ) {
 	return $GLOBALS['__payout_rows'][ (int) $payout ] ?? false;
 }
 
+/**
+ * Mirrors core: the store's currency, which the guard reads. Driven by the
+ * afwp_settings stub so a test can put the store on MYR or something else.
+ */
+function affwp_get_currency() {
+	return (string) affiliate_wp()->settings->get( 'currency', 'MYR' );
+}
+
 function affwp_add_payout( $args ) {
 	return affiliate_wp()->affiliates->payouts->add( $args );
 }
@@ -7281,6 +7289,108 @@ check(
 );
 
 check( 'the dead timestamp key is gone', ! isset( $built['since'] ) );
+
+echo "\n== Test 112: every path that creates a payout checks the currency ==\n";
+reset_state();
+
+/*
+ * CHIP Send settles MYR and the API takes a bare number, so a store on another
+ * currency would send "100.00" that CHIP reads as RM100. Three code paths can
+ * create a payout row; each must refuse when the store is not on MYR, because a
+ * payout the plugin is not willing to send must not appear in the list.
+ */
+$payouts_src  = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' );
+$webhooks_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-webhooks.php' );
+
+$creators = array(
+	'payouts module'  => array( $payouts_src, substr_count( $payouts_src, 'affwp_add_payout(' ) ),
+	'webhooks module' => array( $webhooks_src, substr_count( $webhooks_src, 'affwp_add_payout(' ) ),
+);
+
+$total = 0;
+
+foreach ( $creators as $label => $pair ) {
+	$total += $pair[1];
+}
+
+check( 'payout-creating paths were found', $total >= 3 );
+
+// Each module that creates a payout must also carry the guard.
+check(
+	'the payouts module guards the currency',
+	false !== strpos( $payouts_src, "'MYR' !== chip_affiliatewp_currency()" )
+);
+
+check(
+	'the webhooks module guards the currency',
+	false !== strpos( $webhooks_src, "'MYR' !== chip_affiliatewp_currency()" )
+);
+
+/*
+ * And the guard is effective: a non-MYR store cannot create a payout from a
+ * delivery. Drive the webhook path with a referral-only reference.
+ */
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__currency'] = 'USD';
+
+$GLOBALS['__referral_rows'][2450] = new Fake_Referral( 2450, 3, '9.00', 'unpaid', 0 );
+
+$before_keys = array_keys( $GLOBALS['__payout_rows'] ?? array() );
+
+chip_affiliatewp_process_instruction_webhook(
+	array(
+		'id'        => 9100,
+		'reference' => 'XT-R-2450',
+		'state'     => 'executing',
+	),
+	'test'
+);
+
+$after = count( $GLOBALS['__payouts'] ?? array() );
+
+check( 'a non-MYR store creates no payout from a delivery', $before === $after );
+
+// The same delivery on an MYR store does create one, so the guard is the
+// reason rather than something else failing.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__currency'] = 'MYR';
+
+$GLOBALS['__referral_rows'][2451] = new Fake_Referral( 2451, 3, '9.00', 'unpaid', 0 );
+
+$before_keys = array_keys( $GLOBALS['__payout_rows'] ?? array() );
+
+chip_affiliatewp_process_instruction_webhook(
+	array(
+		'id'        => 9101,
+		'reference' => 'XT-R-2451',
+		'state'     => 'executing',
+	),
+	'test'
+);
+
+$after = count( $GLOBALS['__payouts'] ?? array() );
+
+$new_keys = array_values( array_diff( array_keys( $GLOBALS['__payout_rows'] ?? array() ), $before_keys ) );
+
+check( 'an MYR store does create one', 1 === count( $new_keys ) );
+
+if ( 1 === count( $new_keys ) ) {
+	$row = $GLOBALS['__payout_rows'][ $new_keys[0] ];
+
+	check( 'the recovered payout carries the instruction id', 9101 === (int) $row->service_id );
+	check( 'the recovered payout is for the right affiliate', 3 === (int) $row->affiliate_id );
+	check( 'the recovered payout is processing', 'processing' === $row->status );
+}
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

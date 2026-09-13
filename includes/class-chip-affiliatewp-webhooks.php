@@ -681,7 +681,24 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 				 */
 				return;
 			} elseif ( $referral ) {
-				// Single-referral run: the payout row was never created. Create it now.
+				/*
+				 * Single-referral run: the payout row was never created. Create
+				 * it now.
+				 *
+				 * The currency guard belongs here too. A store cannot submit a
+				 * payout when it is not on MYR, so an instruction only exists
+				 * because the store was on MYR when it was sent — but a store
+				 * that switched currency afterwards would otherwise have this
+				 * delivery materialise a payout row for an instruction whose
+				 * amount CHIP read as ringgit. Nothing is sent from here, so
+				 * no money moves; acknowledging the delivery and leaving the
+				 * row alone keeps the payout list consistent with the payments
+				 * the plugin is willing to make.
+				 */
+				if ( 'MYR' !== chip_affiliatewp_currency() ) {
+					return;
+				}
+
 				$payout_id = affwp_add_payout(
 					array(
 						'affiliate_id'  => $referral->affiliate_id,
