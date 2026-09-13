@@ -41,6 +41,18 @@ function do_action( $hook, ...$args ) {
 	}
 }
 
+/**
+ * Mirrors WordPress: identical to do_action(), but the arguments arrive as a
+ * single array. Action Scheduler runs scheduled callbacks through this, so a
+ * callback whose parameter does not match the args array behaves differently
+ * here than under do_action().
+ */
+function do_action_ref_array( $hook, $args ) {
+	foreach ( $GLOBALS['__actions'][ $hook ] ?? array() as $cb ) {
+		call_user_func_array( $cb, array_values( (array) $args ) );
+	}
+}
+
 function apply_filters( $hook, $value, ...$args ) {
 	foreach ( $GLOBALS['__filters'][ $hook ] ?? array() as $cb ) {
 		$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
@@ -7626,6 +7638,145 @@ $new_keys = array_values( array_diff( array_keys( $GLOBALS['__payout_rows'] ), $
 
 check( 'the delivery did not create a second payout', array() === $new_keys );
 check( 'the payout completed', 'paid' === affwp_get_payout( $payout_id )->status );
+
+echo "\n== Test 115: a scheduled action delivers its arguments the way Action Scheduler does ==\n";
+reset_state();
+
+/*
+ * Action Scheduler runs a scheduled callback as:
+ *
+ *     do_action_ref_array( $hook, array_values( $this->get_args() ) );
+ *
+ * The plugin schedules `array( 'payout_id' => N )`. array_values() turns that
+ * into `array( N )`, so the callback's first parameter is the payout id - which
+ * is why the callback signatures take a bare `$payout_id`. Nothing tested that:
+ * the harness recorded schedule() calls without ever invoking the callback, so
+ * a signature that mismatched the args array would only show up in production,
+ * where the requery would silently run against payout 1.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3200 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3200] = new Fake_Referral( 3200, 3, '30.00', 'unpaid', $payout_id );
+
+// Record the instruction so the requery has something to resolve.
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array(
+		'instruction_id' => 8400,
+		'mode'           => 'test',
+		'state'          => 'executing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s', time() - 3600 ),
+	)
+);
+
+chip_affiliatewp_schedule_check( $payout_id, 60 );
+
+$scheduled = array_values(
+	array_filter(
+		$GLOBALS['__as'],
+		function ( $entry ) {
+			return 'chip_affiliatewp_check_payout_status' === ( $entry[1] ?? '' );
+		}
+	)
+);
+
+check( 'a check was scheduled', 1 === count( $scheduled ) );
+
+$args = $scheduled[0][2] ?? array();
+
+check( 'the args name the payout', $payout_id === (int) ( $args['payout_id'] ?? 0 ) );
+
+/*
+ * Now run it the way Action Scheduler does, and confirm the callback requeries
+ * THIS payout rather than a default.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 8400, 'state' => 'completed', 'receipt_url' => '' ) );
+$GLOBALS['__http_log'] = array();
+
+do_action_ref_array( 'chip_affiliatewp_check_payout_status', array_values( $args ) );
+
+$gets = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'GET' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), '/send_instructions/8400' );
+		}
+	)
+);
+
+check( 'the callback requeried the instruction of the right payout', 1 === count( $gets ) );
+check( 'the payout completed', 'paid' === affwp_get_payout( $payout_id )->status );
+
+/*
+ * The submission callback has the same shape, so exercise it too: if its
+ * parameter did not match the args array it would try to submit payout 1.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$pay_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3201 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3201] = new Fake_Referral( 3201, 3, '30.00', 'unpaid', $pay_id );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8401, 'state' => 'executing' ) );
+$GLOBALS['__http_log'] = array();
+
+do_action_ref_array( 'chip_affiliatewp_submit_payout_action', array_values( array( 'payout_id' => $pay_id ) ) );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' );
+		}
+	)
+);
+
+check( 'the submission callback submitted the right payout', 1 === count( $posts ) );
+
+$body = json_decode( (string) $posts[0]['body'], true );
+
+check(
+	'the instruction was sent under that payout\'s reference',
+	'XT-PO-' . $pay_id === (string) ( $body['reference'] ?? '' )
+);
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
