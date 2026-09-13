@@ -278,7 +278,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 		$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
 
-		if ( ! in_array( $existing_state, array( 'rejected', 'deleted' ), true ) ) {
+		if ( ! chip_affiliatewp_state_is_terminal( $existing_state ) ) {
 			/*
 			 * Live instruction for this attempt: adopt it rather than sending
 			 * again. The instruction may have completed while we were unaware.
@@ -419,7 +419,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
 
-			if ( in_array( $existing_state, array( 'rejected', 'deleted' ), true ) ) {
+			if ( chip_affiliatewp_state_is_terminal( $existing_state ) ) {
 				/*
 				 * The reference is burnt by a dead instruction. Report it under
 				 * the instruction-state code so fail_payout advances the
@@ -854,7 +854,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	// exist there and later complete (e.g. the create call timed out after the
 	// server accepted it). Let a completed/rejected delivery heal the record so
 	// AffiliateWP's auto-retry of failed payouts cannot pay the referral twice.
-	if ( 'failed' === $payout->status && ! in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) ) {
+	if ( 'failed' === $payout->status && ! chip_affiliatewp_state_is_settled( $state ) ) {
 		// Still in flight or unknown: acknowledge the delivery without changes.
 		return true;
 	}
@@ -868,7 +868,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	 * delivery keeps the note so the admin can still see why the payout was
 	 * retried in the first place.
 	 */
-	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) ) {
+	if ( chip_affiliatewp_state_is_settled( $state ) ) {
 		unset( $data['error'], $data['error_status'] );
 	}
 
@@ -887,7 +887,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	$note = trim( (string) chip_affiliatewp_array_value( $instruction, 'rejection_reason', '' ) );
 	$note = chip_affiliatewp_sanitize_note( $note );
 
-	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) || '' === $note ) {
+	if ( chip_affiliatewp_state_is_settled( $state ) || '' === $note ) {
 		unset( $data['note'] );
 	} else {
 		$data['note'] = $note;
@@ -1586,7 +1586,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	if ( is_array( $probe ) && ! empty( $probe['id'] ) ) {
 		$probe_state = strtolower( (string) ( $probe['state'] ?? '' ) );
 
-		if ( ! in_array( $probe_state, array( 'rejected', 'deleted' ), true ) ) {
+		if ( ! chip_affiliatewp_state_is_terminal( $probe_state ) ) {
 			// A live instruction already exists for this referral: adopt it.
 			chip_affiliatewp_adopt_referral_instruction( $referral, $probe, $reference, $mode );
 
@@ -1607,7 +1607,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 				break;
 			}
 
-			if ( ! in_array( strtolower( (string) ( $candidate['state'] ?? '' ) ), array( 'rejected', 'deleted' ), true ) ) {
+			if ( ! chip_affiliatewp_state_is_terminal( (string) ( $candidate['state'] ?? '' ) ) ) {
 				chip_affiliatewp_adopt_referral_instruction( $referral, $candidate, $reference, $mode );
 
 				return true;
@@ -1676,7 +1676,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
 
-			if ( in_array( $existing_state, array( 'rejected', 'deleted' ), true ) ) {
+			if ( chip_affiliatewp_state_is_terminal( $existing_state ) ) {
 				/*
 				 * The reference is burnt by a dead instruction. Remember that
 				 * so the next attempt uses a fresh one; without this the retry

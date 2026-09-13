@@ -34,6 +34,61 @@ function chip_affiliatewp_review_states() {
 }
 
 /**
+ * The CHIP Send instruction states that mean the instruction is finished and
+ * can never settle: nothing will move, and the reference it used is spent.
+ *
+ * One definition, because seven call sites in the payout module decide whether
+ * to adopt an existing instruction or move on to a fresh reference, and a list
+ * that drifts between them makes the same instruction dead in one path and live
+ * in another.
+ *
+ * @return string[] Lowercase state names.
+ */
+function chip_affiliatewp_terminal_states() {
+	/**
+	 * Filters the CHIP Send states that mean an instruction is finished.
+	 *
+	 * @param string[] $states Lowercase state names.
+	 */
+	return (array) apply_filters( 'chip_affiliatewp_terminal_states', array( 'rejected', 'deleted' ) );
+}
+
+/**
+ * Whether an instruction state is terminal.
+ *
+ * @param string $state Instruction state.
+ * @return bool
+ */
+function chip_affiliatewp_state_is_terminal( $state ) {
+	return in_array( strtolower( (string) $state ), chip_affiliatewp_terminal_states(), true );
+}
+
+/**
+ * The states that mean an instruction has finished, whatever the outcome:
+ * settled, refused, or removed.
+ *
+ * Distinct from chip_affiliatewp_terminal_states(), which is the narrower set
+ * that can never settle at all. Three call sites clear an earlier failure note
+ * on any finished instruction, and must not be collapsed into the narrower set:
+ * a completed instruction ends a failure too.
+ *
+ * @return string[]
+ */
+function chip_affiliatewp_settled_states() {
+	return array_merge( array( 'completed' ), chip_affiliatewp_terminal_states() );
+}
+
+/**
+ * Whether an instruction state has finished, whatever the outcome.
+ *
+ * @param string $state Instruction state.
+ * @return bool
+ */
+function chip_affiliatewp_state_is_settled( $state ) {
+	return in_array( strtolower( (string) $state ), chip_affiliatewp_settled_states(), true );
+}
+
+/**
  * Whether an instruction state needs a human.
  *
  * @param string $state Instruction state.

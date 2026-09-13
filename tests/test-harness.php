@@ -7033,6 +7033,62 @@ if ( ! empty( $sent ) ) {
 	check( 'the free reference was used', 'XT-R-2301-3' === ( $body['reference'] ?? '' ) );
 }
 
+echo "\n== Test 108: terminal-state lists have one definition ==\n";
+reset_state();
+
+/*
+ * Which states count as dead decides whether the next attempt adopts an
+ * existing instruction or moves to a fresh reference. Seven call sites made
+ * that decision; when each carried its own copy of the list, a state could be
+ * dead in one path and live in another. The lists are now named helpers, and
+ * this asserts the call sites use them.
+ */
+$payouts_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check(
+	'no call site carries its own terminal-state literal',
+	false === strpos( $payouts_src, "array( 'rejected', 'deleted' )" )
+);
+
+check(
+	'no call site carries its own settled-state literal',
+	false === strpos( $payouts_src, "array( 'completed', 'rejected', 'deleted' )" )
+);
+
+check(
+	'the terminal-state helper is used',
+	false !== strpos( $payouts_src, 'chip_affiliatewp_state_is_terminal(' )
+);
+
+check(
+	'the settled-state helper is used',
+	false !== strpos( $payouts_src, 'chip_affiliatewp_state_is_settled(' )
+);
+
+// The helpers themselves.
+check( 'rejected is terminal', true === chip_affiliatewp_state_is_terminal( 'rejected' ) );
+check( 'deleted is terminal', true === chip_affiliatewp_state_is_terminal( 'deleted' ) );
+check( 'reviewing is not terminal', false === chip_affiliatewp_state_is_terminal( 'reviewing' ) );
+check( 'completed is not terminal', false === chip_affiliatewp_state_is_terminal( 'completed' ) );
+
+check( 'completed is settled', true === chip_affiliatewp_state_is_settled( 'completed' ) );
+check( 'rejected is settled', true === chip_affiliatewp_state_is_settled( 'rejected' ) );
+check( 'executing is not settled', false === chip_affiliatewp_state_is_settled( 'executing' ) );
+
+// The narrower set must stay narrower: a completed instruction ends a failure,
+// so collapsing the two would change behaviour.
+check(
+	'settled is a strict superset of terminal',
+	array() === array_values( array_diff( chip_affiliatewp_terminal_states(), chip_affiliatewp_settled_states() ) )
+);
+
+check(
+	'settled adds exactly the successful ending',
+	array( 'completed' ) === array_values( array_diff( chip_affiliatewp_settled_states(), chip_affiliatewp_terminal_states() ) )
+);
+
+check( 'states are matched case-insensitively', true === chip_affiliatewp_state_is_terminal( 'REJECted' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
