@@ -6892,6 +6892,65 @@ check(
 check( 'no stale reference is stored', ! in_array( 'reference', $keys_written, true ) );
 check( 'no duplicate referral list is stored', ! in_array( 'referral_ids', $keys_written, true ) );
 
+echo "\n== Test 106: callout content is escaped at the call site ==\n";
+reset_state();
+
+/*
+ * AffiliateWP's own docblock for affwp_callout() says the content is body
+ * markup the caller escapes, and affwp_render_callout() does not escape it.
+ * Some of the strings passed here carry text from the CHIP API, so an unescaped
+ * one is an injection path into the settings screen.
+ */
+$admin_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-admin.php' );
+
+// Every 'content' => ... entry that is not a bare __() literal must be escaped.
+preg_match_all(
+	"/'content'\s*=>\s*(.+?)(?=,\s*\n\s*'|,\s*\n\s*\))/s",
+	$admin_src,
+	$matches
+);
+
+check( 'callout content entries were found', ! empty( $matches[1] ) );
+
+$unescaped = array();
+
+foreach ( $matches[1] as $value ) {
+	$value = trim( $value );
+
+	// A translatable literal is already safe markup-free text.
+	if ( preg_match( '/^__\(/', $value ) ) {
+		continue;
+	}
+
+	/*
+	 * A bare variable, or a variable choosing between __() literals. Anything
+	 * built from an expression (a method call, a concatenation) is not covered
+	 * by this and must be escaped.
+	 */
+	if ( preg_match( '/^\$[a-z_]+$/', $value ) ) {
+		continue;
+	}
+
+	if ( preg_match( '/^\$[a-z_]+\s*\?\s*(__|sprintf)\s*\(/', $value ) ) {
+		continue;
+	}
+
+	if ( ! preg_match( '/esc_html|esc_attr|wp_kses/', $value ) ) {
+		$unescaped[] = preg_replace( '/\s+/', ' ', substr( $value, 0, 70 ) );
+	}
+}
+
+check(
+	'no callout content is passed unescaped (' . count( $unescaped ) . ' found)',
+	array() === $unescaped
+);
+
+// The one that carried an API error message.
+check(
+	'the balance-unavailable callout escapes its message',
+	false !== strpos( $admin_src, "'content' => esc_html(" )
+);
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

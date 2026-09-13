@@ -865,9 +865,11 @@ function chip_affiliatewp_render_settings_panel() {
 							array(
 								'tone'    => 'warning',
 								'heading' => __( 'Balance unavailable', 'chip-for-affiliatewp' ),
-								'content' => is_wp_error( $summary )
-									? $summary->get_error_message()
-									: (string) $summary['error'],
+								'content' => esc_html(
+									is_wp_error( $summary )
+										? $summary->get_error_message()
+										: (string) $summary['error']
+								),
 							)
 						);
 						?>
