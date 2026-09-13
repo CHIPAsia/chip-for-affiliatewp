@@ -7525,6 +7525,108 @@ $posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { r
 
 check( 'exactly one instruction was sent for the good payout', 1 === count( $posts ) );
 
+echo "\n== Test 114: a mode flip cannot make a submitted payout pay twice ==\n";
+reset_state();
+
+/*
+ * A payout records the mode it was submitted in. If the site flips to the other
+ * mode and the payout is submitted again, the instruction already exists in the
+ * ORIGINAL mode's environment — but the reference would be new to the OTHER
+ * one. Two instructions for one commission is the worst outcome this plugin
+ * can produce, so the guard has to be the stored instruction, not the mode.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_live_api_key']     = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']  = 'ls';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3100 ),
+		'amount'        => '25.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3100] = new Fake_Referral( 3100, 3, '25.00', 'unpaid', $payout_id );
+
+// First submission, in test mode.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8300, 'state' => 'executing' ) );
+$GLOBALS['__http_log'] = array();
+
+$first = chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'the first submission succeeds', true === $first );
+
+$posts_first = count( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'one instruction was sent', 1 === $posts_first );
+
+$stored = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the instruction is recorded', 8300 === (int) ( $stored['instruction_id'] ?? 0 ) );
+check( 'the mode it was sent in is recorded', 'test' === (string) ( $stored['mode'] ?? '' ) );
+
+/*
+ * Flip to live and submit again. The reference is identical, but live has never
+ * seen it - so a resubmission would create a second instruction and pay the
+ * commission twice.
+ *
+ * The queue deliberately holds a reply for a submission: if the guard does not
+ * stop the resubmission, the POST goes out and this test fails. Leaving the
+ * queue empty would let the request fail as unmocked, which reads the same as
+ * not sending at all.
+ */
+$GLOBALS['__options']['chip_test_mode'] = 0;
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9999, 'state' => 'executing' ) );
+$GLOBALS['__http_log']   = array();
+
+$second = chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'the second submission reports success', true === $second );
+
+$posts_second = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'no second instruction was sent', array() === $posts_second );
+
+// And the payout still points at the instruction it was actually sent under.
+$after = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the instruction id is unchanged', 8300 === (int) ( $after['instruction_id'] ?? 0 ) );
+
+/*
+ * And the same for a delivery arriving after the flip: it must resolve the
+ * payout through the stored instruction, not create a new one for the live
+ * mode's reference.
+ */
+$before_keys = array_keys( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8300, 'state' => 'completed', 'reference' => 'XT-PO-' . $payout_id ),
+	'test'
+);
+
+$new_keys = array_values( array_diff( array_keys( $GLOBALS['__payout_rows'] ), $before_keys ) );
+
+check( 'the delivery did not create a second payout', array() === $new_keys );
+check( 'the payout completed', 'paid' === affwp_get_payout( $payout_id )->status );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
