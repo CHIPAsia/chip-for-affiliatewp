@@ -231,6 +231,16 @@ function wp_remote_request( $url, $args ) {
 		'body'    => $args['body'] ?? null,
 	);
 
+	/*
+	 * Transport-failure simulation: a test can make the next request fail the
+	 * way an unreachable CHIP does, so the error path is exercised rather than
+	 * assumed. The call is still logged above, because a failed request is
+	 * still a request that was made.
+	 */
+	if ( ! empty( $GLOBALS['__http_transport_error'] ) ) {
+		return new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' );
+	}
+
 	foreach ( $GLOBALS['__http_queue'] as $idx => $entry ) {
 		if ( false !== strpos( $url, $entry['match'] ) ) {
 			// Optional method constraint: "/webhooks" is a prefix of
@@ -6231,6 +6241,115 @@ $posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { r
 
 check( 'a resubmission adopts its own live instruction', true === $result );
 check( 'and sends nothing new', array() === $posts );
+
+echo "\n== Test 96: a POST that times out reconciles when the instruction exists ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1900 ),
+		'amount'        => '12.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1900] = new Fake_Referral( 1900, 3, '12.00', 'unpaid', $payout_id );
+
+/*
+ * The POST times out: CHIP may or may not have accepted it. The payout fails,
+ * and the attempt is NOT advanced because a timeout says nothing about whether
+ * the instruction exists.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+
+$GLOBALS['__http_log'] = array();
+
+$GLOBALS['__http_error_override'] = true;
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$GLOBALS['__http_error_override'] = false;
+
+$after_fail = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'a timed-out submission fails the payout', 'failed' === affwp_get_payout( $payout_id )->status );
+/*
+ * attempt is absent until something advances it, and reads as 1. A timeout must
+ * leave it that way: advancing would mint a fresh reference and send a second
+ * instruction for a submission CHIP may have accepted.
+ */
+check( 'the timeout did not burn the attempt', 1 === chip_affiliatewp_payout_attempt( $after_fail ) );
+
+/*
+ * CHIP did accept it after all, so the instruction exists under the same
+ * reference. The retry must adopt it rather than send a second time.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 9001,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $payout_id,
+				'amount'          => '12.00',
+				'bank_account_id' => 84,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$retry = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+$data  = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the retry adopts the instruction CHIP did accept', 9001 === (int) ( $data['instruction_id'] ?? 0 ) );
+check( 'the retry sends nothing second', array() === $posts );
+check( 'the payout returns to processing', 'processing' === affwp_get_payout( $payout_id )->status );
+
+/*
+ * And the instruction completing later pays it, so the retry truly recovers.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions/9001',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'id'              => 9001,
+		'state'           => 'completed',
+		'reference'       => 'XT-PO-' . $payout_id,
+		'amount'          => '12.00',
+		'bank_account_id' => 84,
+		'receipt_url'     => 'https://www.chip-in.asia/receipts/send/recovered',
+	),
+);
+
+chip_affiliatewp_check_payout_status( $payout_id );
+
+check( 'the recovered instruction pays the payout', 'paid' === affwp_get_payout( $payout_id )->status );
+check( 'the recovered instruction pays the referral', 'paid' === $GLOBALS['__referral_rows'][1900]->status );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
