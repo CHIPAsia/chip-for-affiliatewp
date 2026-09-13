@@ -6677,6 +6677,69 @@ check(
 	array() === array_values( array_diff( $cleared_hooks, $real_hooks ) )
 );
 
+echo "\n== Test 103: every failure code reaches a real class ==\n";
+reset_state();
+
+/*
+ * A code that falls through to 'unknown' leaves AffiliateWP without a class to
+ * drive its Retry button, its automatic retry, or the action-required email.
+ * The codes are read out of the source so a new one cannot be added without
+ * deciding what it means.
+ */
+$plugin_root = dirname( __DIR__ );
+$payouts_src = (string) file_get_contents( $plugin_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+preg_match_all( "/fail_payout\((?:[^;]*?)'(chip_[a-z0-9_]+)'/s", $payouts_src, $matches );
+
+// Codes assembled from a state name, e.g. 'chip_instruction_' . $state.
+preg_match_all( "/'(chip_instruction_)'\s*\./", $payouts_src, $dynamic );
+
+$codes = array_values( array_unique( $matches[1] ) );
+
+check( 'failure codes were found in the source', ! empty( $codes ) );
+
+/*
+ * A code ending in an underscore is the prefix of a concatenation, not a code
+ * on its own: it resolves to a CHIP instruction state at the call site. Replace
+ * it with each state it can become.
+ */
+$codes = array_values(
+	array_filter(
+		$codes,
+		function ( $code ) {
+			return '_' !== substr( $code, -1 );
+		}
+	)
+);
+
+foreach ( array( 'rejected', 'deleted', 'not_found' ) as $state ) {
+	$codes[] = 'chip_instruction_' . $state;
+}
+
+$classes = array( 'transient', 'affiliate_action_required', 'admin_action_required', 'data_error' );
+
+foreach ( $codes as $code ) {
+	// A message that carries no hint either way: the code must decide.
+	$class = chip_affiliatewp_classify_failure( $code, 'Something went wrong.', null );
+
+	check(
+		$code . ' classifies to a real class (got ' . $class . ')',
+		in_array( $class, $classes, true )
+	);
+}
+
+// The specific one that used to fall through.
+check(
+	'a payout with nothing left to pay is a data error',
+	'data_error' === chip_affiliatewp_classify_failure( 'chip_referrals_no_longer_payable', 'None of the referrals in this payout are awaiting payment any more, so nothing was sent.', null )
+);
+
+// And an unreadable API response is worth retrying, not unknown.
+check(
+	'an unreadable API response is transient',
+	'transient' === chip_affiliatewp_classify_failure( 'chip_instruction_failed', 'CHIP Send did not return a send instruction ID.', null )
+);
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

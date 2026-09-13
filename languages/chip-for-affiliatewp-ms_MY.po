@@ -58,7 +58,7 @@ msgstr ""
 msgid "Active"
 msgstr "Aktif"
 
-#: includes/class-chip-affiliatewp-failures.php:128
+#: includes/class-chip-affiliatewp-failures.php:155
 msgid ""
 "Add your CHIP Send API key and secret under Settings → Payouts → CHIP Send."
 msgstr ""
@@ -133,7 +133,7 @@ msgstr "Kedua-dua medan diperlukan"
 #: includes/class-chip-affiliatewp-admin.php:20
 #: includes/class-chip-affiliatewp-admin.php:201
 #: includes/class-chip-affiliatewp-admin.php:1156
-#: includes/class-chip-affiliatewp-failures.php:218
+#: includes/class-chip-affiliatewp-failures.php:245
 msgid "CHIP Send"
 msgstr "CHIP Send"
 
@@ -284,7 +284,7 @@ msgstr "CHIP melaporkan: %s"
 msgid "CHIP: %s"
 msgstr "CHIP: %s"
 
-#: includes/class-chip-affiliatewp-failures.php:141
+#: includes/class-chip-affiliatewp-failures.php:168
 msgid ""
 "Check the API key and secret under Settings → Payouts → CHIP Send, and "
 "confirm the key is still active in your CHIP account."
@@ -501,7 +501,7 @@ msgstr "Set semula webhook"
 msgid "Save bank details"
 msgstr "Simpan butiran bank"
 
-#: includes/class-chip-affiliatewp-failures.php:136
+#: includes/class-chip-affiliatewp-failures.php:163
 msgid ""
 "Save your credentials under Settings → Payouts → CHIP Send so the webhook "
 "can register."
@@ -665,7 +665,7 @@ msgstr ""
 "Rujukan ini dibundarkan kepada %s, di bawah jumlah terkecil yang boleh "
 "dipindahkan oleh CHIP Send."
 
-#: includes/class-chip-affiliatewp-failures.php:132
+#: includes/class-chip-affiliatewp-failures.php:159
 msgid "Turn CHIP Send back on under Settings → Payouts."
 msgstr "Hidupkan semula CHIP Send di Settings → Payouts."
 

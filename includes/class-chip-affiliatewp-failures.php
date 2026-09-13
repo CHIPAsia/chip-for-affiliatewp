@@ -75,12 +75,39 @@ function chip_affiliatewp_classify_failure( $error_code, $error_message = '', $h
 	}
 
 	/*
-	 * An amount the API cannot accept. The figures are the store's own, so this
-	 * is a data problem rather than a provider one: retrying unchanged would
-	 * fail identically.
+	 * An amount the API cannot accept, or work that is no longer there to do.
+	 * The figures and the referral states are the store's own, so these are data
+	 * problems rather than provider ones: retrying unchanged would fail
+	 * identically.
 	 */
-	if ( in_array( $code, array( 'chip_invalid_amount', 'chip_currency_unsupported', 'chip_reference_conflict' ), true ) ) {
+	if ( in_array( $code, array( 'chip_invalid_amount', 'chip_currency_unsupported', 'chip_reference_conflict', 'chip_referrals_no_longer_payable' ), true ) ) {
 		return 'data_error';
+	}
+
+	/*
+	 * Instruction states. `rejected` means the recipient's bank details were
+	 * refused, which the affiliate or the admin acting for them must fix.
+	 *
+	 * `deleted` and `not_found` mean the instruction is gone from CHIP: nothing
+	 * will ever settle it, and only the merchant can find out why. Classified
+	 * here rather than left to the message text, which happened to carry the
+	 * words for some of these and not others.
+	 */
+	if ( in_array( $code, array( 'chip_instruction_rejected' ), true ) ) {
+		return 'affiliate_action_required';
+	}
+
+	if ( in_array( $code, array( 'chip_instruction_deleted', 'chip_instruction_not_found' ), true ) ) {
+		return 'admin_action_required';
+	}
+
+	/*
+	 * A response the plugin could not make sense of, or one missing the fields
+	 * it needs. The API answered, so this is the provider's side: retrying the
+	 * same request later is reasonable.
+	 */
+	if ( in_array( $code, array( 'chip_instruction_failed', 'chip_api_invalid_response', 'chip_payout_not_created' ), true ) ) {
+		return 'transient';
 	}
 
 	/*
