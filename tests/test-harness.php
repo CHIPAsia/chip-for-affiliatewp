@@ -5645,6 +5645,23 @@ $posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { r
 
 check( 'one cent is still submitted', 1 === count( $posts ) );
 
+/*
+ * The account the instruction was created against must be recorded, or the
+ * in-use guard cannot tell an account a payout is relying on from one that is
+ * free to delete.
+ */
+$submitted_account = (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $ok ) )['bank_account_id'] ?? 0 );
+
+check( 'the destination account is recorded at submission', 501 === $submitted_account );
+check(
+	'the guard sees the in-flight account',
+	true === chip_affiliatewp_bank_account_is_in_use( 3, 501 )
+);
+check(
+	'an unrelated account is not reported in use',
+	false === chip_affiliatewp_bank_account_is_in_use( 3, 999 )
+);
+
 echo "\n== Test 91: a racing delivery does not create a second payout ==\n";
 reset_state();
 
@@ -5798,7 +5815,11 @@ $GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 700, 'status' => 'verif
 
 chip_affiliatewp_ensure_bank_account( 3 );
 
-// A payout is in flight against that account.
+/*
+ * A payout is in flight against that account. The account id lives in the
+ * payout's meta because the payouts table has no column for it - service_id is
+ * the instruction id - so setting service_id here would test the wrong thing.
+ */
 $live = affiliate_wp()->affiliates->payouts->add(
 	array(
 		'affiliate_id'  => 3,
@@ -5806,8 +5827,13 @@ $live = affiliate_wp()->affiliates->payouts->add(
 		'amount'        => '30.00',
 		'payout_method' => 'chip',
 		'status'        => 'processing',
-		'service_id'    => 700,
+		'service_id'    => 9901,
 	)
+);
+
+chip_affiliatewp_update_payout_data(
+	(int) $live,
+	array( 'instruction_id' => 9901, 'bank_account_id' => 700, 'state' => 'executing', 'mode' => 'test' )
 );
 
 check( 'the account is reported in use', true === chip_affiliatewp_bank_account_is_in_use( 3, 700 ) );

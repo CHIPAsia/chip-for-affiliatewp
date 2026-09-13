@@ -450,12 +450,13 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		return chip_affiliatewp_fail_payout( $payout_id, __( 'CHIP Send did not return a send instruction ID.', 'chip-for-affiliatewp' ), 'chip_instruction_failed' );
 	}
 
-	$data['instruction_id'] = (int) $response['id'];
-	$data['reference']      = $reference;
-	$data['attempt']        = $attempt;
-	$data['state']          = (string) chip_affiliatewp_array_value( $response, 'state', 'received' );
-	$data['receipt_url']    = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $response, 'receipt_url', '' ) );
-	$data['referral_ids']   = $referral_ids;
+	$data['instruction_id']  = (int) $response['id'];
+	$data['reference']       = $reference;
+	$data['attempt']         = $attempt;
+	$data['state']           = (string) chip_affiliatewp_array_value( $response, 'state', 'received' );
+	$data['receipt_url']     = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $response, 'receipt_url', '' ) );
+	$data['bank_account_id'] = (int) $bank_account['id'];
+	$data['referral_ids']    = $referral_ids;
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
 	$data['poll_count']     = 0;
 	$data['mode']           = $mode;
@@ -1052,10 +1053,11 @@ function chip_affiliatewp_adopt_referral_instruction( $referral, $instruction, $
 	chip_affiliatewp_update_payout_data(
 		(int) $payout_id,
 		array(
-			'instruction_id' => $instruction_id,
-			'reference'      => (string) $reference,
-			'state'          => (string) chip_affiliatewp_array_value( $instruction, 'state', 'received' ),
-			'receipt_url'    => $receipt_url,
+			'instruction_id'  => $instruction_id,
+			'reference'       => (string) $reference,
+			'state'           => (string) chip_affiliatewp_array_value( $instruction, 'state', 'received' ),
+			'receipt_url'     => $receipt_url,
+			'bank_account_id' => absint( chip_affiliatewp_array_value( $instruction, 'bank_account_id', 0 ) ),
 			'referral_ids'   => array( (int) $referral->ID ),
 			'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
 			'poll_count'     => 0,

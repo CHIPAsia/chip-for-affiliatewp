@@ -465,6 +465,10 @@ function chip_affiliatewp_delete_superseded_bank_account( $affiliate_id, $accoun
 /**
  * Whether a payout is still working against a bank account.
  *
+ * The account id is read from the payout's own meta. The payouts table has no
+ * column for it: its service_id holds the instruction id, so comparing against
+ * that would never match and the guard would always answer "not in use".
+ *
  * @param int $affiliate_id Affiliate ID.
  * @param int $account_id   CHIP bank account ID.
  * @return bool
@@ -486,7 +490,9 @@ function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
 	);
 
 	foreach ( (array) $payouts as $payout ) {
-		if ( $account_id === (int) $payout->service_id ) {
+		$data = chip_affiliatewp_payout_data( $payout );
+
+		if ( $account_id === (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) ) {
 			return true;
 		}
 	}
