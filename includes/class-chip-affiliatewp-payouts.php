@@ -451,12 +451,10 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	}
 
 	$data['instruction_id']  = (int) $response['id'];
-	$data['reference']       = $reference;
 	$data['attempt']         = $attempt;
 	$data['state']           = (string) chip_affiliatewp_array_value( $response, 'state', 'received' );
 	$data['receipt_url']     = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $response, 'receipt_url', '' ) );
 	$data['bank_account_id'] = (int) $bank_account['id'];
-	$data['referral_ids']    = $referral_ids;
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
 	$data['poll_count']     = 0;
 	$data['mode']           = $mode;
@@ -585,7 +583,6 @@ function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction, 
 	$data = chip_affiliatewp_payout_data( $payout );
 
 	$data['instruction_id'] = (int) $instruction['id'];
-	$data['reference']      = (string) $reference;
 	$data['receipt_url']    = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $instruction, 'receipt_url', '' ) );
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
 
@@ -909,10 +906,6 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 
 	if ( ! empty( $instruction['id'] ) ) {
 		$data['instruction_id'] = (int) $instruction['id'];
-	}
-
-	if ( ! empty( $instruction['reference'] ) ) {
-		$data['reference'] = (string) $instruction['reference'];
 	}
 
 	$receipt_url = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $instruction, 'receipt_url', '' ) );

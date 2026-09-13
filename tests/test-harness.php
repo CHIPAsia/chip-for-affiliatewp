@@ -6841,6 +6841,57 @@ $sent = json_decode( (string) $post[0]['body'], true );
 check( 'the sent name is not empty', ! empty( $sent['name'] ) );
 check( 'the sent name is a string', is_string( $sent['name'] ) );
 
+echo "\n== Test 105: no payout meta key is written without a reader ==\n";
+reset_state();
+
+/*
+ * Dead state is not harmless. A key that is written and never read bloats every
+ * payout row, and - worse - can hold a stale copy of something the code derives
+ * elsewhere: a stored reference that no longer matches the one being used reads
+ * as the truth to whoever finds it later.
+ *
+ * Every module is swept, because a key written in one file may be read in
+ * another (the attempt number and the account id both are).
+ */
+$chip_plugin_root = dirname( __DIR__ );
+$module_src       = '';
+
+foreach ( glob( $chip_plugin_root . '/includes/*.php' ) as $module_file ) {
+	$module_src .= (string) file_get_contents( $module_file );
+}
+
+// Written: assignment into $data, or an unset() that clears it.
+preg_match_all( '/\$data\[\s*\'([a-z_0-9]+)\'\s*\]\s*=/', $module_src, $written );
+preg_match_all( '/unset\(\s*\$data\[\s*\'([a-z_0-9]+)\'\s*\]/', $module_src, $unset );
+
+// Read: indexed access (not an assignment), or the array helper.
+preg_match_all( '/\$data\[\s*\'([a-z_0-9]+)\'\s*\](?!\s*=)/', $module_src, $read_direct );
+preg_match_all( '/chip_affiliatewp_array_value\(\s*\$data\s*,\s*\'([a-z_0-9]+)\'/', $module_src, $read_helper );
+
+$keys_written = array_values( array_unique( array_merge( $written[1], $unset[1] ) ) );
+$keys_read    = array_values( array_unique( array_merge( $read_direct[1], $read_helper[1] ) ) );
+
+check( 'meta keys were found in the source', ! empty( $keys_written ) );
+
+$orphans = array_values(
+	array_filter(
+		$keys_written,
+		function ( $key ) use ( $keys_read ) {
+			return ! in_array( $key, $keys_read, true );
+		}
+	)
+);
+
+check(
+	'every written key has a reader (orphans: ' . implode( ', ', $orphans ) . ')',
+	array() === $orphans
+);
+
+// The two that were dead: a reference the code recomputes, and a duplicate of
+// the payout's own referrals column.
+check( 'no stale reference is stored', ! in_array( 'reference', $keys_written, true ) );
+check( 'no duplicate referral list is stored', ! in_array( 'referral_ids', $keys_written, true ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
