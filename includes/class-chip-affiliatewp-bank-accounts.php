@@ -492,7 +492,7 @@ function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
 	foreach ( (array) $payouts as $payout ) {
 		$data = chip_affiliatewp_payout_data( $payout );
 
-		if ( $account_id === (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) ) {
+		if ( (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) === $account_id ) {
 			return true;
 		}
 	}

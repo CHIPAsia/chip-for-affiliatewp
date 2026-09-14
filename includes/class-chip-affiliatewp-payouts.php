@@ -295,7 +295,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 				);
 			}
 
-			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $reference );
+			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing );
 
 			return true;
 		}
@@ -443,7 +443,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 				);
 			}
 
-			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $reference );
+			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing );
 
 			return true;
 		}
@@ -465,9 +465,9 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	$data['state']           = (string) chip_affiliatewp_array_value( $response, 'state', 'received' );
 	$data['receipt_url']     = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $response, 'receipt_url', '' ) );
 	$data['bank_account_id'] = (int) $bank_account['id'];
-	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
-	$data['poll_count']     = 0;
-	$data['mode']           = $mode;
+	$data['last_checked']    = gmdate( 'Y-m-d H:i:s' );
+	$data['poll_count']      = 0;
+	$data['mode']            = $mode;
 
 	// The instruction was accepted, so any earlier failure no longer applies.
 	unset( $data['error'], $data['error_status'] );
@@ -586,10 +586,9 @@ function chip_affiliatewp_instruction_belongs_to_payout( $payout, $instruction )
  * @param int    $payout_id Payout ID.
  * @param object $payout    Payout row.
  * @param array  $instruction Instruction payload from CHIP.
- * @param string $reference Reference the instruction was found under.
  * @return void
  */
-function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction, $reference ) {
+function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction ) {
 	$data = chip_affiliatewp_payout_data( $payout );
 
 	$data['instruction_id'] = (int) $instruction['id'];
@@ -1078,10 +1077,10 @@ function chip_affiliatewp_adopt_referral_instruction( $referral, $instruction, $
 			'state'           => (string) chip_affiliatewp_array_value( $instruction, 'state', 'received' ),
 			'receipt_url'     => $receipt_url,
 			'bank_account_id' => absint( chip_affiliatewp_array_value( $instruction, 'bank_account_id', 0 ) ),
-			'referral_ids'   => array( (int) $referral->ID ),
-			'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
-			'poll_count'     => 0,
-			'mode'           => $mode,
+			'referral_ids'    => array( (int) $referral->ID ),
+			'last_checked'    => gmdate( 'Y-m-d H:i:s' ),
+			'poll_count'      => 0,
+			'mode'            => $mode,
 		)
 	);
 
