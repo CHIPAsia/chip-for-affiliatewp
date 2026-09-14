@@ -1171,6 +1171,37 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 			: 0;
 
 		/*
+		 * The credentials this payout needs are gone.
+		 *
+		 * A payout remembers the mode it was submitted in, so one submitted in
+		 * test mode and left in flight while the merchant goes live - clearing
+		 * the test keys, which is what the setup instructions tell them to do -
+		 * requeries against credentials that no longer exist. The request never
+		 * leaves the site, so there is no status to classify and no answer to
+		 * act on.
+		 *
+		 * Failing the payout would be wrong: the state is recoverable, and
+		 * restoring the keys lets it settle. Rescheduling would be wrong too:
+		 * every check burns a sweep slot on an error that cannot change.
+		 *
+		 * So record why, name the mode so the merchant knows which set to
+		 * restore, and leave the payout alone - the hourly sweep will find it
+		 * again once the credentials are back.
+		 */
+		if ( 'chip_missing_credentials' === $response->get_error_code() ) {
+			$data['error'] = sprintf(
+				/* translators: %s: "test" or "live". */
+				__( 'This payout was submitted in %s mode, but this site no longer has CHIP Send API credentials for that mode. Restore them and the payout will settle on its next check.', 'chip-for-affiliatewp' ),
+				'live' === $stored_mode ? __( 'live', 'chip-for-affiliatewp' ) : __( 'test', 'chip-for-affiliatewp' )
+			);
+			$data['last_checked'] = gmdate( 'Y-m-d H:i:s' );
+
+			chip_affiliatewp_update_payout_data( $payout_id, $data );
+
+			return;
+		}
+
+		/*
 		 * A 404 means the instruction does not exist at CHIP, and it will not
 		 * appear later — the record is gone. Treating it as a transient outage
 		 * leaves the payout requerying a dead id forever: the capped Action

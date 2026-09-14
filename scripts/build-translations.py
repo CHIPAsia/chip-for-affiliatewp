@@ -41,6 +41,9 @@ TRANSLATIONS = {
     # --- bank / affiliate labels ---
     'Bank Code': 'Kod Bank',
     'Link to the affiliate payout settings page': 'Pautan ke halaman tetapan pembayaran afiliasi',
+    'This payout was submitted in %s mode, but this site no longer has CHIP Send API credentials for that mode. Restore them and the payout will settle on its next check.': 'Pembayaran ini dihantar dalam mod %s, tetapi laman ini tidak lagi mempunyai kredensial API CHIP Send untuk mod itu. Pulihkannya dan pembayaran akan diselesaikan pada semakan seterusnya.',
+    'test': 'ujian',
+    'live': 'langsung',
     'Bank Account Number': 'Nombor Akaun Bank',
     'Send Receipt to Affiliate': 'Hantar Resit ke Afiliasi',
     '— Select bank —': '— Pilih bank —',

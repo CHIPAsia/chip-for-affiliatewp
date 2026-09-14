@@ -9859,6 +9859,98 @@ check(
 
 check( 'and it was the test environment', array( 'test' ) === $hosts );
 
+echo "\n== Test 134: a payout whose mode has no credentials is not polled forever ==\n";
+reset_state();
+
+/*
+ * A payout remembers the mode it was submitted in. If the merchant then goes
+ * live and clears the test keys - which is what the setup instructions tell them
+ * to do - a test-mode payout requeries against credentials that no longer exist.
+ *
+ * `chip_affiliatewp_request()` returns `chip_missing_credentials` with no HTTP
+ * status, so the requery does not classify it as "instruction gone". The payout
+ * stays processing, is rescheduled, and burns a sweep slot on every run, while
+ * the reason never reaches the merchant: it just never settles.
+ *
+ * The state is recoverable - restoring the keys lets it settle - so the payout
+ * must not be failed either. It must be recognised as unable to progress now,
+ * and left for when the credentials return.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+$cred_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 4000 ),
+		'amount'        => '55.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][4000] = new Fake_Referral( 4000, 3, '55.00', 'unpaid', $cred_payout );
+
+chip_affiliatewp_update_payout_data(
+	$cred_payout,
+	array(
+		'instruction_id' => 9100,
+		'mode'           => 'test',
+		'state'          => 'executing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s', time() - 3600 ),
+	)
+);
+
+// The test credentials are gone; only live ones remain.
+$GLOBALS['__options']['chip_test_api_key']     = '';
+$GLOBALS['__options']['chip_test_secret_key']  = '';
+$GLOBALS['__options']['chip_live_api_key']     = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']  = 'ls';
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+$GLOBALS['__as']         = array();
+
+chip_affiliatewp_check_payout_status( $cred_payout, false );
+
+check( 'no request was attempted without credentials', array() === $GLOBALS['__http_log'] );
+
+// The payout must not be failed: restoring the keys lets it settle.
+check( 'the payout is not failed', 'processing' === affwp_get_payout( $cred_payout )->status );
+check( 'the referral is not released', 'unpaid' === $GLOBALS['__referral_rows'][4000]->status );
+
+/*
+ * And it must say why, so the merchant can act. The reason names the mode,
+ * because "credentials missing" alone does not tell them which set to restore.
+ */
+$stored = chip_affiliatewp_payout_data( affwp_get_payout( $cred_payout ) );
+$reason = (string) ( $stored['error'] ?? '' );
+
+check( 'the payout records a reason', '' !== $reason );
+check( 'the reason names the mode', false !== stripos( $reason, 'test' ) );
+check( 'the reason mentions credentials', false !== stripos( $reason, 'credential' ) );
+
+// It must not be rescheduled to hammer the API either.
+check( 'the check did not reschedule itself', array() === array_filter( $GLOBALS['__as'], function ( $e ) { return 'chip_affiliatewp_check_payout_status' === ( $e[1] ?? '' ); } ) );
+
+/*
+ * Restoring the credentials lets the same payout settle: the state is deferred,
+ * not terminal.
+ */
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 9100, 'state' => 'completed', 'reference' => 'XT-PO-' . $cred_payout ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_check_payout_status( $cred_payout, false );
+
+check( 'with credentials restored it settles', 'paid' === affwp_get_payout( $cred_payout )->status );
+check( 'and the referral is paid', 'paid' === $GLOBALS['__referral_rows'][4000]->status );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
