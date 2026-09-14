@@ -9463,9 +9463,32 @@ check( 'the README links the latest release asset', false !== strpos( $readme_md
 // That link only resolves if the release carries an asset under a stable name.
 check( 'the release asset name is version-less', false !== strpos( $readme_md, '/releases/latest/download/chip-for-affiliatewp.zip' ) );
 
+/*
+ * The build produces exactly one zip, under the version-less name the README's
+ * link depends on. A second versioned asset is not shipped: two identical files
+ * on the release page make the merchant choose, and the version they want is
+ * already named by the release tag.
+ */
 $build = (string) file_get_contents( $chip_root . '/scripts/build-dist.sh' );
 
-check( 'the build produces a version-less copy', false !== strpos( $build, 'dist/chip-for-affiliatewp.zip' ) );
+check( 'the build writes the version-less zip', false !== strpos( $build, 'dist/chip-for-affiliatewp.zip' ) );
+
+check(
+	'the build does not also write a versioned zip',
+	false === strpos( $build, 'dist/chip-for-affiliatewp.$VERSION.zip' )
+);
+
+// The build must still name the top-level directory, or WordPress installs
+// nothing.
+check( 'the build wraps the plugin in its own directory', false !== strpos( $build, '$STAGE/chip-for-affiliatewp' ) );
+
+// And it must not ship the development tree.
+foreach ( array( 'vendor', 'tests', '.github', 'node_modules' ) as $dev_only ) {
+	check(
+		'the build does not ship ' . $dev_only,
+		false === strpos( $build, 'cp -r ' . $dev_only )
+	);
+}
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

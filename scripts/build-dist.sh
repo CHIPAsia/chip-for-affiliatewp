@@ -5,14 +5,18 @@
 # whose entries sit at the root, the upgrader copies them straight into
 # wp-content/plugins/ and the plugin cannot be activated.
 #
+# The file name carries no version, so the README's download link
+# (/releases/latest/download/chip-for-affiliatewp.zip) always resolves to the
+# newest release without naming one. The released version is in the plugin
+# header inside the zip, and the release tag names it.
+#
 # Excludes development-only files. Usage:
-#   bash scripts/build-dist.sh           # -> dist/chip-for-affiliatewp.<ver>.zip
+#   bash scripts/build-dist.sh           # -> dist/chip-for-affiliatewp.zip
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION=$(grep -oP "Version: \K[0-9.]+" chip-for-affiliatewp.php | head -1)
 mkdir -p dist
-rm -f "dist/chip-for-affiliatewp.$VERSION.zip" "dist/chip-for-affiliatewp.zip"
+rm -f dist/chip-for-affiliatewp.zip
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
@@ -24,13 +28,7 @@ cp -r includes languages assets "$STAGE/chip-for-affiliatewp/"
 
 find "$STAGE" -name '.DS_Store' -delete
 
-( cd "$STAGE" && zip -rq "$OLDPWD/dist/chip-for-affiliatewp.$VERSION.zip" chip-for-affiliatewp )
+( cd "$STAGE" && zip -rq "$OLDPWD/dist/chip-for-affiliatewp.zip" chip-for-affiliatewp )
 
-# A copy under a version-less name, so
-# /releases/latest/download/chip-for-affiliatewp.zip always resolves to the
-# newest release without the README having to name a version.
-cp "dist/chip-for-affiliatewp.$VERSION.zip" "dist/chip-for-affiliatewp.zip"
-
-echo "dist/chip-for-affiliatewp.$VERSION.zip"
 echo "dist/chip-for-affiliatewp.zip"
-unzip -l "dist/chip-for-affiliatewp.zip" | tail -3
+unzip -l dist/chip-for-affiliatewp.zip | tail -3
