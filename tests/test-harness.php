@@ -1364,7 +1364,14 @@ class Fake_WPDO {
 
 		return '1';
 	}
-	public function query( $q ) { return true; }
+	public function query( $q ) {
+		// Record RELEASE_LOCK so a test can assert the lock was handed back.
+		if ( false !== strpos( (string) $q, 'RELEASE_LOCK' ) ) {
+			$GLOBALS['__lock_released'][] = (string) $q;
+		}
+
+		return true;
+	}
 }
 $GLOBALS['wpdb'] = new Fake_WPDO();
 
@@ -2544,6 +2551,8 @@ $GLOBALS['__referral_rows'][97] = new Fake_Referral( 97, 3, '2.00', 'unpaid', $o
 $GLOBALS['__http_queue'] = array();
 // The submit path checks whether the reference already exists first.
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 601, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $ok_id );
 check( 'successful payout description stays JSON-free', null === json_decode( (string) affwp_get_payout( $ok_id )->description, true ) );
@@ -8864,6 +8873,179 @@ check(
 		"'receipt_url'] = (string) chip_affiliatewp_array_value( \$instruction, 'receipt_url' )"
 	)
 );
+
+echo "\n== Test 126: the submission lock serialises concurrent workers ==\n";
+reset_state();
+
+/*
+ * The instruction_id guard before submission is a read-then-write: two workers
+ * handling the same payout at once - a duplicate scheduled action, or a requery
+ * racing a webhook - could both read it empty and both send money. The advisory
+ * lock closes that window, and it is the only thing that does.
+ *
+ * The lock had no test: the existing one covers the webhook's lock, which is a
+ * different name and a different code path.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+
+$GLOBALS['wpdb'] = new Fake_WPDO();
+
+$lock_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3600 ),
+		'amount'        => '25.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3600] = new Fake_Referral( 3600, 3, '25.00', 'unpaid', $lock_payout );
+
+// A second worker holds the lock for this payout.
+$GLOBALS['__lock_held'] = 'chip_affiliatewp_submit_' . absint( $lock_payout );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+$blocked = chip_affiliatewp_submit_payout( $lock_payout );
+
+check( 'a blocked submission reports success, not failure', true === $blocked );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), 'send_instructions' );
+		}
+	)
+);
+
+check( 'a blocked submission sends nothing', array() === $posts );
+check( 'a blocked submission records no instruction', empty( chip_affiliatewp_payout_data( affwp_get_payout( $lock_payout ) )['instruction_id'] ) );
+
+/*
+ * Returning true without sending is deliberate: the other worker owns the
+ * submission, so this one must not report a failure for doing nothing.
+ */
+
+// With the lock free, the submission proceeds and sends. The bank-account
+// lookup runs first, then creation, then the instruction.
+$GLOBALS['__lock_held']  = null;
+$GLOBALS['__http_log']   = array();
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 601, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
+
+$sent = chip_affiliatewp_submit_payout( $lock_payout );
+
+check( 'an unblocked submission succeeds', true === $sent );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), 'send_instructions' );
+		}
+	)
+);
+
+check( 'an unblocked submission sends exactly one instruction', 1 === count( $posts ) );
+check( 'the instruction id is recorded', 9700 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $lock_payout ) )['instruction_id'] ?? 0 ) );
+
+/*
+ * Now that an instruction exists, a second worker must return early even with
+ * the lock free - the instruction_id guard, which the lock protects.
+ */
+$GLOBALS['__http_log'] = array();
+
+$again = chip_affiliatewp_submit_payout( $lock_payout );
+
+check( 'a submitted payout is not resubmitted', true === $again );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), 'send_instructions' );
+		}
+	)
+);
+
+check( 'no second instruction is sent', array() === $posts );
+
+/*
+ * The lock must be released even when the submission fails, or a transient
+ * error would block that payout's submissions forever.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['wpdb'] = new Fake_WPDO();
+
+$fail_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3601 ),
+		'amount'        => '25.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3601] = new Fake_Referral( 3601, 3, '25.00', 'unpaid', $fail_payout );
+
+// The submission fails: CHIP answers 500.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 603, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 500, 'body' => array( 'error' => 'boom' ) );
+$GLOBALS['__http_log'] = array();
+$GLOBALS['__lock_released'] = array();
+
+$result = chip_affiliatewp_submit_payout( $fail_payout );
+
+check( 'a failing submission is reported', is_wp_error( $result ) );
+
+// The lock must have been released on the way out.
+check(
+	'the lock is released after a failure',
+	false !== strpos( implode( '|', $GLOBALS['__lock_released'] ?? array() ), 'RELEASE_LOCK' )
+);
+
+// And a later attempt is free to try again rather than finding the lock held.
+$GLOBALS['__lock_held']  = null;
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 602, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9701, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+$retry = chip_affiliatewp_submit_payout( $fail_payout );
+
+check( 'a retry after a failure proceeds', true === $retry );
+check( 'the retry recorded its instruction', 9701 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $fail_payout ) )['instruction_id'] ?? 0 ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
