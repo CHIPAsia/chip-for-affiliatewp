@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 VERSION=$(grep -oP "Version: \K[0-9.]+" chip-for-affiliatewp.php | head -1)
 mkdir -p dist
-rm -f "dist/chip-for-affiliatewp.$VERSION.zip"
+rm -f "dist/chip-for-affiliatewp.$VERSION.zip" "dist/chip-for-affiliatewp.zip"
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
@@ -26,5 +26,11 @@ find "$STAGE" -name '.DS_Store' -delete
 
 ( cd "$STAGE" && zip -rq "$OLDPWD/dist/chip-for-affiliatewp.$VERSION.zip" chip-for-affiliatewp )
 
+# A copy under a version-less name, so
+# /releases/latest/download/chip-for-affiliatewp.zip always resolves to the
+# newest release without the README having to name a version.
+cp "dist/chip-for-affiliatewp.$VERSION.zip" "dist/chip-for-affiliatewp.zip"
+
 echo "dist/chip-for-affiliatewp.$VERSION.zip"
-unzip -l "dist/chip-for-affiliatewp.$VERSION.zip" | tail -3
+echo "dist/chip-for-affiliatewp.zip"
+unzip -l "dist/chip-for-affiliatewp.zip" | tail -3

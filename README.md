@@ -20,7 +20,7 @@ Pay your affiliates' commissions as [CHIP Send](https://docs.chip-in.asia/chip-s
 
 ## Installation
 
-* [Download zip](https://github.com/CHIPAsia/chip-for-affiliatewp/archive/main.zip).
+* [Download the latest release](https://github.com/CHIPAsia/chip-for-affiliatewp/releases/latest/download/chip-for-affiliatewp.zip). The zip is ready to install — it contains the plugin and nothing else.
 * Log in to your WordPress admin panel and go: **Plugins** → **Add New**
 * Select **Upload Plugin**, choose the zip file you downloaded in step 1 and press **Install Now**
 * Activate plugin (AffiliateWP must be active)

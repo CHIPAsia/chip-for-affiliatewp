@@ -9360,6 +9360,113 @@ $url = chip_affiliatewp_email_tag_payout_settings_url( 3 );
 check( 'the resolver returns the settings URL', false !== strpos( $url, 'tab=settings' ) );
 check( 'the resolver returns no braces', false === strpos( $url, '{' ) );
 
+echo "\n== Test 130: release metadata agrees with the plugin version ==\n";
+reset_state();
+
+/*
+ * Five places carry the version, and a release is only correct when they agree:
+ *
+ *   chip-for-affiliatewp.php   header + constant (the plugin's own version)
+ *   readme.txt                 Stable tag
+ *   readme.txt changelog       the latest release only
+ *   changelog.txt              every release, newest first
+ *   README.md                  the download link
+ *
+ * They drifted before: readme.txt's changelog still described 1.0.0 while the
+ * audit work was unreleased, and the README's download link pointed at a
+ * source archive containing vendor/ and tests/ rather than the installable zip.
+ */
+$chip_root = dirname( __DIR__ );
+
+$plugin_src = (string) file_get_contents( $chip_root . '/chip-for-affiliatewp.php' );
+
+preg_match( '/^ \* Version:\s*([0-9.]+)/m', $plugin_src, $header_match );
+preg_match( "/define\( 'CHIP_AFFILIATEWP_VERSION', '([0-9.]+)' \)/", $plugin_src, $const_match );
+
+$header_version = $header_match[1] ?? '';
+$const_version  = $const_match[1] ?? '';
+
+check( 'the header declares a version', '' !== $header_version );
+check( 'the constant matches the header', $header_version === $const_version );
+
+$readme = (string) file_get_contents( $chip_root . '/readme.txt' );
+
+preg_match( '/^Stable tag:\s*([0-9.]+)/m', $readme, $stable_match );
+$stable = $stable_match[1] ?? '';
+
+check( 'readme.txt declares a stable tag', '' !== $stable );
+check( 'the stable tag matches the plugin version', $header_version === $stable );
+
+/*
+ * readme.txt carries only the latest release. Older entries belong in
+ * changelog.txt - the convention this repository follows.
+ */
+$readme_changelog = '';
+
+if ( preg_match( '/== Changelog ==(.*?)(?:== Upgrade Notice ==|$)/s', $readme, $cm ) ) {
+	$readme_changelog = $cm[1];
+}
+
+preg_match_all( '/^= ([0-9.]+) =/m', $readme_changelog, $readme_versions );
+
+check( 'readme.txt has one changelog entry', 1 === count( $readme_versions[1] ?? array() ) );
+check( 'and it is the current version', ( $readme_versions[1][0] ?? '' ) === $header_version );
+
+// The upgrade notice describes the same release.
+$notice = '';
+
+if ( preg_match( '/== Upgrade Notice ==(.*)$/s', $readme, $nm ) ) {
+	$notice = $nm[1];
+}
+
+preg_match_all( '/^= ([0-9.]+) =/m', $notice, $notice_versions );
+
+check( 'readme.txt has one upgrade notice', 1 === count( $notice_versions[1] ?? array() ) );
+check( 'and it is the current version', ( $notice_versions[1][0] ?? '' ) === $header_version );
+
+/*
+ * changelog.txt keeps every release, newest first, and must contain the
+ * current one.
+ */
+$changelog = (string) file_get_contents( $chip_root . '/changelog.txt' );
+
+preg_match_all( '/^= ([0-9.]+)(?: - [0-9-]+)? =/m', $changelog, $log_versions );
+
+check( 'changelog.txt has entries', ! empty( $log_versions[1] ) );
+check( 'changelog.txt includes the current version', in_array( $header_version, $log_versions[1] ?? array(), true ) );
+
+// Newest first: the first entry must not be older than the second.
+$logged = $log_versions[1] ?? array();
+
+if ( count( $logged ) >= 2 ) {
+	check( 'changelog.txt is newest first', version_compare( $logged[0], $logged[1], '>=' ) );
+} else {
+	check( 'changelog.txt is newest first', true );
+}
+
+check( 'changelog.txt is newer than readme.txt\'s convention allows', count( $logged ) > 1 );
+
+// Every changelog entry must name the current version's changes before older
+// ones: the current version sits at the top.
+check( 'the current version is the first entry in changelog.txt', ( $logged[0] ?? '' ) === $header_version );
+
+/*
+ * The README's download link must point at the release asset, not a source
+ * archive: main.zip carries vendor/, tests/ and CI config, which WordPress
+ * copies into wp-content/plugins/.
+ */
+$readme_md = (string) file_get_contents( $chip_root . '/README.md' );
+
+check( 'the README does not link the source archive', false === strpos( $readme_md, '/archive/main.zip' ) );
+check( 'the README links the latest release asset', false !== strpos( $readme_md, '/releases/latest/download/' ) );
+
+// That link only resolves if the release carries an asset under a stable name.
+check( 'the release asset name is version-less', false !== strpos( $readme_md, '/releases/latest/download/chip-for-affiliatewp.zip' ) );
+
+$build = (string) file_get_contents( $chip_root . '/scripts/build-dist.sh' );
+
+check( 'the build produces a version-less copy', false !== strpos( $build, 'dist/chip-for-affiliatewp.zip' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

@@ -4,7 +4,7 @@ Tags: affiliatewp, affiliates, payouts, chip send, malaysia
 Requires at least: 7.1
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -60,19 +60,19 @@ In the CHIP portal under Control → Settings → Applications. The secret key i
 
 == Changelog ==
 
-= 1.0.0 =
-* Initial release: complete CHIP Send payout integration.
-* Signed API client (epoch + HMAC-SHA512 checksum) with test/live environment switching.
-* Payout method ("chip") available to affiliates; participates in AffiliateWP payout batches and single-referral payments.
-* Automatic CHIP Send webhook registration with public-key capture; inbound deliveries signature-verified; duplicate and out-of-order deliveries ignored.
-* Missed-webhook healing via scheduled status checks and an hourly requery sweep.
-* Idempotent payouts: deterministic unique references, existing-instruction reuse, and safe failure handling that releases referrals back to unpaid.
-* Affiliate bank details (bank code + account number) on the Edit Affiliate screen with Malaysian bank codes.
-* Balance card in the settings panel showing the allocated Send balance and what is available to convert, with a one-click budget conversion request.
-* Reset webhook button to clear this site's webhook and register it again, without touching other webhooks in the merchant's CHIP account.
-* Optional recipient receipts on payouts.
+= 1.1.0 =
+* Fixed: a failed payout left its referrals unpaid but still attached to it, so the single-pay action refused them and the commission could never be paid again. Failed payouts now detach their referrals.
+* Fixed: the affiliate "action required" email showed a raw `{affiliate_payout_settings_url}` placeholder instead of a link on sites without the Stripe integration. The plugin now provides the tag itself.
+* Fixed: the Malay translation never reached the site — the build wrote only the .po file, so the compiled .mo WordPress reads was stale, and plural strings were not extracted at all.
+* Fixed: a referral reassigned to another affiliate before submission was still paid from the original payout.
+* Fixed: the webhook recovery path could create a payout without checking that the store currency is MYR.
+* Fixed: a referral whose references CHIP had all refused retried forever; it is now refused with a clear reason.
+* Fixed: uninstall left the burnt-reference meta behind, which suppressed a fresh reference on a later reinstall.
+* Fixed: the CHIP note on an instruction was stored unbounded and reached the payout list and notification email; it is now capped.
+* Fixed: several smaller issues — an unescaped API error rendered on the settings screen, a superseded bank account left registered at CHIP, an account summary cache written and dropped under different key spellings, and an instruction CHIP no longer holds polling forever.
+* Also: the coding-standards check in CI had failed since 1.0.0 (a Composer plugin was blocked). It now installs from composer.json and runs the same command as a local checkout.
 
 == Upgrade Notice ==
 
-= 1.0.0 =
-Full CHIP Send payout support with webhooks and automatic retries. Test mode credentials are configured separately from live credentials — check your settings after upgrading.
+= 1.1.0 =
+Fixes a payout that could become impossible to pay again after a failure, a broken link in the affiliate failure email, and a Malay translation that never reached the site. Recommended for all installs.

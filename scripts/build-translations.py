@@ -285,7 +285,7 @@ def main():
     import polib
     pot = polib.POFile()
     pot.metadata = {
-        'Project-Id-Version': 'CHIP for AffiliateWP 1.0.0',
+        'Project-Id-Version': 'CHIP for AffiliateWP 1.1.0',
         'Report-Msgid-Bugs-To': 'https://github.com/CHIPAsia/chip-for-affiliatewp/issues',
         'POT-Creation-Date': '2026-09-01 08:30+0800',
         'MIME-Version': '1.0',
