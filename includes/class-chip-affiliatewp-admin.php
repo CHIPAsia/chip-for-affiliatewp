@@ -75,7 +75,23 @@ function chip_affiliatewp_payout_method_is_affiliate_ready( $ready, $method, $af
 
 	$details = chip_affiliatewp_get_bank_details( $affiliate_id );
 
-	return '' !== $details['account_number'] && '' !== $details['bank_code'];
+	if ( '' === $details['account_number'] || '' === $details['bank_code'] ) {
+		return false;
+	}
+
+	/*
+	 * Present is not the same as usable. The core fields can be filled in from
+	 * the affiliate edit screen, an import, or an earlier version of this
+	 * plugin, none of which pass through the affiliate-area validation. A
+	 * payout built for details CHIP will refuse fails after the batch has
+	 * already been created, and the affiliate is left waiting on a manual
+	 * retry — so the same checks the form applies are applied here.
+	 */
+	if ( is_wp_error( chip_affiliatewp_validate_bank_code( (string) $details['bank_code'] ) ) ) {
+		return false;
+	}
+
+	return ! is_wp_error( chip_affiliatewp_validate_account_number( (string) $details['account_number'] ) );
 }
 add_filter( 'affwp_payout_method_is_affiliate_ready', 'chip_affiliatewp_payout_method_is_affiliate_ready', 10, 4 );
 
@@ -747,6 +763,9 @@ function chip_affiliatewp_render_settings_panel() {
 							<p class="mt-2 text-sm text-gray-600">
 							<?php esc_html_e( 'Two characters used to prefix CHIP Send references.', 'chip-for-affiliatewp' ); ?>
 							</p>
+							<p class="mt-2 text-sm text-gray-600">
+							<?php esc_html_e( 'Make this different on every site that uses the same CHIP account. References are what stop a payout being sent twice, and two sites with the same prefix can collide, so the second site would have its payout refused rather than paid.', 'chip-for-affiliatewp' ); ?>
+							</p>
 						</div>
 					</div>
 				</div>
@@ -846,9 +865,11 @@ function chip_affiliatewp_render_settings_panel() {
 							array(
 								'tone'    => 'warning',
 								'heading' => __( 'Balance unavailable', 'chip-for-affiliatewp' ),
-								'content' => is_wp_error( $summary )
-									? $summary->get_error_message()
-									: (string) $summary['error'],
+								'content' => esc_html(
+									is_wp_error( $summary )
+										? $summary->get_error_message()
+										: (string) $summary['error']
+								),
 							)
 						);
 						?>

@@ -187,8 +187,21 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		return true;
 	}
 
-	if ( (float) $payout->amount <= 0 ) {
-		return chip_affiliatewp_fail_payout( $payout_id, __( 'Payout amount must be greater than zero.', 'chip-for-affiliatewp' ), 'chip_invalid_amount' );
+	/*
+	 * Checked after formatting, because that is the figure CHIP is sent: a
+	 * payout of 0.001 formats to "0.00", which CHIP refuses. Catching it here
+	 * turns a rejected submission into a clear, actionable failure.
+	 */
+	if ( (float) chip_affiliatewp_format_amount( $payout->amount ) <= 0 ) {
+		return chip_affiliatewp_fail_payout(
+			$payout_id,
+			sprintf(
+				/* translators: %s: the payout amount. */
+				__( 'This payout rounds to %s, below the smallest amount CHIP Send can transfer.', 'chip-for-affiliatewp' ),
+				chip_affiliatewp_format_amount( $payout->amount )
+			),
+			'chip_invalid_amount'
+		);
 	}
 
 	/*
@@ -265,12 +278,24 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 		$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
 
-		if ( ! in_array( $existing_state, array( 'rejected', 'deleted' ), true ) ) {
+		if ( ! chip_affiliatewp_state_is_terminal( $existing_state ) ) {
 			/*
 			 * Live instruction for this attempt: adopt it rather than sending
 			 * again. The instruction may have completed while we were unaware.
+			 *
+			 * Only if it is this payout's own. A reference is unique per CHIP
+			 * account rather than per site, so another installation sharing the
+			 * credentials can hold the same reference for a different payment.
 			 */
-			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $reference );
+			if ( ! chip_affiliatewp_instruction_belongs_to_payout( $payout, $existing ) ) {
+				return chip_affiliatewp_fail_payout(
+					$payout_id,
+					__( 'A different payment already uses this reference at CHIP, so this payout cannot be sent under it. Each site sharing a CHIP account needs its own reference prefix.', 'chip-for-affiliatewp' ),
+					'chip_reference_conflict'
+				);
+			}
+
+			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing );
 
 			return true;
 		}
@@ -307,6 +332,18 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 			continue;
 		}
 
+		/*
+		 * The referral must still belong to the affiliate this payout is for.
+		 * AffiliateWP lets an admin reassign a referral to another affiliate
+		 * (`affwp_update_referral` with an `affiliate_id`), and the payout's
+		 * recipient account belongs to the affiliate it was built for: paying
+		 * here would move the reassigned commission into the wrong person's
+		 * bank account.
+		 */
+		if ( absint( $referral->affiliate_id ) !== absint( $payout->affiliate_id ) ) {
+			continue;
+		}
+
 		// 0 means "not attached to any payout"; anything else must be this one.
 		if ( ! empty( $referral->payout_id ) && absint( $referral->payout_id ) !== absint( $payout_id ) ) {
 			continue;
@@ -333,7 +370,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 			$amount  += (float) $referral->amount;
 		}
 
-		if ( $amount <= 0 ) {
+		if ( (float) chip_affiliatewp_format_amount( $amount ) <= 0 ) {
 			return chip_affiliatewp_fail_payout( $payout_id, __( 'The referrals left in this payout have no payable amount.', 'chip-for-affiliatewp' ), 'chip_invalid_amount' );
 		}
 
@@ -363,6 +400,12 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 				/* translators: %s: payout ID */
 				__( 'Affiliate commission payout No.%s', 'chip-for-affiliatewp' ),
 				$payout_id
+			),
+			140,
+			sprintf(
+				/* translators: %s: payout ID */
+				__( 'Affiliate commission payout No.%s', 'chip-for-affiliatewp' ),
+				$payout_id
 			)
 		),
 		'reference'       => $reference,
@@ -386,7 +429,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
 
-			if ( in_array( $existing_state, array( 'rejected', 'deleted' ), true ) ) {
+			if ( chip_affiliatewp_state_is_terminal( $existing_state ) ) {
 				/*
 				 * The reference is burnt by a dead instruction. Report it under
 				 * the instruction-state code so fail_payout advances the
@@ -400,7 +443,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 				);
 			}
 
-			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $reference );
+			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing );
 
 			return true;
 		}
@@ -417,15 +460,14 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		return chip_affiliatewp_fail_payout( $payout_id, __( 'CHIP Send did not return a send instruction ID.', 'chip-for-affiliatewp' ), 'chip_instruction_failed' );
 	}
 
-	$data['instruction_id'] = (int) $response['id'];
-	$data['reference']      = $reference;
-	$data['attempt']        = $attempt;
-	$data['state']          = (string) chip_affiliatewp_array_value( $response, 'state', 'received' );
-	$data['receipt_url']    = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $response, 'receipt_url', '' ) );
-	$data['referral_ids']   = $referral_ids;
-	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
-	$data['poll_count']     = 0;
-	$data['mode']           = $mode;
+	$data['instruction_id']  = (int) $response['id'];
+	$data['attempt']         = $attempt;
+	$data['state']           = (string) chip_affiliatewp_array_value( $response, 'state', 'received' );
+	$data['receipt_url']     = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $response, 'receipt_url', '' ) );
+	$data['bank_account_id'] = (int) $bank_account['id'];
+	$data['last_checked']    = gmdate( 'Y-m-d H:i:s' );
+	$data['poll_count']      = 0;
+	$data['mode']            = $mode;
 
 	// The instruction was accepted, so any earlier failure no longer applies.
 	unset( $data['error'], $data['error_status'] );
@@ -471,24 +513,85 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 }
 
 /**
- * Records an instruction that already exists at CHIP against a payout.
+ * Whether a found instruction actually belongs to this payout.
  *
- * Used when the reference lookup finds a live instruction before sending, or
- * when CHIP refuses a submission because the reference is taken. Adopting
- * rather than re-sending is what makes a retry after an unclear response safe.
+ * A reference is unique per CHIP merchant account, not per site. Two
+ * installations sharing one CHIP account — a staging site pointed at the same
+ * credentials, or a merchant running two stores — can therefore mint the same
+ * reference for different payouts, because the reference is built from the
+ * payout's own ID and a short site prefix. Adopting on the reference alone
+ * would attach this payout to another site's instruction: the payout would take
+ * that instruction's state, and a completed one would mark these referrals paid
+ * for money that went somewhere else.
+ *
+ * The amount, and the destination account when both sides state one, are what
+ * must agree. The instruction id is not used here: a payout adopting an
+ * instruction has not recorded one yet, which is the whole point of adopting.
+ *
+ * @param object $payout      Payout row.
+ * @param array  $instruction Instruction payload from CHIP.
+ * @return bool
+ */
+function chip_affiliatewp_instruction_belongs_to_payout( $payout, $instruction ) {
+	$expected_amount = (float) chip_affiliatewp_format_amount( $payout->amount );
+	$actual_amount   = (float) chip_affiliatewp_format_amount( chip_affiliatewp_array_value( $instruction, 'amount', 0 ) );
+
+	if ( abs( $expected_amount - $actual_amount ) > 0.001 ) {
+		return false;
+	}
+
+	/*
+	 * The destination account. A payout whose bank account does not match is
+	 * paying a different recipient.
+	 *
+	 * The row does not carry the account id — its service_id is the instruction
+	 * id — so it is asked for when needed rather than read here.
+	 */
+	$instruction_account = absint( chip_affiliatewp_array_value( $instruction, 'bank_account_id' ) );
+
+	if ( ! $instruction_account ) {
+		// Not stated: the amount agreeing is as far as this can be taken.
+		return true;
+	}
+
+	/*
+	 * If the payout already names the same instruction, the destination is
+	 * settled: this is the instruction it was submitted under.
+	 */
+	$known_instruction = absint( chip_affiliatewp_array_value( $instruction, 'id' ) );
+	$recorded          = absint( $payout->service_id );
+
+	if ( $recorded && $known_instruction && $recorded === $known_instruction ) {
+		return true;
+	}
+
+	$affiliate_id = absint( $payout->affiliate_id );
+
+	if ( ! $affiliate_id ) {
+		return false;
+	}
+
+	$account = chip_affiliatewp_ensure_bank_account( $affiliate_id );
+
+	if ( is_wp_error( $account ) || empty( $account['id'] ) ) {
+		return false;
+	}
+
+	return absint( $account['id'] ) === $instruction_account;
+}
+
+/**
+ * Adopts an existing CHIP instruction for a payout that already has a row.
  *
  * @param int    $payout_id Payout ID.
  * @param object $payout    Payout row.
  * @param array  $instruction Instruction payload from CHIP.
- * @param string $reference Reference the instruction was found under.
  * @return void
  */
-function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction, $reference ) {
+function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction ) {
 	$data = chip_affiliatewp_payout_data( $payout );
 
 	$data['instruction_id'] = (int) $instruction['id'];
-	$data['reference']      = (string) $reference;
-	$data['state']          = (string) chip_affiliatewp_array_value( $instruction, 'state', 'received' );
 	$data['receipt_url']    = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $instruction, 'receipt_url', '' ) );
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
 
@@ -576,13 +679,16 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 	 * retry would look successful while no money moved. A new attempt number
 	 * yields a reference CHIP has never seen, so the retry sends for real.
 	 *
+	 * An instruction CHIP no longer holds is in the same position: it cannot
+	 * settle, and its reference is spent.
+	 *
 	 * An instruction that is merely unverified or in flight is left alone: it
 	 * still exists at CHIP and resolves on its own, and keeping its reference
 	 * is what makes a repeat submission adopt instead of double-pay.
 	 */
 	$terminal_at_chip = in_array(
 		strtolower( (string) $error_code ),
-		array( 'chip_instruction_rejected', 'chip_instruction_deleted' ),
+		array( 'chip_instruction_rejected', 'chip_instruction_deleted', 'chip_instruction_not_found' ),
 		true
 	);
 
@@ -669,6 +775,23 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 
 		foreach ( chip_affiliatewp_payout_referral_ids( $payout ) as $referral_id ) {
 			affwp_set_referral_status( $referral_id, 'unpaid' );
+
+			/*
+			 * Detach the referral from this payout as well.
+			 *
+			 * `affwp_set_referral_status()` writes only the status, so the
+			 * referral is left unpaid while still carrying a payout_id. The
+			 * single-pay path refuses any referral that has one ("already
+			 * attached to a payout"), which leaves it listed as payable and
+			 * impossible to pay. AffiliateWP's Stripe integration detaches for
+			 * the same reason.
+			 */
+			affiliate_wp()->referrals->update(
+				$referral_id,
+				array( 'payout_id' => 0 ),
+				'',
+				'referral'
+			);
 		}
 
 		// A failure is terminal for the batch roll-up: recount so the batch can
@@ -757,7 +880,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	// exist there and later complete (e.g. the create call timed out after the
 	// server accepted it). Let a completed/rejected delivery heal the record so
 	// AffiliateWP's auto-retry of failed payouts cannot pay the referral twice.
-	if ( 'failed' === $payout->status && ! in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) ) {
+	if ( 'failed' === $payout->status && ! chip_affiliatewp_state_is_settled( $state ) ) {
 		// Still in flight or unknown: acknowledge the delivery without changes.
 		return true;
 	}
@@ -771,7 +894,7 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	 * delivery keeps the note so the admin can still see why the payout was
 	 * retried in the first place.
 	 */
-	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) ) {
+	if ( chip_affiliatewp_state_is_settled( $state ) ) {
 		unset( $data['error'], $data['error_status'] );
 	}
 
@@ -781,10 +904,16 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 	 * is resolved, so a note we already hold has to be replaced or cleared to
 	 * match what CHIP is saying now — keeping it would show the merchant a
 	 * reason that has since been fixed, and they would chase it again.
+	 *
+	 * The field is unbounded at the source — CHIP allows up to 64 KiB — and the
+	 * note is stored on the payout meta, rendered in the admin review list, and
+	 * quoted in the merchant email. An outsized reason would bloat all three,
+	 * so it is trimmed to something a person can actually read.
 	 */
 	$note = trim( (string) chip_affiliatewp_array_value( $instruction, 'rejection_reason', '' ) );
+	$note = chip_affiliatewp_sanitize_note( $note );
 
-	if ( in_array( $state, array( 'completed', 'rejected', 'deleted' ), true ) || '' === $note ) {
+	if ( chip_affiliatewp_state_is_settled( $state ) || '' === $note ) {
 		unset( $data['note'] );
 	} else {
 		$data['note'] = $note;
@@ -803,10 +932,6 @@ function chip_affiliatewp_apply_instruction( $payout_id, $instruction ) {
 
 	if ( ! empty( $instruction['id'] ) ) {
 		$data['instruction_id'] = (int) $instruction['id'];
-	}
-
-	if ( ! empty( $instruction['reference'] ) ) {
-		$data['reference'] = (string) $instruction['reference'];
 	}
 
 	$receipt_url = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $instruction, 'receipt_url', '' ) );
@@ -947,14 +1072,15 @@ function chip_affiliatewp_adopt_referral_instruction( $referral, $instruction, $
 	chip_affiliatewp_update_payout_data(
 		(int) $payout_id,
 		array(
-			'instruction_id' => $instruction_id,
-			'reference'      => (string) $reference,
-			'state'          => (string) chip_affiliatewp_array_value( $instruction, 'state', 'received' ),
-			'receipt_url'    => $receipt_url,
-			'referral_ids'   => array( (int) $referral->ID ),
-			'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
-			'poll_count'     => 0,
-			'mode'           => $mode,
+			'instruction_id'  => $instruction_id,
+			'reference'       => (string) $reference,
+			'state'           => (string) chip_affiliatewp_array_value( $instruction, 'state', 'received' ),
+			'receipt_url'     => $receipt_url,
+			'bank_account_id' => absint( chip_affiliatewp_array_value( $instruction, 'bank_account_id', 0 ) ),
+			'referral_ids'    => array( (int) $referral->ID ),
+			'last_checked'    => gmdate( 'Y-m-d H:i:s' ),
+			'poll_count'      => 0,
+			'mode'            => $mode,
 		)
 	);
 
@@ -1032,6 +1158,37 @@ function chip_affiliatewp_check_payout_status( $payout_id, $reschedule = true ) 
 	$response = chip_affiliatewp_get_instruction( (int) $data['instruction_id'], $stored_mode );
 
 	if ( is_wp_error( $response ) ) {
+		$status = function_exists( 'chip_affiliatewp_error_http_status' )
+			? (int) chip_affiliatewp_error_http_status( $response )
+			: 0;
+
+		/*
+		 * A 404 means the instruction does not exist at CHIP, and it will not
+		 * appear later — the record is gone. Treating it as a transient outage
+		 * leaves the payout requerying a dead id forever: the capped Action
+		 * Scheduler checks run out, then the hourly sweep keeps polling for the
+		 * life of the store, one API call each time, for an instruction that
+		 * can never answer.
+		 *
+		 * Fail the payout instead and release the referrals, so the merchant
+		 * sees a settled failure they can act on rather than a payout that sits
+		 * in processing indefinitely.
+		 */
+		if ( 404 === $status ) {
+			chip_affiliatewp_fail_payout(
+				$payout_id,
+				sprintf(
+					/* translators: %s: CHIP Send instruction ID. */
+					__( 'CHIP Send has no record of instruction %s, so it can no longer be tracked. Any funds it was meant to move were not sent.', 'chip-for-affiliatewp' ),
+					(string) $data['instruction_id']
+				),
+				'chip_instruction_not_found',
+				$status
+			);
+
+			return;
+		}
+
 		/*
 		 * Count the failed check too. Without it the cap below is never
 		 * reached on this path: an unreachable CHIP would reschedule a check
@@ -1150,11 +1307,16 @@ function chip_affiliatewp_sweep_processing_payouts() {
 		$data    = chip_affiliatewp_payout_data( $payout );
 		$against = chip_affiliatewp_parse_utc( chip_affiliatewp_array_value( $data, 'last_checked', '' ) );
 
-		$window = chip_affiliatewp_state_needs_review( (string) ( $data['state'] ?? '' ) )
+		/*
+		 * Named for the cooldown, not the query window above: reusing $window
+		 * here would silently discard the row limit after the first iteration,
+		 * and anything reading it later would get seconds instead of rows.
+		 */
+		$cooldown_for_payout = chip_affiliatewp_state_needs_review( (string) ( $data['state'] ?? '' ) )
 			? $review_cooldown
 			: $cooldown;
 
-		if ( $against && ( time() - $against ) < $window ) {
+		if ( $against && ( time() - $against ) < $cooldown_for_payout ) {
 			continue;
 		}
 
@@ -1374,8 +1536,15 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		);
 	}
 
-	if ( (float) $referral->amount <= 0 ) {
-		return new WP_Error( 'chip_invalid_amount', __( 'The referral amount must be greater than zero.', 'chip-for-affiliatewp' ) );
+	if ( (float) chip_affiliatewp_format_amount( $referral->amount ) <= 0 ) {
+		return new WP_Error(
+			'chip_invalid_amount',
+			sprintf(
+				/* translators: %s: the referral amount. */
+				__( 'This referral rounds to %s, below the smallest amount CHIP Send can transfer.', 'chip-for-affiliatewp' ),
+				chip_affiliatewp_format_amount( $referral->amount )
+			)
+		);
 	}
 
 	/*
@@ -1402,10 +1571,39 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	$reference      = $base_reference;
 	$burnt          = chip_affiliatewp_burnt_references( $referral_id );
 
+	/**
+	 * Filters how many burnt references are skipped before giving up.
+	 *
+	 * Each refusal burns one reference for this referral. The sweep below walks
+	 * past the burnt ones, and it needs a ceiling: CHIP refuses a reference
+	 * permanently, so an unbounded walk would issue one API call per burnt
+	 * reference on every submission.
+	 *
+	 * @param int $limit Maximum attempt number to reach.
+	 */
+	$attempt_limit = max( 2, absint( apply_filters( 'chip_affiliatewp_reference_attempt_limit', 50 ) ) );
+
 	// Skip any reference CHIP has already refused for this referral.
-	while ( $attempt < 20 && in_array( $reference, $burnt, true ) ) {
+	while ( $attempt < $attempt_limit && in_array( $reference, $burnt, true ) ) {
 		++$attempt;
 		$reference = substr( $base_reference . '-' . $attempt, 0, 40 );
+	}
+
+	/*
+	 * Every reference up to the ceiling is spent, so there is nothing left to
+	 * send under. Say so rather than submitting a reference CHIP has already
+	 * refused: that fails identically, and each attempt burns another one, so
+	 * the referral would never be paid and nothing would explain why.
+	 */
+	if ( $attempt >= $attempt_limit && in_array( $reference, $burnt, true ) ) {
+		return new WP_Error(
+			'chip_reference_exhausted',
+			sprintf(
+				/* translators: %d: number of attempts tried. */
+				__( 'CHIP has refused every reference tried for this referral (%d so far). Contact your CHIP account manager about the recipient before trying again.', 'chip-for-affiliatewp' ),
+				$attempt_limit
+			)
+		);
 	}
 
 	// Count existing instructions for this referral to pick the attempt number.
@@ -1414,7 +1612,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 	if ( is_array( $probe ) && ! empty( $probe['id'] ) ) {
 		$probe_state = strtolower( (string) ( $probe['state'] ?? '' ) );
 
-		if ( ! in_array( $probe_state, array( 'rejected', 'deleted' ), true ) ) {
+		if ( ! chip_affiliatewp_state_is_terminal( $probe_state ) ) {
 			// A live instruction already exists for this referral: adopt it.
 			chip_affiliatewp_adopt_referral_instruction( $referral, $probe, $reference, $mode );
 
@@ -1428,14 +1626,14 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		$reference = substr( $base_reference . '-' . $attempt, 0, 40 );
 
 		// Skip past any earlier dead attempts for this referral.
-		while ( $attempt < 20 ) {
+		while ( $attempt < $attempt_limit ) {
 			$candidate = chip_affiliatewp_list_instruction_by_reference( $reference, $mode );
 
 			if ( ! is_array( $candidate ) || empty( $candidate['id'] ) ) {
 				break;
 			}
 
-			if ( ! in_array( strtolower( (string) ( $candidate['state'] ?? '' ) ), array( 'rejected', 'deleted' ), true ) ) {
+			if ( ! chip_affiliatewp_state_is_terminal( (string) ( $candidate['state'] ?? '' ) ) ) {
 				chip_affiliatewp_adopt_referral_instruction( $referral, $candidate, $reference, $mode );
 
 				return true;
@@ -1470,11 +1668,18 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		return new WP_Error( 'chip_no_email', __( 'This affiliate account does not have a payment email.', 'chip-for-affiliatewp' ) );
 	}
 
+	$referral_fallback = sprintf(
+		/* translators: %d: Referral ID. */
+		__( 'Commission for referral No.%d', 'chip-for-affiliatewp' ),
+		$referral_id
+	);
+
 	$instruction_description = chip_affiliatewp_sanitize_description(
 		'' !== (string) $referral->description
 			? (string) $referral->description
-			/* translators: %d: Referral ID. */
-			: sprintf( __( 'Commission for referral No.%d', 'chip-for-affiliatewp' ), $referral_id )
+			: $referral_fallback,
+		140,
+		$referral_fallback
 	);
 
 	$body = array(
@@ -1504,7 +1709,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 			$existing_state = strtolower( (string) ( $existing['state'] ?? '' ) );
 
-			if ( in_array( $existing_state, array( 'rejected', 'deleted' ), true ) ) {
+			if ( chip_affiliatewp_state_is_terminal( $existing_state ) ) {
 				/*
 				 * The reference is burnt by a dead instruction. Remember that
 				 * so the next attempt uses a fresh one; without this the retry

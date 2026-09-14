@@ -28,9 +28,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return array|WP_Error Account summary, or an error when unavailable.
  */
 function chip_affiliatewp_get_account_summary( $mode = 'live', $force = false ) {
-	$mode = 'test' === $mode ? 'test' : 'live';
-
-	$cache_key = 'chip_affiliatewp_account_' . $mode;
+	$mode      = 'test' === $mode ? 'test' : 'live';
+	$cache_key = chip_affiliatewp_account_cache_key( $mode );
 
 	if ( ! $force ) {
 		$cached = get_transient( $cache_key );
@@ -92,6 +91,19 @@ function chip_affiliatewp_parse_account_summary( $response ) {
 }
 
 /**
+ * The transient key holding a mode's account summary.
+ *
+ * Named once because the summary is written under it and dropped under it: two
+ * spellings of the same key leave a stale balance on screen after a conversion.
+ *
+ * @param string $mode "test" or "live"; anything else resolves to "live".
+ * @return string
+ */
+function chip_affiliatewp_account_cache_key( $mode ) {
+	return 'chip_affiliatewp_account_' . ( 'test' === $mode ? 'test' : 'live' );
+}
+
+/**
  * Requests a budget allocation, converting settlement balance into Send limit.
  *
  * CHIP sends the request to the configured approvers, who approve by email, so
@@ -104,7 +116,14 @@ function chip_affiliatewp_parse_account_summary( $response ) {
 function chip_affiliatewp_request_budget_allocation( $amount, $mode = 'live' ) {
 	$amount = round( (float) $amount, 2 );
 
-	if ( $amount <= 0 ) {
+	/*
+	 * A non-finite value passes a `<= 0` test — INF is greater than zero — and
+	 * number_format() renders it as "inf", so it would be sent to CHIP as an
+	 * amount. Requesting the balance conversion is the merchant's own screen,
+	 * but the ceiling check above is skipped whenever the summary cannot be
+	 * read (an API outage), so this cannot be left to it.
+	 */
+	if ( ! is_finite( $amount ) || $amount <= 0 ) {
 		return new WP_Error( 'chip_invalid_amount', __( 'Enter an amount greater than zero.', 'chip-for-affiliatewp' ) );
 	}
 
@@ -121,7 +140,7 @@ function chip_affiliatewp_request_budget_allocation( $amount, $mode = 'live' ) {
 	}
 
 	// The allocation changes the balance, so drop the cached summary.
-	delete_transient( 'chip_affiliatewp_account_' . ( 'test' === $mode ? 'test' : 'live' ) );
+	delete_transient( chip_affiliatewp_account_cache_key( $mode ) );
 
 	return is_array( $response ) ? $response : array();
 }

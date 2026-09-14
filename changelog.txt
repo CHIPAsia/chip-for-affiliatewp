@@ -1,6 +1,32 @@
 === CHIP for AffiliateWP Changelog ===
 
-All notable changes are documented in readme.txt (WordPress format).
+All notable changes to this plugin are recorded here. The readme.txt shipped
+with the plugin carries only the latest release's entries.
+
+= 1.1.0 - 2026-09-14 =
+* Fixed: a payout that failed left its referrals unpaid but still attached to it, so the single-pay action refused them and the commission could never be paid again. Failed payouts now detach their referrals.
+* Fixed: the affiliate "action required" email ended with a raw `{affiliate_payout_settings_url}` placeholder instead of a link on any site without the Stripe integration registered. The plugin now provides the tag itself and defers to an existing implementation.
+* Fixed: the Malay translation never reached the site. The build only wrote the .po file, so the compiled .mo WordPress actually reads stayed at its last hand-built state; plural strings (_n) were not extracted at all. Both are fixed — 153 entries, all delivered.
+* Fixed: a referral reassigned to another affiliate between batch build and submission was still paid from the original payout. Eligibility now re-checks that the referral still belongs to the payout's affiliate.
+* Fixed: the webhook recovery path could create a payout row without checking the store currency, unlike the batch and single-pay paths.
+* Fixed: a referral whose references CHIP had all refused looped forever. The sweep now refuses with a clear reason instead of resending a spent reference.
+* Fixed: uninstall left `chip_burnt_references` behind, which suppressed a fresh reference on a later reinstall.
+* Fixed: uninstall cleared scheduled hooks that no longer existed, leaving the real ones behind to fire against an uninstalled plugin.
+* Fixed: the CHIP note attached to an instruction was stored unbounded (CHIP permits up to ~64 KiB) and reached the payout list and notification email. Now capped and stripped of control characters.
+* Fixed: the settings screen rendered a CHIP API error message as markup. Callout content is escaped.
+* Fixed: a bank account superseded by a details change was left registered at CHIP.
+* Fixed: payout readiness accepted bank details CHIP would refuse.
+* Fixed: a balance conversion amount that was not finite could be submitted.
+* Fixed: the account summary cache was written under one key and dropped under another spelling of the same key.
+* Fixed: an instruction CHIP no longer holds left the payout polling forever; it now settles with a clear reason.
+* Fixed: the webhook delivery lock was taken after the payout lookup instead of before.
+* Fixed: every failure code that can reach a failed payout is now classified, so the Retry button and action-required email behave consistently.
+* Fixed: a recipient name is registered when the affiliate has none.
+* Fixed: an amount that rounds below the smallest transferable one is refused before submission rather than by CHIP.
+* Changed: the reference prefix warning now states that each site sharing a CHIP account needs its own prefix.
+* Changed: terminal and settled instruction states are defined once instead of being repeated as literals.
+* Removed: payout meta and review-list values that nothing read.
+* Also: the coding-standards job in CI has failed since 1.0.0 because Composer blocked its installer plugin and the sniff paths were incomplete. It now installs from composer.json and runs the same command as a local checkout.
 
 = 1.0.0 - 2026-09-01 =
 * Initial release: complete CHIP Send payout integration.

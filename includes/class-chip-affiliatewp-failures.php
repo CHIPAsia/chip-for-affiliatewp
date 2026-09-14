@@ -75,6 +75,42 @@ function chip_affiliatewp_classify_failure( $error_code, $error_message = '', $h
 	}
 
 	/*
+	 * An amount the API cannot accept, or work that is no longer there to do.
+	 * The figures and the referral states are the store's own, so these are data
+	 * problems rather than provider ones: retrying unchanged would fail
+	 * identically.
+	 */
+	if ( in_array( $code, array( 'chip_invalid_amount', 'chip_currency_unsupported', 'chip_reference_conflict', 'chip_referrals_no_longer_payable' ), true ) ) {
+		return 'data_error';
+	}
+
+	/*
+	 * Instruction states. `rejected` means the recipient's bank details were
+	 * refused, which the affiliate or the admin acting for them must fix.
+	 *
+	 * `deleted` and `not_found` mean the instruction is gone from CHIP: nothing
+	 * will ever settle it, and only the merchant can find out why. Classified
+	 * here rather than left to the message text, which happened to carry the
+	 * words for some of these and not others.
+	 */
+	if ( in_array( $code, array( 'chip_instruction_rejected' ), true ) ) {
+		return 'affiliate_action_required';
+	}
+
+	if ( in_array( $code, array( 'chip_instruction_deleted', 'chip_instruction_not_found' ), true ) ) {
+		return 'admin_action_required';
+	}
+
+	/*
+	 * A response the plugin could not make sense of, or one missing the fields
+	 * it needs. The API answered, so this is the provider's side: retrying the
+	 * same request later is reasonable.
+	 */
+	if ( in_array( $code, array( 'chip_instruction_failed', 'chip_api_invalid_response', 'chip_payout_not_created' ), true ) ) {
+		return 'transient';
+	}
+
+	/*
 	 * CHIP rejections are terminal and usually mean the recipient's bank
 	 * details are wrong, so treat them as needing affiliate action. Anything
 	 * left is an API or transport problem with no status attached, which is
@@ -174,6 +210,74 @@ function chip_affiliatewp_failure_email_body( $body, $payout, $method, $state ) 
 	return __( "Hi {name},\n\nWe couldn't send your {amount} commission from {site_name} to your bank account.\n\nThis usually means the bank account details on your affiliate account need attention — a wrong or incomplete account number, or a bank account that hasn't finished verification.\n\nPlease open your settings and check your bank details:\n{affiliate_payout_settings_url}\n\nOnce they're corrected, we'll automatically try sending your commission again. Questions? Just reply to this email.\n\nThanks,\n{site_name}", 'chip-for-affiliatewp' );
 }
 add_filter( 'affwp_payout_failure_email_body', 'chip_affiliatewp_failure_email_body', 10, 4 );
+
+/**
+ * Provides the `{affiliate_payout_settings_url}` email tag for this plugin's
+ * failure email.
+ *
+ * The tag is not part of AffiliateWP's core set: the canonical implementation
+ * ships inside the Stripe (Connect) module, which only loads when Connect is
+ * configured. On a site without it the tag is unknown, and AffiliateWP renders
+ * an unknown tag literally - the affiliate receives the raw text
+ * `{affiliate_payout_settings_url}` where a link should be. AffiliateWP's own
+ * Global Payouts module carries a fallback for this exact reason, and says so.
+ *
+ * Registered with a lower priority than Stripe's so that when the canonical
+ * implementation is present it wins and this is a no-op; the plugin only fills
+ * the gap.
+ *
+ * @param array $email_tags Registered email tags.
+ * @return array
+ */
+function chip_affiliatewp_register_payout_settings_url_tag( $email_tags ) {
+	$email_tags = is_array( $email_tags ) ? $email_tags : array();
+
+	foreach ( $email_tags as $tag ) {
+		if ( is_array( $tag ) && 'affiliate_payout_settings_url' === ( $tag['tag'] ?? '' ) ) {
+			return $email_tags;
+		}
+	}
+
+	$email_tags[] = array(
+		'tag'         => 'affiliate_payout_settings_url',
+		'description' => __( 'Link to the affiliate payout settings page', 'chip-for-affiliatewp' ),
+		'function'    => 'chip_affiliatewp_email_tag_payout_settings_url',
+	);
+
+	return $email_tags;
+}
+add_filter( 'affwp_email_tags', 'chip_affiliatewp_register_payout_settings_url_tag', 20 );
+
+/**
+ * Resolves the affiliate's payout settings URL.
+ *
+ * Mirrors what AffiliateWP's own fallback does: the affiliate area's Settings
+ * tab, which is where this plugin's bank-details form lives. Returns the
+ * affiliate area when the tab URL cannot be built, so the affiliate never
+ * receives a dead placeholder.
+ *
+ * @param int $affiliate_id Affiliate ID (unused; the tag is per-recipient).
+ * @return string
+ */
+function chip_affiliatewp_email_tag_payout_settings_url( $affiliate_id = 0 ) {
+	unset( $affiliate_id );
+
+	if ( function_exists( 'affwp_get_affiliate_area_page_url' ) ) {
+		$url = affwp_get_affiliate_area_page_url( 'settings' );
+
+		if ( is_string( $url ) && '' !== $url ) {
+			return $url;
+		}
+
+		$url = affwp_get_affiliate_area_page_url();
+
+		if ( is_string( $url ) && '' !== $url ) {
+			return $url;
+		}
+	}
+
+	return home_url();
+}
 
 /**
  * Registers the classifier with AffiliateWP.

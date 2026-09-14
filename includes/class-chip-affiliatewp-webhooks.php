@@ -612,6 +612,48 @@ function chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode 
 	$instruction_id = absint( chip_affiliatewp_array_value( $payload, 'id' ) );
 	$reference      = (string) chip_affiliatewp_array_value( $payload, 'reference' );
 
+	/*
+	 * Take the lock before looking anything up. Two deliveries can arrive
+	 * together — a CHIP retry overlapping the original, or a redelivery racing
+	 * a requery — and both would find no payout and create one of their own,
+	 * so the instruction ends up with two payout rows and its referral counted
+	 * twice. Locking first makes the lookup-and-create step atomic; the second
+	 * worker finds the row the first one made.
+	 */
+	$lock_name = 'chip_affiliatewp_' . md5( 'instruction_' . ( $instruction_id ? $instruction_id : $reference ) );
+
+	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- advisory lock, not a data read.
+	$lock_value = 'mysql' === ( $GLOBALS['wpdb']->is_mysql ? 'mysql' : 'other' ) ? $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $lock_name ) ) : null;
+	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+
+	if ( null !== $lock_value && '1' !== (string) $lock_value ) {
+		// Another worker is already handling this exact delivery.
+		return;
+	}
+
+	try {
+		chip_affiliatewp_process_locked_instruction_webhook( $payload, $verified_mode, $instruction_id, $reference );
+	} finally {
+		if ( null !== $lock_value && '1' === (string) $lock_value ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releases the advisory lock above.
+			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+		}
+	}
+}
+
+/**
+ * Resolves and applies one instruction delivery while its lock is held.
+ *
+ * Split out so the lock is taken and released around the whole
+ * lookup-then-create sequence, never inside it.
+ *
+ * @param array  $payload       Webhook payload.
+ * @param string $verified_mode Mode whose signature verified the delivery.
+ * @param int    $instruction_id Instruction ID from the payload.
+ * @param string $reference     Reference from the payload.
+ * @return void
+ */
+function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verified_mode, $instruction_id, $reference ) {
 	$payout_id = 0;
 
 	// Fast path: a payout already stores this instruction ID.
@@ -628,8 +670,35 @@ function chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode 
 
 			if ( $referral && ! empty( $referral->payout_id ) ) {
 				$payout_id = absint( $referral->payout_id );
+			} elseif ( $referral && 'paid' === $referral->status ) {
+				/*
+				 * Already paid, but with no payout on record — a referral whose
+				 * status was set directly, or carried over from before payouts
+				 * existed. Nothing is owed for it, and materialising a payout
+				 * here would give the retry path a row to resubmit: it would
+				 * send a second instruction and move the money twice for one
+				 * commission. Acknowledge the delivery and leave it alone.
+				 */
+				return;
 			} elseif ( $referral ) {
-				// Single-referral run: the payout row was never created. Create it now.
+				/*
+				 * Single-referral run: the payout row was never created. Create
+				 * it now.
+				 *
+				 * The currency guard belongs here too. A store cannot submit a
+				 * payout when it is not on MYR, so an instruction only exists
+				 * because the store was on MYR when it was sent — but a store
+				 * that switched currency afterwards would otherwise have this
+				 * delivery materialise a payout row for an instruction whose
+				 * amount CHIP read as ringgit. Nothing is sent from here, so
+				 * no money moves; acknowledging the delivery and leaving the
+				 * row alone keeps the payout list consistent with the payments
+				 * the plugin is willing to make.
+				 */
+				if ( 'MYR' !== chip_affiliatewp_currency() ) {
+					return;
+				}
+
 				$payout_id = affwp_add_payout(
 					array(
 						'affiliate_id'  => $referral->affiliate_id,
@@ -677,31 +746,7 @@ function chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode 
 		return;
 	}
 
-	/*
-	 * Serialize processing per instruction so duplicate or racing deliveries
-	 * cannot double-apply. GET_LOCK/RELEASE_LOCK are MySQL advisory locks, not
-	 * data reads: there is nothing to cache, and they must hit the database to
-	 * be atomic across concurrent workers.
-	 */
-	$lock_name = 'chip_affiliatewp_' . md5( 'instruction_' . ( $instruction_id ? $instruction_id : $payout_id ) );
-
-	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- advisory lock, not a data read.
-	$lock_value = 'mysql' === ( $GLOBALS['wpdb']->is_mysql ? 'mysql' : 'other' ) ? $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $lock_name ) ) : null;
-	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-
-	if ( null !== $lock_value && '1' !== (string) $lock_value ) {
-		// Another worker is already handling this exact delivery.
-		return;
-	}
-
-	try {
-		chip_affiliatewp_apply_instruction( $payout_id, $payload );
-	} finally {
-		if ( null !== $lock_value && '1' === (string) $lock_value ) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releases the advisory lock above.
-			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
-		}
-	}
+	chip_affiliatewp_apply_instruction( $payout_id, $payload );
 }
 
 /**

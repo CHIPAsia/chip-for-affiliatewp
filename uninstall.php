@@ -136,7 +136,7 @@ foreach ( $chip_option_names as $chip_option_name ) {
 
 // Remove the payout data this plugin stores against each affiliate: the cached
 // CHIP Send account record, and the bank details it was resolved from.
-foreach ( array( 'chip_bank_account', 'payment_account_number', 'payment_bank_code' ) as $chip_meta_key ) {
+foreach ( array( 'chip_bank_account', 'chip_bank_account_superseded', 'payment_account_number', 'payment_bank_code' ) as $chip_meta_key ) {
 	$chip_users = get_users(
 		array(
 			'meta_key' => $chip_meta_key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- one-off uninstall sweep.
@@ -147,6 +147,58 @@ foreach ( array( 'chip_bank_account', 'payment_account_number', 'payment_bank_co
 
 	foreach ( $chip_users as $chip_user_id ) {
 		delete_user_meta( (int) $chip_user_id, $chip_meta_key );
+	}
+}
+
+/*
+ * Remove the payout meta this plugin stores against each payout.
+ *
+ * `chip_payout_data` carries the CHIP instruction id, the reference, and CHIP's
+ * own note about the instruction — payout-level records that outlive the plugin
+ * otherwise. The payouts are read through AffiliateWP's own store rather than a
+ * hand-written query, so this keeps working if the schema moves.
+ */
+if ( class_exists( 'Affiliate_WP' ) && function_exists( 'affwp_delete_payout_meta' ) ) {
+	$chip_payouts = affiliate_wp()->affiliates->payouts->get_payouts(
+		array(
+			'payout_method' => 'chip',
+			'number'        => 5000,
+			'fields'        => 'ids',
+		)
+	);
+
+	foreach ( (array) $chip_payouts as $chip_payout_id ) {
+		affwp_delete_payout_meta( (int) $chip_payout_id, 'chip_payout_data' );
+	}
+}
+
+/*
+ * Remove the referral meta this plugin stores.
+ *
+ * `chip_burnt_references` records the references CHIP has refused for a
+ * referral. Left behind, it would suppress a fresh reference on a later
+ * reinstall, so the first attempt for an affected referral would reuse a
+ * reference CHIP has permanently refused.
+ *
+ * The table name is read from AffiliateWP rather than spelled out: on a network
+ * with `AFFILIATE_WP_NETWORK_WIDE` the meta table carries no site prefix, and a
+ * literal name would find nothing and silently leave the rows behind.
+ */
+if ( class_exists( 'Affiliate_WP' ) && function_exists( 'affwp_delete_referral_meta' ) && ! empty( affiliate_wp()->referral_meta->table_name ) ) {
+	global $wpdb;
+
+	$chip_meta_table = affiliate_wp()->referral_meta->table_name;
+
+	$chip_referral_ids = $wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off uninstall sweep, nothing to cache.
+		$wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- the table name comes from AffiliateWP itself.
+			"SELECT referral_id FROM {$chip_meta_table} WHERE meta_key = %s",
+			'chip_burnt_references'
+		)
+	);
+
+	foreach ( (array) $chip_referral_ids as $chip_referral_id ) {
+		affwp_delete_referral_meta( (int) $chip_referral_id, 'chip_burnt_references' );
 	}
 }
 
@@ -167,11 +219,25 @@ foreach ( $chip_transients as $chip_transient ) {
 	delete_transient( $chip_key );
 }
 
-// Clear scheduled actions owned by the plugin.
-if ( function_exists( 'as_unschedule_all_actions' ) ) {
-	as_unschedule_all_actions( 'chip_affiliatewp_submit_payout_action' );
-	as_unschedule_all_actions( 'chip_affiliatewp_run_check_action' );
-	as_unschedule_all_actions( 'chip_affiliatewp_hourly_sweep' );
-}
+/*
+ * Clear scheduled actions owned by the plugin.
+ *
+ * The hook names are the ones the plugin actually schedules. `uninstall.php`
+ * cannot call the plugin's own helper (it is not loaded), so the list is kept
+ * here in step with `chip_affiliatewp_unschedule_sweep()`. A name that does not
+ * exist is silently deleted from nothing, leaving the real actions behind to
+ * fire callbacks for a plugin that is gone.
+ */
+$chip_scheduled_hooks = array(
+	'chip_affiliatewp_submit_payout_action',
+	'chip_affiliatewp_check_payout_status',
+	'chip_affiliatewp_hourly_sweep',
+);
 
-wp_clear_scheduled_hook( 'chip_affiliatewp_hourly_sweep' );
+foreach ( $chip_scheduled_hooks as $chip_scheduled_hook ) {
+	wp_clear_scheduled_hook( $chip_scheduled_hook );
+
+	if ( function_exists( 'as_unschedule_all_actions' ) ) {
+		as_unschedule_all_actions( $chip_scheduled_hook );
+	}
+}

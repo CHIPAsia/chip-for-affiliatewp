@@ -40,6 +40,7 @@ TRANSLATIONS = {
     'Webhook Public Key': 'Kunci Awam Webhook',
     # --- bank / affiliate labels ---
     'Bank Code': 'Kod Bank',
+    'Link to the affiliate payout settings page': 'Pautan ke halaman tetapan pembayaran afiliasi',
     'Bank Account Number': 'Nombor Akaun Bank',
     'Send Receipt to Affiliate': 'Hantar Resit ke Afiliasi',
     '— Select bank —': '— Pilih bank —',
@@ -144,6 +145,12 @@ TRANSLATIONS = {
     'A Malaysian bank account number is between 5 and 20 digits. Check the number and try again.': 'Nombor akaun bank Malaysia adalah antara 5 hingga 20 digit. Semak nombor itu dan cuba lagi.',
     'The referral amount must be greater than zero.': 'Jumlah rujukan mesti lebih daripada sifar.',
     'CHIP reports: %s': 'CHIP melaporkan: %s',
+    'CHIP has refused every reference tried for this referral (%d so far). Contact your CHIP account manager about the recipient before trying again.': 'CHIP telah menolak setiap rujukan yang dicuba untuk referral ini (%d setakat ini). Hubungi pengurus akaun CHIP anda tentang penerima sebelum mencuba lagi.',
+    'Make this different on every site that uses the same CHIP account. References are what stop a payout being sent twice, and two sites with the same prefix can collide, so the second site would have its payout refused rather than paid.': 'Jadikan ini berbeza pada setiap tapak yang menggunakan akaun CHIP yang sama. Rujukan inilah yang menghalang payout dihantar dua kali, dan dua tapak dengan awalan sama boleh berlanggar, jadi tapak kedua akan ditolak payoutnya dan bukan dibayar.',
+    'A different payment already uses this reference at CHIP, so this payout cannot be sent under it. Each site sharing a CHIP account needs its own reference prefix.': 'Pembayaran lain sudah menggunakan rujukan ini di CHIP, jadi payout ini tidak boleh dihantar dengannya. Setiap tapak yang berkongsi akaun CHIP memerlukan awalan rujukan tersendiri.',
+    'CHIP Send has no record of instruction %s, so it can no longer be tracked. Any funds it was meant to move were not sent.': 'CHIP Send tiada rekod bagi instruksi %s, jadi ia tidak lagi boleh dipantau. Sebarang dana yang sepatutnya dipindahkan tidak dihantar.',
+    'This payout rounds to %s, below the smallest amount CHIP Send can transfer.': 'Payout ini dibundarkan kepada %s, di bawah jumlah terkecil yang boleh dipindahkan oleh CHIP Send.',
+    'This referral rounds to %s, below the smallest amount CHIP Send can transfer.': 'Rujukan ini dibundarkan kepada %s, di bawah jumlah terkecil yang boleh dipindahkan oleh CHIP Send.',
     'CHIP: %s': 'CHIP: %s',
     'CHIP Send for AffiliateWP needs AffiliateWP %2$s or newer. You have %1$s, so the payout method is unavailable. Update AffiliateWP to use CHIP Send payouts.': 'CHIP Send untuk AffiliateWP memerlukan AffiliateWP %2$s atau lebih baharu. Anda mempunyai %1$s, jadi kaedah pembayaran tidak tersedia. Kemas kini AffiliateWP untuk menggunakan pembayaran CHIP Send.',
     'CHIP Send verifies the account before your next payout. You will be paid as soon as verification completes.': 'CHIP Send mengesahkan akaun sebelum pembayaran seterusnya. Anda akan dibayar sebaik sahaja pengesahan selesai.',
@@ -227,17 +234,40 @@ def extract():
         path = BASE + rel
         src = open(path).read()
         lines = src.split('\n')
+
+        # Plural calls span lines, so they are matched against the whole file.
+        _n_re = re.compile(r"_n\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'", re.S)
         for i, line in enumerate(lines, 1):
             # skip purely comment lines but still capture __() where present
             for m in re.finditer(r"__\(\s*'((?:[^'\\]|\\.)*)'", line):
                 msgid = m.group(1)
                 occurrences.setdefault(msgid, []).append(f'{rel}:{i}')
-            for m in re.finditer(r"(?:esc_html_e|esc_html__|esc_html|_e)\(\s*'((?:[^'\\]|\\.)*)'", line):
+            for m in re.finditer(r"(?:esc_html_e|esc_html__|esc_attr_e|esc_attr__|_e)\(\s*'((?:[^'\\]|\\.)*)'", line):
                 msgid = m.group(1)
                 if msgid not in occurrences or 'esc' in line:
                     occurrences.setdefault(msgid, [])
                     if f'{rel}:{i}' not in occurrences[msgid]:
                         occurrences[msgid].append(f'{rel}:{i}')
+
+            # Plural forms: the singular and plural are both translatable, and
+            # _n() was not being read at all, so those strings never reached the
+            # catalogue and stayed English on the site. The arguments routinely
+            # sit on their own lines, so the scan is over the whole file rather
+            # than one line.
+            for m in _n_re.finditer(src):
+                for msgid in (m.group(1), m.group(2)):
+                    line_no = src[:m.start()].count('\n') + 1
+                    occurrences.setdefault(msgid, [])
+                    if f'{rel}:{line_no}' not in occurrences[msgid]:
+                        occurrences[msgid].append(f'{rel}:{line_no}')
+
+            # Context forms: the context is a translator hint, the string is the
+            # msgid.
+            for m in re.finditer(r"(?:_x|_nx)\(\s*'((?:[^'\\]|\\.)*)'", line):
+                msgid = m.group(1)
+                occurrences.setdefault(msgid, [])
+                if f'{rel}:{i}' not in occurrences[msgid]:
+                    occurrences[msgid].append(f'{rel}:{i}')
 
 
 def occurrence_tuples():
@@ -255,7 +285,7 @@ def main():
     import polib
     pot = polib.POFile()
     pot.metadata = {
-        'Project-Id-Version': 'CHIP for AffiliateWP 1.0.0',
+        'Project-Id-Version': 'CHIP for AffiliateWP 1.1.0',
         'Report-Msgid-Bugs-To': 'https://github.com/CHIPAsia/chip-for-affiliatewp/issues',
         'POT-Creation-Date': '2026-09-01 08:30+0800',
         'MIME-Version': '1.0',
@@ -297,8 +327,17 @@ def main():
     pot.save(BASE + 'languages/chip-for-affiliatewp.pot')
     po.save(BASE + 'languages/chip-for-affiliatewp-ms_MY.po')
 
+    # WordPress reads the compiled catalogue, not the .po. Saving only the .po
+    # leaves the shipped .mo at whatever it held when it was last built by hand,
+    # so new strings translate in the source and stay English at runtime.
+    mo = polib.MOFile()
+    for entry in po:
+        mo.append(polib.MOEntry(msgid=entry.msgid, msgstr=entry.msgstr))
+    mo.save(BASE + 'languages/chip-for-affiliatewp-ms_MY.mo')
+
     print(f'extracted: {len(occurrences)} unique msgids')
     print(f'ms_MY translated: {len(po)} entries')
+    print(f'ms_MY compiled: {len(mo)} entries')
     print(f'untranslated: {len(untranslated)}')
     for m in untranslated:
         print('  MISS:', m[:90])

@@ -394,6 +394,7 @@ function chip_affiliatewp_cleanup_deleted_affiliate( $affiliate_id, $delete_data
 
 	delete_user_meta( $user_id, 'payment_account_number' );
 	delete_user_meta( $user_id, 'payment_bank_code' );
+	delete_user_meta( $user_id, 'chip_bank_account_superseded' );
 }
 add_action( 'affwp_affiliate_deleted', 'chip_affiliatewp_cleanup_deleted_affiliate', 10, 3 );
 
@@ -410,6 +411,136 @@ function chip_affiliatewp_bank_details_fingerprint( $affiliate_id ) {
 	$details = chip_affiliatewp_get_bank_details( $affiliate_id );
 
 	return md5( strtoupper( $details['bank_code'] ) . '|' . preg_replace( '/\D/', '', $details['account_number'] ) );
+}
+
+/**
+ * Deletes a superseded CHIP Send bank account.
+ *
+ * Correcting a mistyped account number, or changing banks, produces a new
+ * reference and therefore a new CHIP record, because a reference derived from
+ * the details is what makes registration idempotent. Without this the previous
+ * record stays in the merchant's CHIP account for good — one stale recipient per
+ * correction, still payable by anything holding its id.
+ *
+ * The delete is refused while a payout is still in flight against the account:
+ * CHIP's delete prevents future payments, and a transfer already executing must
+ * not be interfered with.
+ *
+ * @param int         $affiliate_id Affiliate ID.
+ * @param int         $account_id   CHIP bank account ID to delete.
+ * @param string|null $mode         Optional. Mode the record belongs to.
+ * @return bool
+ */
+function chip_affiliatewp_delete_superseded_bank_account( $affiliate_id, $account_id, $mode = null ) {
+	$account_id = absint( $account_id );
+
+	if ( ! $account_id ) {
+		return false;
+	}
+
+	$mode = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
+
+	if ( chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) ) {
+		return false;
+	}
+
+	$response = chip_affiliatewp_request( 'DELETE', '/send/bank_accounts/' . $account_id, array(), array(), $mode );
+
+	if ( is_wp_error( $response ) ) {
+		/*
+		 * Already gone, or CHIP refused. CHIP answers a delete of an unknown id
+		 * with an error, and a record the merchant removed themselves should not
+		 * be retried forever, so the marker is cleared either way.
+		 */
+		chip_affiliatewp_forget_superseded_bank_account( $affiliate_id, $mode );
+
+		return false;
+	}
+
+	chip_affiliatewp_forget_superseded_bank_account( $affiliate_id, $mode );
+
+	return true;
+}
+
+/**
+ * Whether a payout is still working against a bank account.
+ *
+ * The account id is read from the payout's own meta. The payouts table has no
+ * column for it: its service_id holds the instruction id, so comparing against
+ * that would never match and the guard would always answer "not in use".
+ *
+ * @param int $affiliate_id Affiliate ID.
+ * @param int $account_id   CHIP bank account ID.
+ * @return bool
+ */
+function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
+	$account_id = absint( $account_id );
+
+	if ( ! $account_id ) {
+		return false;
+	}
+
+	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
+		array(
+			'affiliate_id'  => absint( $affiliate_id ),
+			'payout_method' => 'chip',
+			'status'        => 'processing',
+			'number'        => 50,
+		)
+	);
+
+	foreach ( (array) $payouts as $payout ) {
+		$data = chip_affiliatewp_payout_data( $payout );
+
+		if ( (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) === $account_id ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * The name to register a recipient bank account under.
+ *
+ * `affwp_get_affiliate_name()` returns an empty string when the user has no
+ * first or last name set, which is the ordinary state of an account created
+ * with an email address and a password. CHIP requires a name of at least one
+ * character, so passing it through unchanged makes account registration fail
+ * and the affiliate unpayable. Fall back to the login, then the email, and
+ * finally to something explicitly usable.
+ *
+ * @param int $affiliate_id Affiliate ID.
+ * @return string
+ */
+function chip_affiliatewp_bank_account_name( $affiliate_id ) {
+	$affiliate_id = absint( $affiliate_id );
+	$name         = trim( (string) affwp_get_affiliate_name( $affiliate_id ) );
+
+	if ( '' !== $name ) {
+		return chip_affiliatewp_substr( $name, 128 );
+	}
+
+	$user_id = function_exists( 'affwp_get_affiliate_user_id' ) ? absint( affwp_get_affiliate_user_id( $affiliate_id ) ) : 0;
+	$user    = $user_id ? get_userdata( $user_id ) : false;
+
+	if ( $user ) {
+		$login = trim( (string) $user->user_login );
+
+		if ( '' !== $login ) {
+			return chip_affiliatewp_substr( $login, 128 );
+		}
+
+		$email = trim( (string) $user->user_email );
+
+		if ( '' !== $email ) {
+			return chip_affiliatewp_substr( $email, 128 );
+		}
+	}
+
+	// Nothing identifying on file. CHIP needs a non-empty name; name it so the
+	// merchant can see which affiliate the account belongs to.
+	return sprintf( 'Affiliate %d', $affiliate_id );
 }
 
 /**
@@ -440,13 +571,21 @@ function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
 		return new WP_Error( 'chip_missing_bank_details', __( 'This affiliate has no bank account details on file.', 'chip-for-affiliatewp' ) );
 	}
 
+	/*
+	 * Corrected details leave the record registered under the old reference
+	 * behind in the CHIP account. Clear it once the replacement is confirmed,
+	 * never before: deleting first would leave the affiliate without a payable
+	 * account if the new registration were to fail.
+	 */
+	$superseded = chip_affiliatewp_superseded_bank_account_id( $affiliate_id, $mode );
+
 	$response = chip_affiliatewp_request(
 		'POST',
 		'/send/bank_accounts',
 		array(
 			'account_number' => $details['account_number'],
 			'bank_code'      => $details['bank_code'],
-			'name'           => chip_affiliatewp_substr( (string) affwp_get_affiliate_name( $affiliate_id ), 128 ),
+			'name'           => chip_affiliatewp_bank_account_name( $affiliate_id ),
 			'reference'      => chip_affiliatewp_bank_reference( $affiliate_id ),
 		),
 		array(),
@@ -455,6 +594,10 @@ function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
 
 	if ( is_wp_error( $response ) ) {
 		return $response;
+	}
+
+	if ( $superseded && ! empty( $response['id'] ) ) {
+		chip_affiliatewp_delete_superseded_bank_account( $affiliate_id, $superseded, $mode );
 	}
 
 	if ( empty( $response['id'] ) ) {
@@ -620,14 +763,90 @@ function chip_affiliatewp_store_bank_details( $user_id, $bank_code, $number ) {
 
 	/*
 	 * New details mean the cached CHIP Send account id no longer describes this
-	 * affiliate's account. Drop it so the next payout registers the new details
-	 * rather than paying the previous account.
+	 * affiliate's account. Record the record this change supersedes, per mode,
+	 * then drop the cache so the next payout registers the new details rather
+	 * than paying the previous account.
+	 *
+	 * The superseded account cannot be deleted here: the new details have not
+	 * been registered with CHIP yet, and deleting first would leave the
+	 * affiliate with nothing payable if that registration were to fail.
 	 */
 	if ( $changed ) {
+		$previous = get_user_meta( $user_id, 'chip_bank_account', true );
+
+		if ( is_array( $previous ) ) {
+			$superseded = get_user_meta( $user_id, 'chip_bank_account_superseded', true );
+			$superseded = is_array( $superseded ) ? $superseded : array();
+
+			foreach ( array( 'test', 'live' ) as $record_mode ) {
+				$record = $previous[ $record_mode ] ?? null;
+
+				if ( is_array( $record ) && ! empty( $record['id'] ) ) {
+					$superseded[ $record_mode ] = absint( $record['id'] );
+				}
+			}
+
+			if ( $superseded ) {
+				update_user_meta( $user_id, 'chip_bank_account_superseded', $superseded );
+			}
+		}
+
 		delete_user_meta( $user_id, 'chip_bank_account' );
 	}
 
 	return $changed;
+}
+
+/**
+ * Returns the CHIP bank account a details change superseded, for a mode.
+ *
+ * @param int    $affiliate_id Affiliate ID.
+ * @param string $mode         Mode the record belongs to.
+ * @return int Account ID, or 0 when there is nothing to clear.
+ */
+function chip_affiliatewp_superseded_bank_account_id( $affiliate_id, $mode ) {
+	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
+
+	if ( ! $user_id ) {
+		return 0;
+	}
+
+	$superseded = get_user_meta( $user_id, 'chip_bank_account_superseded', true );
+
+	if ( ! is_array( $superseded ) ) {
+		return 0;
+	}
+
+	return absint( $superseded[ $mode ] ?? 0 );
+}
+
+/**
+ * Forgets a superseded bank account once it has been deleted.
+ *
+ * @param int    $affiliate_id Affiliate ID.
+ * @param string $mode         Mode the record belonged to.
+ * @return void
+ */
+function chip_affiliatewp_forget_superseded_bank_account( $affiliate_id, $mode ) {
+	$user_id = affwp_get_affiliate_user_id( $affiliate_id );
+
+	if ( ! $user_id ) {
+		return;
+	}
+
+	$superseded = get_user_meta( $user_id, 'chip_bank_account_superseded', true );
+
+	if ( ! is_array( $superseded ) || ! isset( $superseded[ $mode ] ) ) {
+		return;
+	}
+
+	unset( $superseded[ $mode ] );
+
+	if ( $superseded ) {
+		update_user_meta( $user_id, 'chip_bank_account_superseded', $superseded );
+	} else {
+		delete_user_meta( $user_id, 'chip_bank_account_superseded' );
+	}
 }
 
 /**

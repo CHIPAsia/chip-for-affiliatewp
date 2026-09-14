@@ -41,6 +41,18 @@ function do_action( $hook, ...$args ) {
 	}
 }
 
+/**
+ * Mirrors WordPress: identical to do_action(), but the arguments arrive as a
+ * single array. Action Scheduler runs scheduled callbacks through this, so a
+ * callback whose parameter does not match the args array behaves differently
+ * here than under do_action().
+ */
+function do_action_ref_array( $hook, $args ) {
+	foreach ( $GLOBALS['__actions'][ $hook ] ?? array() as $cb ) {
+		call_user_func_array( $cb, array_values( (array) $args ) );
+	}
+}
+
 function apply_filters( $hook, $value, ...$args ) {
 	foreach ( $GLOBALS['__filters'][ $hook ] ?? array() as $cb ) {
 		$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
@@ -130,6 +142,36 @@ function esc_attr( $text ) {
 
 function esc_url( $text ) {
 	return $text;
+}
+
+/**
+ * The escaping helpers that echo rather than return, mirroring WordPress: they
+ * emit the escaped value. The forms use these, so rendering them in a test
+ * needs the same behaviour.
+ */
+function esc_html_e( $text, $domain = null ) {
+	echo esc_html( $text );
+}
+
+function esc_attr_e( $text, $domain = null ) {
+	echo esc_attr( $text );
+}
+
+function esc_html__s( $text, $domain = null ) {
+	return esc_html( $text );
+}
+
+/**
+ * Mirrors WordPress: emits ` selected='selected'` when the two values match.
+ */
+function selected( $selected, $current = true, $display = true ) {
+	$result = ( (string) $selected === (string) $current ) ? " selected='selected'" : '';
+
+	if ( $display ) {
+		echo $result;
+	}
+
+	return $result;
 }
 
 function wp_json_encode( $data ) {
@@ -231,6 +273,16 @@ function wp_remote_request( $url, $args ) {
 		'body'    => $args['body'] ?? null,
 	);
 
+	/*
+	 * Transport-failure simulation: a test can make the next request fail the
+	 * way an unreachable CHIP does, so the error path is exercised rather than
+	 * assumed. The call is still logged above, because a failed request is
+	 * still a request that was made.
+	 */
+	if ( ! empty( $GLOBALS['__http_transport_error'] ) ) {
+		return new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' );
+	}
+
 	foreach ( $GLOBALS['__http_queue'] as $idx => $entry ) {
 		if ( false !== strpos( $url, $entry['match'] ) ) {
 			// Optional method constraint: "/webhooks" is a prefix of
@@ -299,6 +351,15 @@ $GLOBALS['__current_user_can'] = true;
 $GLOBALS['__die_message']      = '';
 $GLOBALS['__redirected']       = '';
 
+/**
+ * Mirrors WordPress: produces a nonce for an action. The harness's verifier
+ * accepts the literal 'good-nonce', which is what the save-handler tests feed
+ * it, so this returns that for every action.
+ */
+function wp_create_nonce( $action = -1 ) {
+	return 'good-nonce';
+}
+
 function wp_verify_nonce( $nonce, $action = '' ) {
 	return 'good-nonce' === $nonce ? 1 : false;
 }
@@ -321,8 +382,22 @@ function wp_parse_url( $url, $component = -1 ) {
 	return parse_url( $url, $component );
 }
 
+/**
+ * Mirrors WordPress: emits the nonce field. Returning nothing would make a form
+ * look nonce-less to any test that inspects the rendered markup.
+ */
 function wp_nonce_field( $action = '', $name = '_wpnonce', $echo = true ) {
-	return '';
+	$field = sprintf(
+		'<input type="hidden" id="%1$s" name="%1$s" value="%2$s" />',
+		esc_attr( $name ),
+		esc_attr( wp_create_nonce( $action ) )
+	);
+
+	if ( $echo ) {
+		echo $field;
+	}
+
+	return $field;
 }
 
 function current_user_can( $cap ) {
@@ -444,20 +519,44 @@ class Fake_WP_Settings {
 class Fake_AffiliateWP {
 	public $settings;
 	public $affiliates;
+	public $referrals;
 
 	public function __construct() {
-		$this->settings = new Fake_WP_Settings();
+		$this->settings   = new Fake_WP_Settings();
 		$this->affiliates = new Fake_Affiliates_Container();
+		$this->referrals  = new Fake_Referrals_DB();
 	}
 }
 
 class Fake_Affiliates_Container {
 	public $payouts;
 	public $payout_batches;
+	public $referrals;
 
 	public function __construct() {
 		$this->payouts        = new Fake_Payouts_DB();
 		$this->payout_batches = new Fake_Payout_Batches_DB();
+		$this->referrals      = new Fake_Referrals_DB();
+	}
+}
+
+/**
+ * Mirrors core's referrals store for the one write the plugin makes on it:
+ * detaching a referral from a failed payout.
+ */
+class Fake_Referrals_DB {
+	public function update( $referral_id, $data, $where = '', $type = '' ) {
+		$referral_id = (int) $referral_id;
+
+		if ( ! isset( $GLOBALS['__referral_rows'][ $referral_id ] ) ) {
+			return false;
+		}
+
+		foreach ( (array) $data as $field => $value ) {
+			$GLOBALS['__referral_rows'][ $referral_id ]->$field = $value;
+		}
+
+		return true;
 	}
 }
 
@@ -617,10 +716,25 @@ function wp_list_pluck( $list, $key ) {
 class Fake_User {
 	public $ID;
 	public $user_email;
+	public $user_login;
 
-	public function __construct( $id, $email ) {
+	public function __construct( $id, $email, $login = '' ) {
 		$this->ID         = $id;
 		$this->user_email = $email;
+		$this->user_login = '' !== $login ? $login : 'user' . $id;
+	}
+}
+
+/**
+ * The affiliate object AffiliateWP passes to affwp_edit_affiliate_end.
+ */
+class Fake_Affiliate {
+	public $affiliate_id;
+	public $user_id;
+
+	public function __construct( $affiliate_id, $user_id = 0 ) {
+		$this->affiliate_id = (int) $affiliate_id;
+		$this->user_id      = (int) $user_id;
 	}
 }
 
@@ -710,6 +824,20 @@ function affwp_get_affiliate_id() {
 	return $GLOBALS['__current_affiliate_id'] ?? 0;
 }
 
+/**
+ * Mirrors core: the affiliate area's page URL, optionally for a tab. Driven by
+ * __affiliate_area_urls so a test can put the site in the state it needs.
+ */
+function affwp_get_affiliate_area_page_url( $tab = '' ) {
+	$urls = $GLOBALS['__affiliate_area_urls'] ?? array();
+
+	if ( '' !== $tab ) {
+		return (string) ( $urls[ $tab ] ?? '' );
+	}
+
+	return (string) ( $urls[''] ?? 'https://example.test/affiliate-area/' );
+}
+
 function affwp_get_affiliate_usable_payout_method( $affiliate_id ) {
 	$pick = $GLOBALS['__affiliate_meta'][ (int) $affiliate_id ]['payout_method_pick'] ?? '';
 
@@ -717,7 +845,35 @@ function affwp_get_affiliate_usable_payout_method( $affiliate_id ) {
 }
 
 function affwp_get_affiliate_name( $affiliate_id ) {
-	return 'Test Affiliate ' . $affiliate_id;
+	/*
+	 * Mirrors the core behaviour that matters here: the name is built from the
+	 * user's first and last name, and an account with neither returns an empty
+	 * string. Returning a stand-in name unconditionally would hide that.
+	 */
+	$uid = affwp_get_affiliate_user_id( $affiliate_id );
+	$u   = isset( $GLOBALS['__users'][ $uid ] ) ? $GLOBALS['__users'][ $uid ] : false;
+
+	if ( ! $u ) {
+		return '';
+	}
+
+	$first = isset( $GLOBALS['__user_meta'][ $uid ]['first_name'] ) ? trim( (string) $GLOBALS['__user_meta'][ $uid ]['first_name'] ) : '';
+	$last  = isset( $GLOBALS['__user_meta'][ $uid ]['last_name'] ) ? trim( (string) $GLOBALS['__user_meta'][ $uid ]['last_name'] ) : '';
+
+	if ( '' !== $first && '' !== $last ) {
+		return $first . ' ' . $last;
+	}
+
+	if ( '' !== $first ) {
+		return $first;
+	}
+
+	if ( '' !== $last ) {
+		return $last;
+	}
+
+	// No name on the account: core returns an empty string.
+	return '';
 }
 
 function affwp_get_affiliate_payment_email( $affiliate_id ) {
@@ -777,6 +933,14 @@ function affwp_get_payout( $payout ) {
 		return $payout;
 	}
 	return $GLOBALS['__payout_rows'][ (int) $payout ] ?? false;
+}
+
+/**
+ * Mirrors core: the store's currency, which the guard reads. Driven by the
+ * afwp_settings stub so a test can put the store on MYR or something else.
+ */
+function affwp_get_currency() {
+	return (string) affiliate_wp()->settings->get( 'currency', 'MYR' );
 }
 
 function affwp_add_payout( $args ) {
@@ -1212,9 +1376,40 @@ $GLOBALS['__referral_rows'][11] = new Fake_Referral( 11, 3, '100.00', 'unpaid', 
 // GET_LOCK stub: return 1 immediately via direct $wpdb->get_var override.
 class Fake_WPDO {
 	public $is_mysql = true;
-	public function prepare( $q, ...$a ) { return $q; }
-	public function get_var( $q ) { return '1'; }
-	public function query( $q ) { return true; }
+	public function prepare( $q, ...$a ) {
+		/*
+		 * Substitute the placeholders the way real wpdb does. Returning the
+		 * query unchanged would hide the argument from anything that inspects
+		 * the statement.
+		 */
+		foreach ( $a as $value ) {
+			$q = preg_replace( '/%[sd]/', is_int( $value ) ? (string) $value : "'" . $value . "'", $q, 1 );
+		}
+
+		return $q;
+	}
+	public function get_var( $q ) {
+		/*
+		 * A test can hold the lock by setting __lock_held to the lock name it
+		 * wants contended, so the blocked path is exercised the way a second
+		 * worker would hit it. Otherwise the lock is free.
+		 */
+		$name = $GLOBALS['__lock_held'] ?? null;
+
+		if ( null !== $name && false !== strpos( (string) $q, $name ) ) {
+			return '0';
+		}
+
+		return '1';
+	}
+	public function query( $q ) {
+		// Record RELEASE_LOCK so a test can assert the lock was handed back.
+		if ( false !== strpos( (string) $q, 'RELEASE_LOCK' ) ) {
+			$GLOBALS['__lock_released'][] = (string) $q;
+		}
+
+		return true;
+	}
 }
 $GLOBALS['wpdb'] = new Fake_WPDO();
 
@@ -2394,6 +2589,8 @@ $GLOBALS['__referral_rows'][97] = new Fake_Referral( 97, 3, '2.00', 'unpaid', $o
 $GLOBALS['__http_queue'] = array();
 // The submit path checks whether the reference already exists first.
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 601, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
 chip_affiliatewp_submit_payout( $ok_id );
 check( 'successful payout description stays JSON-free', null === json_decode( (string) affwp_get_payout( $ok_id )->description, true ) );
@@ -3004,7 +3201,7 @@ $payout_id = affiliate_wp()->affiliates->payouts->add(
 $GLOBALS['__referral_rows'][130] = new Fake_Referral( 130, 3, '7.00', 'unpaid', $payout_id );
 
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5001, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5001, 'state' => 'executing', 'reference' => 'XT-PO-' . $payout_id, 'amount' => '7.00', 'bank_account_id' => 84 ) ) ) );
 $result = chip_affiliatewp_submit_payout( $payout_id );
 
 $posts = 0;
@@ -3044,7 +3241,7 @@ $done_id = affiliate_wp()->affiliates->payouts->add(
 $GLOBALS['__referral_rows'][131] = new Fake_Referral( 131, 3, '7.00', 'unpaid', $done_id );
 
 $GLOBALS['__http_queue'] = array();
-$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5002, 'state' => 'completed', 'reference' => 'XT-PO-' . $done_id, 'receipt_url' => 'https://www.chip-in.asia/receipts/send/done' ) ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array( array( 'id' => 5002, 'state' => 'completed', 'reference' => 'XT-PO-' . $done_id, 'amount' => '7.00', 'bank_account_id' => 84, 'receipt_url' => 'https://www.chip-in.asia/receipts/send/done' ) ) ) );
 chip_affiliatewp_submit_payout( $done_id );
 
 check( 'an adopted completed instruction pays the payout', 'paid' === affwp_get_payout( $done_id )->status );
@@ -4388,7 +4585,7 @@ check( 'the build ships the languages directory', false !== strpos( $build_sourc
 
 // Development-only directories must NOT ship.
 foreach ( array( 'tests', 'scripts', 'vendor' ) as $dev_only ) {
-	check( 'the build does not ship ' . $dev_only, ! preg_match( '/^\s*' . $dev_only . '\s*\\/m', $build_source ) );
+	check( 'the build does not ship ' . $dev_only, ! preg_match( '/^\s*' . preg_quote( $dev_only, '/' ) . '\s*$/m', $build_source ) );
 }
 
 /*
@@ -4575,8 +4772,13 @@ foreach ( glob( $repo . '/includes/*.php' ) as $path ) {
 		}
 	}
 
-	// $input['name'] = ... inside the options sanitizer
-	if ( preg_match_all( "/\\$input\[\s*'([a-z0-9_]+)'\s*\]/", $src, $hits ) ) {
+	/*
+	 * $input['name'] = ... inside the options sanitizer. Only assignments
+	 * count: the same array is read and unset() in there, and a key that is
+	 * explicitly cleared before storage is never persisted, so uninstall has
+	 * nothing to remove.
+	 */
+	if ( preg_match_all( '/\$input\[\s*\'([a-z0-9_]+)\'\s*\]\s*=/', $src, $hits ) ) {
 		foreach ( $hits[1] as $name ) {
 			$written[ $name ] = basename( $path );
 		}
@@ -5522,6 +5724,3748 @@ $GLOBALS['__options']['chip_reference_prefix'] = '';
 add_filter( 'chip_affiliatewp_reference_prefix_fallback', function () { return 'a-b!c@d#'; } );
 
 check( 'a filtered prefix is alphanumeric and capped', 'ABCD' === chip_affiliatewp_reference_prefix() );
+
+echo "\n== Test 90: an amount that rounds below one cent is refused before sending ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 501, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+/*
+ * 0.004 formats to "0.00" and CHIP refuses it. The old guard only compared
+ * against zero, so this was submitted, rejected, and the payout failed with a
+ * provider error instead of a clear message.
+ */
+$tiny = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1300 ),
+		'amount'        => '0.004',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1300] = new Fake_Referral( 1300, 3, '0.004', 'unpaid', $tiny );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+chip_affiliatewp_submit_payout_locked( $tiny, affwp_get_payout( $tiny ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'a sub-cent payout is not submitted', array() === $posts );
+check( 'the payout failed', 'failed' === affwp_get_payout( $tiny )->status );
+
+$row  = affwp_get_payout( $tiny );
+$data = chip_affiliatewp_payout_data( $row );
+
+check( 'the failure names the amount', false !== strpos( (string) $row->description, '0.00' ) );
+check( 'the failure is classified as a data error', 'data_error' === ( $row->failure_class ?? '' ) );
+
+// A single referral that rounds below a cent is refused the same way.
+$GLOBALS['__options']['chip_test_mode'] = 1;
+
+$result = chip_affiliatewp_pay_single_referral( 1301, true );
+
+$GLOBALS['__referral_rows'][1301] = new Fake_Referral( 1301, 3, '0.002', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_pay_single_referral( 1301 );
+
+check( 'a sub-cent referral is refused', is_wp_error( $result ) );
+check( 'the refusal names the amount', false !== strpos( $result->get_error_message(), '0.00' ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'no instruction was sent for the referral', array() === $posts );
+
+// One cent still goes through: the guard must not block legitimate small pays.
+$ok = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1302 ),
+		'amount'        => '0.01',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1302] = new Fake_Referral( 1302, 3, '0.01', 'unpaid', $ok );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 7001, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_submit_payout_locked( $ok, affwp_get_payout( $ok ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'one cent is still submitted', 1 === count( $posts ) );
+
+/*
+ * The account the instruction was created against must be recorded, or the
+ * in-use guard cannot tell an account a payout is relying on from one that is
+ * free to delete.
+ */
+$submitted_account = (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $ok ) )['bank_account_id'] ?? 0 );
+
+check( 'the destination account is recorded at submission', 501 === $submitted_account );
+check(
+	'the guard sees the in-flight account',
+	true === chip_affiliatewp_bank_account_is_in_use( 3, 501 )
+);
+check(
+	'an unrelated account is not reported in use',
+	false === chip_affiliatewp_bank_account_is_in_use( 3, 999 )
+);
+
+echo "\n== Test 91: a racing delivery does not create a second payout ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+/*
+ * A single-referral run that submitted but never got a payout row: the webhook
+ * is what creates it. If the lock is taken after the lookup, two deliveries
+ * arriving together each find nothing and each create a row.
+ */
+$GLOBALS['__referral_rows'][1400] = new Fake_Referral( 1400, 3, '11.00', 'unpaid', 0 );
+
+$payload = array(
+	'id'        => 8800,
+	'state'     => 'executing',
+	'reference' => 'XT-R-1400',
+);
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook( $payload, 'test' );
+$after_first = count( $GLOBALS['__payout_rows'] );
+
+check( 'the first delivery created a payout', $after_first === $before + 1 );
+
+chip_affiliatewp_process_instruction_webhook( $payload, 'test' );
+
+check( 'a redelivery creates no second payout', count( $GLOBALS['__payout_rows'] ) === $after_first );
+
+$matching = array_values(
+	array_filter(
+		$GLOBALS['__payout_rows'],
+		function ( $row ) {
+			return 8800 === (int) $row->service_id;
+		}
+	)
+);
+
+check( 'exactly one payout carries the instruction', 1 === count( $matching ) );
+
+/*
+ * The decisive property: while another worker holds the lock, this delivery
+ * must do nothing at all. Under the old ordering the row was created before the
+ * lock was taken, so a concurrent delivery produced a second payout even though
+ * it then bailed out.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__referral_rows'][1401] = new Fake_Referral( 1401, 3, '11.00', 'unpaid', 0 );
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+// Pretend another worker owns the lock for this instruction.
+$GLOBALS['__lock_held'] = 'chip_affiliatewp_' . md5( 'instruction_8801' );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8801, 'state' => 'executing', 'reference' => 'XT-R-1401' ),
+	'test'
+);
+
+check( 'a blocked delivery creates no payout', count( $GLOBALS['__payout_rows'] ) === $before );
+
+$GLOBALS['__lock_held'] = null;
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8801, 'state' => 'executing', 'reference' => 'XT-R-1401' ),
+	'test'
+);
+
+check( 'the delivery runs once the lock is free', count( $GLOBALS['__payout_rows'] ) === $before + 1 );
+
+echo "\n== Test 92: corrected bank details delete the superseded CHIP record ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+// Registered under the first set of details.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 700, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$first = chip_affiliatewp_ensure_bank_account( 3 );
+
+check( 'the first registration returned an account', is_array( $first ) && 700 === (int) $first['id'] );
+
+// The affiliate corrects a mistyped account number.
+chip_affiliatewp_store_bank_details( 7, 'MBBEMYKL', '157380112230' );
+
+$superseded = chip_affiliatewp_superseded_bank_account_id( 3, 'test' );
+
+check( 'the old account is remembered as superseded', 700 === (int) $superseded );
+
+// The new details register a new account, and the old one is deleted.
+unset( $GLOBALS['__chip_bank_lookup_override'] );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 701, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts/700', 'method' => 'DELETE', 'code' => 200, 'body' => array() );
+$GLOBALS['__http_log'] = array();
+
+$second = chip_affiliatewp_ensure_bank_account( 3 );
+
+check( 'the corrected details registered', is_array( $second ) && 701 === (int) $second['id'] );
+
+$deletes = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $entry ) {
+			return 'DELETE' === ( $entry['method'] ?? '' ) && false !== strpos( (string) $entry['url'], '/bank_accounts/700' );
+		}
+	)
+);
+
+check( 'the superseded account was deleted at CHIP', 1 === count( $deletes ) );
+check( 'the marker was cleared', 0 === chip_affiliatewp_superseded_bank_account_id( 3, 'test' ) );
+
+/*
+ * An account still carrying an in-flight payout must not be deleted: CHIP's
+ * delete blocks future payments, and a transfer already executing is not
+ * something to interfere with.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 700, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+chip_affiliatewp_ensure_bank_account( 3 );
+
+/*
+ * A payout is in flight against that account. The account id lives in the
+ * payout's meta because the payouts table has no column for it - service_id is
+ * the instruction id - so setting service_id here would test the wrong thing.
+ */
+$live = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1500 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'service_id'    => 9901,
+	)
+);
+
+chip_affiliatewp_update_payout_data(
+	(int) $live,
+	array( 'instruction_id' => 9901, 'bank_account_id' => 700, 'state' => 'executing', 'mode' => 'test' )
+);
+
+check( 'the account is reported in use', true === chip_affiliatewp_bank_account_is_in_use( 3, 700 ) );
+
+/*
+ * The lookup override answers every bank-account URL, so it is cleared here or
+ * it would swallow the delete and the assertion would pass for the wrong
+ * reason. A delete mock is queued so that, had the guard not stopped it, the
+ * call would have been made and logged.
+ */
+unset( $GLOBALS['__chip_bank_lookup_override'] );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts/700', 'method' => 'DELETE', 'code' => 200, 'body' => array() );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_delete_superseded_bank_account( 3, 700, 'test' );
+
+$deletes = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $entry ) {
+			return 'DELETE' === ( $entry['method'] ?? '' );
+		}
+	)
+);
+
+check( 'an in-flight account is not deleted', array() === $deletes );
+
+// A settled payout no longer protects the account.
+affiliate_wp()->affiliates->payouts->update( $live, array( 'status' => 'paid' ), '', 'payout' );
+
+check( 'a settled payout frees the account', false === chip_affiliatewp_bank_account_is_in_use( 3, 700 ) );
+
+echo "\n== Test 93: an instruction CHIP no longer holds settles the payout ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1600 ),
+		'amount'        => '40.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1600] = new Fake_Referral( 1600, 3, '40.00', 'unpaid', $payout_id );
+
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array( 'instruction_id' => 8800, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1, 'poll_count' => 0 )
+);
+
+// CHIP answers 404: the record is gone and will never answer.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/8800', 'method' => 'GET', 'code' => 404, 'body' => array( 'message' => 'Record not found' ) );
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_check_payout_status( $payout_id );
+
+$row  = affwp_get_payout( $payout_id );
+$data = chip_affiliatewp_payout_data( $row );
+
+check( 'the payout is settled as failed', 'failed' === $row->status );
+check( 'the failure names the missing instruction', false !== strpos( (string) $row->description, '8800' ) );
+check( 'the failure is classified as needing the admin', 'admin_action_required' === ( $row->failure_class ?? '' ) );
+check( 'the dead instruction id is cleared', empty( $data['instruction_id'] ) );
+check( 'the attempt advanced so a retry can send', 2 === (int) ( $data['attempt'] ?? 0 ) );
+check( 'the referral is released to unpaid', 'unpaid' === $GLOBALS['__referral_rows'][1600]->status );
+check( 'no further check is queued', array() === $GLOBALS['__as_scheduled'] );
+
+/*
+ * A transport failure must stay retryable: only a definite 404 settles.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$flaky = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1601 ),
+		'amount'        => '40.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1601] = new Fake_Referral( 1601, 3, '40.00', 'unpaid', $flaky );
+
+chip_affiliatewp_update_payout_data(
+	$flaky,
+	array( 'instruction_id' => 8801, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1, 'poll_count' => 0 )
+);
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/8801', 'method' => 'GET', 'code' => 503, 'body' => array( 'message' => 'unavailable' ) );
+$GLOBALS['__as_scheduled'] = array();
+
+chip_affiliatewp_check_payout_status( $flaky );
+
+check( 'an outage does not fail the payout', 'processing' === affwp_get_payout( $flaky )->status );
+check( 'an outage reschedules a check', ! empty( $GLOBALS['__as_scheduled'] ) );
+
+echo "\n== Test 94: another site's instruction is never adopted ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1700 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1700] = new Fake_Referral( 1700, 3, '7.00', 'unpaid', $payout_id );
+
+/*
+ * The reference resolves to an instruction for a different amount and a
+ * different recipient: another installation sharing this CHIP account minted
+ * the same reference for its own payout. Adopting it would mark these referrals
+ * paid against money that went elsewhere.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6001,
+				'state'           => 'completed',
+				'reference'       => 'XT-PO-' . $payout_id,
+				'amount'          => '999.00',
+				'bank_account_id' => 9999,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$payout = affwp_get_payout( $payout_id );
+$data   = chip_affiliatewp_payout_data( $payout );
+
+check( 'the foreign instruction is not adopted', is_wp_error( $result ) );
+check( 'its id is not stored', empty( $data['instruction_id'] ) );
+check( 'the payout did not become paid', 'paid' !== $payout->status );
+check( 'the referral was not marked paid', 'paid' !== $GLOBALS['__referral_rows'][1700]->status );
+// fail_payout wraps the reason, so it surfaces on the row as the description.
+check( 'the refusal explains the conflict', false !== strpos( (string) $payout->description, 'reference at CHIP' ) );
+check( 'the failure is classified as a data error', 'data_error' === ( $payout->failure_class ?? '' ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'nothing was sent under the conflicted reference', array() === $posts );
+
+// The amount alone is not enough: a matching amount to a different account is still foreign.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$second = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1701 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1701] = new Fake_Referral( 1701, 3, '7.00', 'unpaid', $second );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6002,
+				'state'           => 'completed',
+				'reference'       => 'XT-PO-' . $second,
+				'amount'          => '7.00',
+				'bank_account_id' => 4242,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result2 = chip_affiliatewp_submit_payout( $second );
+
+check( 'a same-amount different-recipient instruction is refused too', is_wp_error( $result2 ) );
+check( 'its id is not stored either', empty( chip_affiliatewp_payout_data( affwp_get_payout( $second ) )['instruction_id'] ) );
+
+/*
+ * Same recipient, wrong amount: only the amount comparison can catch this, so
+ * the check is exercised in isolation rather than leaning on the account match.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$fourth = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1703 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1703] = new Fake_Referral( 1703, 3, '7.00', 'unpaid', $fourth );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6004,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $fourth,
+				'amount'          => '8.00',
+				'bank_account_id' => 84,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result4 = chip_affiliatewp_submit_payout( $fourth );
+
+check( 'a matching-account different-amount instruction is refused', is_wp_error( $result4 ) );
+check( 'its id is not stored on the row either', empty( chip_affiliatewp_payout_data( affwp_get_payout( $fourth ) )['instruction_id'] ) );
+
+// The affiliate's own instruction, matching on both, is still adopted.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$third = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1702 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1702] = new Fake_Referral( 1702, 3, '7.00', 'unpaid', $third );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 6003,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $third,
+				'amount'          => '7.00',
+				'bank_account_id' => 84,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result3 = chip_affiliatewp_submit_payout( $third );
+
+check( 'a genuine instruction is still adopted', true === $result3 );
+check( 'its id is stored', 6003 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $third ) )['instruction_id'] ?? 0 ) );
+
+echo "\n== Test 95: a payout may re-adopt the instruction it was submitted under ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1800 ),
+		'amount'        => '7.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1800] = new Fake_Referral( 1800, 3, '7.00', 'unpaid', $payout_id );
+
+/*
+ * This payout was submitted before: the row carries the instruction id in
+ * service_id. Re-finding that same instruction must be accepted, or a retry
+ * after an unclear response could never reconcile.
+ */
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array( 'instruction_id' => 7001, 'state' => 'executing', 'mode' => 'test', 'attempt' => 1 )
+);
+
+affiliate_wp()->affiliates->payouts->update(
+	$payout_id,
+	array( 'service_id' => 7001 ),
+	'',
+	'payout'
+);
+
+$payout = affwp_get_payout( $payout_id );
+
+check(
+	'its own instruction is recognised as its own',
+	true === chip_affiliatewp_instruction_belongs_to_payout(
+		$payout,
+		array(
+			'id'              => 7001,
+			'amount'          => '7.00',
+			'bank_account_id' => 9999,
+			'state'           => 'executing',
+		)
+	)
+);
+
+// And the full path still adopts rather than re-sending.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 7001,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $payout_id,
+				'amount'          => '7.00',
+				'bank_account_id' => 9999,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'a resubmission adopts its own live instruction', true === $result );
+check( 'and sends nothing new', array() === $posts );
+
+echo "\n== Test 96: a POST that times out reconciles when the instruction exists ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 1900 ),
+		'amount'        => '12.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][1900] = new Fake_Referral( 1900, 3, '12.00', 'unpaid', $payout_id );
+
+/*
+ * The POST times out: CHIP may or may not have accepted it. The payout fails,
+ * and the attempt is NOT advanced because a timeout says nothing about whether
+ * the instruction exists.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+
+$GLOBALS['__http_log'] = array();
+
+$GLOBALS['__http_error_override'] = true;
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+$GLOBALS['__http_error_override'] = false;
+
+$after_fail = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'a timed-out submission fails the payout', 'failed' === affwp_get_payout( $payout_id )->status );
+/*
+ * attempt is absent until something advances it, and reads as 1. A timeout must
+ * leave it that way: advancing would mint a fresh reference and send a second
+ * instruction for a submission CHIP may have accepted.
+ */
+check( 'the timeout did not burn the attempt', 1 === chip_affiliatewp_payout_attempt( $after_fail ) );
+
+/*
+ * CHIP did accept it after all, so the instruction exists under the same
+ * reference. The retry must adopt it rather than send a second time.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 9001,
+				'state'           => 'executing',
+				'reference'       => 'XT-PO-' . $payout_id,
+				'amount'          => '12.00',
+				'bank_account_id' => 84,
+			),
+		),
+	),
+);
+
+$GLOBALS['__http_log'] = array();
+
+$retry = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+$data  = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the retry adopts the instruction CHIP did accept', 9001 === (int) ( $data['instruction_id'] ?? 0 ) );
+check( 'the retry sends nothing second', array() === $posts );
+check( 'the payout returns to processing', 'processing' === affwp_get_payout( $payout_id )->status );
+
+/*
+ * And the instruction completing later pays it, so the retry truly recovers.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions/9001',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'id'              => 9001,
+		'state'           => 'completed',
+		'reference'       => 'XT-PO-' . $payout_id,
+		'amount'          => '12.00',
+		'bank_account_id' => 84,
+		'receipt_url'     => 'https://www.chip-in.asia/receipts/send/recovered',
+	),
+);
+
+chip_affiliatewp_check_payout_status( $payout_id );
+
+check( 'the recovered instruction pays the payout', 'paid' === affwp_get_payout( $payout_id )->status );
+check( 'the recovered instruction pays the referral', 'paid' === $GLOBALS['__referral_rows'][1900]->status );
+
+echo "\n== Test 97: an outsized note from CHIP is trimmed ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 2000 ),
+		'amount'        => '20.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][2000] = new Fake_Referral( 2000, 3, '20.00', 'unpaid', $payout_id );
+
+/*
+ * CHIP allows up to 64 KiB in rejection_reason. The note is stored on the
+ * payout, listed in the admin, and quoted in the merchant email, so an outsized
+ * reason would bloat all three.
+ */
+$huge = str_repeat( 'Recipient bank declined the transfer. ', 1600 );
+
+check( 'the raw note really is oversized', strlen( $huge ) > 40000 );
+
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'               => 9500,
+		'state'            => 'reviewing',
+		'rejection_reason' => $huge,
+	)
+);
+
+$stored = (string) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['note'] ?? '' );
+
+check( 'the note is stored', '' !== $stored );
+check( 'the stored note is bounded', strlen( $stored ) <= 500 );
+check( 'it still begins with the original wording', 0 === strpos( $stored, 'Recipient bank declined' ) );
+
+// Control characters and newlines do not reach storage either.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'               => 9500,
+		'state'            => 'reviewing',
+		'rejection_reason' => "Needs\nattention\tfrom\x07 the bank manager",
+	)
+);
+
+$stored2 = (string) ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['note'] ?? '' );
+
+check( 'control characters are stripped', false === strpos( $stored2, "\x07" ) );
+check( 'newlines become spaces', false === strpos( $stored2, "\n" ) );
+check( 'the note still reads', false !== strpos( $stored2, 'Needs attention from the bank manager' ) );
+
+// A normal note is left alone.
+chip_affiliatewp_apply_instruction(
+	$payout_id,
+	array(
+		'id'               => 9500,
+		'state'            => 'reviewing',
+		'rejection_reason' => 'Account name does not match.',
+	)
+);
+
+check(
+	'ordinary notes pass through unchanged',
+	'Account name does not match.' === ( chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) )['note'] ?? '' )
+);
+
+echo "\n== Test 98: readiness rejects details CHIP will refuse ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']   = 1;
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__affiliates_map'][3]         = 7;
+$GLOBALS['__users'][7]                  = new Fake_User( 7, 'affiliate@test.dev' );
+
+// Nothing on file: not ready.
+check( 'no details at all is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+// A valid pair: ready.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+check( 'a valid pair is ready', true === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+/*
+ * Details can reach the database without passing the affiliate-area form: the
+ * core fields are editable from the affiliate screen, and imports and earlier
+ * versions write them directly. A payout built on those fails after the batch
+ * exists.
+ */
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '123';
+
+check( 'a too-short account is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '15738011222999999999999999';
+
+check( 'a too-long account is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+$GLOBALS['__user_meta'][7]['payment_account_number'] = 'not-a-number';
+
+check( 'a non-numeric account is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'NOPE';
+
+check( 'an unknown bank code is not ready', false === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'chip', 3 ) );
+
+// Another method is never touched.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '123';
+
+check( 'another method is passed through', true === chip_affiliatewp_payout_method_is_affiliate_ready( true, 'paypal', 3 ) );
+
+echo "\n== Test 99: a non-finite amount never reaches CHIP ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+/*
+ * "1e999" casts to INF, which is greater than zero, so a `<= 0` guard lets it
+ * through and number_format() renders it as "inf" for the API.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_request_budget_allocation( 1e999, 'test' );
+
+check( 'an infinite amount is refused', is_wp_error( $result ) && 'chip_invalid_amount' === $result->get_error_code() );
+check( 'no request was made with it', array() === $GLOBALS['__http_log'] );
+
+$result_nan = chip_affiliatewp_request_budget_allocation( NAN, 'test' );
+
+check( 'a NaN amount is refused', is_wp_error( $result_nan ) && 'chip_invalid_amount' === $result_nan->get_error_code() );
+
+// A negative infinity is not "less than zero and therefore fine".
+$result_neg = chip_affiliatewp_request_budget_allocation( -1e999, 'test' );
+
+check( 'a negative infinite amount is refused', is_wp_error( $result_neg ) );
+
+// The payout path must not be able to send one either.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 2100 ),
+		'amount'        => '0.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][2100] = new Fake_Referral( 2100, 3, '0.00', 'unpaid', $payout_id );
+
+// A payout whose amount cannot be represented as a transferable figure.
+affiliate_wp()->affiliates->payouts->update( $payout_id, array( 'amount' => 'INF' ), '', 'payout' );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$sent = chip_affiliatewp_submit_payout( $payout_id );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'an unrepresentable payout amount is not submitted', array() === $posts );
+
+echo "\n== Test 101: a paid referral gets no second payout from a webhook ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+/*
+ * A referral already paid, with no payout on record: its status was set
+ * directly, or it predates payouts. Materialising a payout for it would give
+ * the retry path a row to resubmit, sending a second instruction for one
+ * commission.
+ */
+$GLOBALS['__referral_rows'][2200] = new Fake_Referral( 2200, 3, '15.00', 'paid', 0 );
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9600, 'state' => 'completed', 'reference' => 'XT-R-2200' ),
+	'test'
+);
+
+check( 'no payout is created for a paid referral', count( $GLOBALS['__payout_rows'] ) === $before );
+check( 'the referral stays paid', 'paid' === $GLOBALS['__referral_rows'][2200]->status );
+
+// The same delivery repeated changes nothing either.
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9600, 'state' => 'completed', 'reference' => 'XT-R-2200' ),
+	'test'
+);
+
+check( 'a redelivery still creates nothing', count( $GLOBALS['__payout_rows'] ) === $before );
+
+/*
+ * An unpaid referral with no payout is still materialised: that is the ordinary
+ * single-referral case the recovery path exists for.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$GLOBALS['__referral_rows'][2201] = new Fake_Referral( 2201, 3, '15.00', 'unpaid', 0 );
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9601, 'state' => 'completed', 'reference' => 'XT-R-2201' ),
+	'test'
+);
+
+check( 'an unpaid referral is still materialised', count( $GLOBALS['__payout_rows'] ) === $before + 1 );
+check( 'and it is paid by the delivery', 'paid' === $GLOBALS['__referral_rows'][2201]->status );
+
+echo "\n== Test 102: the scheduled hooks named at uninstall are real ==\n";
+reset_state();
+
+$plugin_root = dirname( __DIR__ );
+
+$uninstall_src  = (string) file_get_contents( $plugin_root . '/uninstall.php' );
+$lifecycle_src  = (string) file_get_contents( $plugin_root . '/includes/chip-affiliatewp-lifecycle.php' );
+$payouts_src    = (string) file_get_contents( $plugin_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+/*
+ * A hook name that does not exist unschedules nothing, silently: the real
+ * actions stay behind and fire callbacks for a plugin that is gone. The names
+ * in uninstall.php must therefore be the names the plugin schedules.
+ */
+// The hook name is passed on its own line, so the pattern spans newlines.
+preg_match_all( "/as_schedule_[a-z_]+\\(.*?'(chip_affiliatewp_[a-z_]+)'/s", $payouts_src . $lifecycle_src, $scheduled );
+preg_match_all( "/wp_schedule_event\\(.*?'(chip_affiliatewp_[a-z_]+)'/s", $lifecycle_src, $recurring );
+
+$real_hooks = array_values( array_unique( array_merge( $scheduled[1], $recurring[1] ) ) );
+
+check( 'the plugin schedules something', ! empty( $real_hooks ) );
+
+/*
+ * Only the names in the sweep list matter; the file also mentions functions and
+ * option keys, which are not hooks.
+ */
+preg_match( '/\$chip_scheduled_hooks\s*=\s*array\(([^)]*)\)/s', $uninstall_src, $list_match );
+
+check( 'uninstall has a scheduled-hook list', ! empty( $list_match[1] ) );
+
+preg_match_all( "/'(chip_affiliatewp_[a-z_]+)'/", (string) ( $list_match[1] ?? '' ), $cleared );
+
+$cleared_hooks = array_values( array_unique( $cleared[1] ) );
+
+foreach ( $real_hooks as $real_hook ) {
+	check(
+		'uninstall clears the real hook ' . $real_hook,
+		in_array( $real_hook, $cleared_hooks, true )
+	);
+}
+
+check(
+	'uninstall names no hook that does not exist',
+	array() === array_values( array_diff( $cleared_hooks, $real_hooks ) )
+);
+
+echo "\n== Test 103: every failure code reaches a real class ==\n";
+reset_state();
+
+/*
+ * A code that falls through to 'unknown' leaves AffiliateWP without a class to
+ * drive its Retry button, its automatic retry, or the action-required email.
+ * The codes are read out of the source so a new one cannot be added without
+ * deciding what it means.
+ */
+$plugin_root = dirname( __DIR__ );
+$payouts_src = (string) file_get_contents( $plugin_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+preg_match_all( "/fail_payout\((?:[^;]*?)'(chip_[a-z0-9_]+)'/s", $payouts_src, $matches );
+
+// Codes assembled from a state name, e.g. 'chip_instruction_' . $state.
+preg_match_all( "/'(chip_instruction_)'\s*\./", $payouts_src, $dynamic );
+
+$codes = array_values( array_unique( $matches[1] ) );
+
+check( 'failure codes were found in the source', ! empty( $codes ) );
+
+/*
+ * A code ending in an underscore is the prefix of a concatenation, not a code
+ * on its own: it resolves to a CHIP instruction state at the call site. Replace
+ * it with each state it can become.
+ */
+$codes = array_values(
+	array_filter(
+		$codes,
+		function ( $code ) {
+			return '_' !== substr( $code, -1 );
+		}
+	)
+);
+
+foreach ( array( 'rejected', 'deleted', 'not_found' ) as $state ) {
+	$codes[] = 'chip_instruction_' . $state;
+}
+
+$classes = array( 'transient', 'affiliate_action_required', 'admin_action_required', 'data_error' );
+
+foreach ( $codes as $code ) {
+	// A message that carries no hint either way: the code must decide.
+	$class = chip_affiliatewp_classify_failure( $code, 'Something went wrong.', null );
+
+	check(
+		$code . ' classifies to a real class (got ' . $class . ')',
+		in_array( $class, $classes, true )
+	);
+}
+
+// The specific one that used to fall through.
+check(
+	'a payout with nothing left to pay is a data error',
+	'data_error' === chip_affiliatewp_classify_failure( 'chip_referrals_no_longer_payable', 'None of the referrals in this payout are awaiting payment any more, so nothing was sent.', null )
+);
+
+// And an unreadable API response is worth retrying, not unknown.
+check(
+	'an unreadable API response is transient',
+	'transient' === chip_affiliatewp_classify_failure( 'chip_instruction_failed', 'CHIP Send did not return a send instruction ID.', null )
+);
+
+echo "\n== Test 104: a nameless affiliate still gets a payable account ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+// No name at all: the ordinary state of an account made with an email only.
+$GLOBALS['__user_meta'][7]['first_name'] = '';
+$GLOBALS['__user_meta'][7]['last_name']  = '';
+
+$name = chip_affiliatewp_bank_account_name( 3 );
+
+check( 'a name is produced for an unnamed affiliate', '' !== $name );
+check( 'the name is not blank space', '' !== trim( $name ) );
+check( 'the name is bounded', strlen( $name ) <= 128 );
+
+// CHIP requires at least one character, which is the point.
+check( 'the name satisfies the API minimum', strlen( $name ) >= 1 );
+
+// A real name is still used as-is.
+$GLOBALS['__user_meta'][7]['first_name'] = 'Ahmad';
+$GLOBALS['__user_meta'][7]['last_name']  = 'Razali';
+
+check(
+	'a real name is used unchanged',
+	'Ahmad Razali' === chip_affiliatewp_bank_account_name( 3 )
+);
+
+// And an overlong name is still trimmed.
+$GLOBALS['__user_meta'][7]['first_name'] = str_repeat( 'N', 400 );
+$GLOBALS['__user_meta'][7]['last_name']  = '';
+
+check( 'an overlong name is trimmed', 128 === strlen( chip_affiliatewp_bank_account_name( 3 ) ) );
+
+// The registration itself sends a non-empty name.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__user_meta'][7]['first_name']             = '';
+$GLOBALS['__user_meta'][7]['last_name']              = '';
+
+unset( $GLOBALS['__chip_bank_lookup_override'] );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 880, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_log'] = array();
+
+$account = chip_affiliatewp_ensure_bank_account( 3 );
+
+check( 'registration succeeded without a name', is_array( $account ) && 880 === (int) $account['id'] );
+
+$post = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'a registration was sent', 1 === count( $post ) );
+
+$sent = json_decode( (string) $post[0]['body'], true );
+
+check( 'the sent name is not empty', ! empty( $sent['name'] ) );
+check( 'the sent name is a string', is_string( $sent['name'] ) );
+
+echo "\n== Test 105: no payout meta key is written without a reader ==\n";
+reset_state();
+
+/*
+ * Dead state is not harmless. A key that is written and never read bloats every
+ * payout row, and - worse - can hold a stale copy of something the code derives
+ * elsewhere: a stored reference that no longer matches the one being used reads
+ * as the truth to whoever finds it later.
+ *
+ * Every module is swept, because a key written in one file may be read in
+ * another (the attempt number and the account id both are).
+ */
+$chip_plugin_root = dirname( __DIR__ );
+$module_src       = '';
+
+foreach ( glob( $chip_plugin_root . '/includes/*.php' ) as $module_file ) {
+	$module_src .= (string) file_get_contents( $module_file );
+}
+
+// Written: assignment into $data, or an unset() that clears it.
+preg_match_all( '/\$data\[\s*\'([a-z_0-9]+)\'\s*\]\s*=/', $module_src, $written );
+preg_match_all( '/unset\(\s*\$data\[\s*\'([a-z_0-9]+)\'\s*\]/', $module_src, $unset );
+
+// Read: indexed access (not an assignment), or the array helper.
+preg_match_all( '/\$data\[\s*\'([a-z_0-9]+)\'\s*\](?!\s*=)/', $module_src, $read_direct );
+preg_match_all( '/chip_affiliatewp_array_value\(\s*\$data\s*,\s*\'([a-z_0-9]+)\'/', $module_src, $read_helper );
+
+$keys_written = array_values( array_unique( array_merge( $written[1], $unset[1] ) ) );
+$keys_read    = array_values( array_unique( array_merge( $read_direct[1], $read_helper[1] ) ) );
+
+check( 'meta keys were found in the source', ! empty( $keys_written ) );
+
+$orphans = array_values(
+	array_filter(
+		$keys_written,
+		function ( $key ) use ( $keys_read ) {
+			return ! in_array( $key, $keys_read, true );
+		}
+	)
+);
+
+check(
+	'every written key has a reader (orphans: ' . implode( ', ', $orphans ) . ')',
+	array() === $orphans
+);
+
+// The two that were dead: a reference the code recomputes, and a duplicate of
+// the payout's own referrals column.
+check( 'no stale reference is stored', ! in_array( 'reference', $keys_written, true ) );
+check( 'no duplicate referral list is stored', ! in_array( 'referral_ids', $keys_written, true ) );
+
+echo "\n== Test 106: callout content is escaped at the call site ==\n";
+reset_state();
+
+/*
+ * AffiliateWP's own docblock for affwp_callout() says the content is body
+ * markup the caller escapes, and affwp_render_callout() does not escape it.
+ * Some of the strings passed here carry text from the CHIP API, so an unescaped
+ * one is an injection path into the settings screen.
+ */
+$admin_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-admin.php' );
+
+// Every 'content' => ... entry that is not a bare __() literal must be escaped.
+preg_match_all(
+	"/'content'\s*=>\s*(.+?)(?=,\s*\n\s*'|,\s*\n\s*\))/s",
+	$admin_src,
+	$matches
+);
+
+check( 'callout content entries were found', ! empty( $matches[1] ) );
+
+$unescaped = array();
+
+foreach ( $matches[1] as $value ) {
+	$value = trim( $value );
+
+	// A translatable literal is already safe markup-free text.
+	if ( preg_match( '/^__\(/', $value ) ) {
+		continue;
+	}
+
+	/*
+	 * A bare variable, or a variable choosing between __() literals. Anything
+	 * built from an expression (a method call, a concatenation) is not covered
+	 * by this and must be escaped.
+	 */
+	if ( preg_match( '/^\$[a-z_]+$/', $value ) ) {
+		continue;
+	}
+
+	if ( preg_match( '/^\$[a-z_]+\s*\?\s*(__|sprintf)\s*\(/', $value ) ) {
+		continue;
+	}
+
+	if ( ! preg_match( '/esc_html|esc_attr|wp_kses/', $value ) ) {
+		$unescaped[] = preg_replace( '/\s+/', ' ', substr( $value, 0, 70 ) );
+	}
+}
+
+check(
+	'no callout content is passed unescaped (' . count( $unescaped ) . ' found)',
+	array() === $unescaped
+);
+
+// The one that carried an API error message.
+check(
+	'the balance-unavailable callout escapes its message',
+	false !== strpos( $admin_src, "'content' => esc_html(" )
+);
+
+echo "\n== Test 107: a referral with every reference burnt is refused ==\n";
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$GLOBALS['__referral_rows'][2300] = new Fake_Referral( 2300, 3, '9.00', 'unpaid', 0 );
+
+/*
+ * Every reference up to the ceiling has already been refused. Submitting one
+ * again fails identically and burns another, so the referral could never be
+ * paid and nothing would say why.
+ */
+$burnt = array( 'XT-R-2300' );
+
+for ( $i = 2; $i <= 50; $i++ ) {
+	$burnt[] = 'XT-R-2300-' . $i;
+}
+
+affwp_update_referral_meta( 2300, 'chip_burnt_references', $burnt );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_pay_single_referral( 2300 );
+
+check( 'an exhausted referral is refused', is_wp_error( $result ) );
+check( 'the refusal names the cause', 'chip_reference_exhausted' === $result->get_error_code() );
+check( 'the message says how many were tried', false !== strpos( $result->get_error_message(), '50' ) );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'nothing was submitted under a burnt reference', array() === $posts );
+
+/*
+ * A referral with a free reference still pays, so the ceiling does not block
+ * the ordinary case.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$GLOBALS['__referral_rows'][2301] = new Fake_Referral( 2301, 3, '9.00', 'unpaid', 0 );
+
+// Only the first two are burnt; a third is free.
+affwp_update_referral_meta( 2301, 'chip_burnt_references', array( 'XT-R-2301', 'XT-R-2301-2' ) );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8001, 'state' => 'executing', 'reference' => 'XT-R-2301-3' ) );
+$GLOBALS['__http_log'] = array();
+
+$ok = chip_affiliatewp_pay_single_referral( 2301 );
+
+check( 'a referral with a free reference still pays', true === $ok );
+
+$sent = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+if ( ! empty( $sent ) ) {
+	$body = json_decode( (string) $sent[0]['body'], true );
+
+	check( 'the free reference was used', 'XT-R-2301-3' === ( $body['reference'] ?? '' ) );
+}
+
+echo "\n== Test 108: terminal-state lists have one definition ==\n";
+reset_state();
+
+/*
+ * Which states count as dead decides whether the next attempt adopts an
+ * existing instruction or moves to a fresh reference. Seven call sites made
+ * that decision; when each carried its own copy of the list, a state could be
+ * dead in one path and live in another. The lists are now named helpers, and
+ * this asserts the call sites use them.
+ */
+$payouts_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check(
+	'no call site carries its own terminal-state literal',
+	false === strpos( $payouts_src, "array( 'rejected', 'deleted' )" )
+);
+
+check(
+	'no call site carries its own settled-state literal',
+	false === strpos( $payouts_src, "array( 'completed', 'rejected', 'deleted' )" )
+);
+
+check(
+	'the terminal-state helper is used',
+	false !== strpos( $payouts_src, 'chip_affiliatewp_state_is_terminal(' )
+);
+
+check(
+	'the settled-state helper is used',
+	false !== strpos( $payouts_src, 'chip_affiliatewp_state_is_settled(' )
+);
+
+// The helpers themselves.
+check( 'rejected is terminal', true === chip_affiliatewp_state_is_terminal( 'rejected' ) );
+check( 'deleted is terminal', true === chip_affiliatewp_state_is_terminal( 'deleted' ) );
+check( 'reviewing is not terminal', false === chip_affiliatewp_state_is_terminal( 'reviewing' ) );
+check( 'completed is not terminal', false === chip_affiliatewp_state_is_terminal( 'completed' ) );
+
+check( 'completed is settled', true === chip_affiliatewp_state_is_settled( 'completed' ) );
+check( 'rejected is settled', true === chip_affiliatewp_state_is_settled( 'rejected' ) );
+check( 'executing is not settled', false === chip_affiliatewp_state_is_settled( 'executing' ) );
+
+// The narrower set must stay narrower: a completed instruction ends a failure,
+// so collapsing the two would change behaviour.
+check(
+	'settled is a strict superset of terminal',
+	array() === array_values( array_diff( chip_affiliatewp_terminal_states(), chip_affiliatewp_settled_states() ) )
+);
+
+check(
+	'settled adds exactly the successful ending',
+	array( 'completed' ) === array_values( array_diff( chip_affiliatewp_settled_states(), chip_affiliatewp_terminal_states() ) )
+);
+
+check( 'states are matched case-insensitively', true === chip_affiliatewp_state_is_terminal( 'REJECted' ) );
+
+echo "\n== Test 109: a description in another script still identifies the payout ==\n";
+reset_state();
+
+/*
+ * The API carries a subset of ASCII. A store that writes its referral
+ * descriptions in Chinese, Japanese or Arabic produces one that sanitizes to
+ * nothing - and the API refuses a description shorter than one character, so
+ * the payout would fail over wording, not over money.
+ */
+foreach ( array( '日本語の注文', '订单', '***', '   ', 'طلبية' ) as $written ) {
+	$fallback = 'Affiliate commission payout No.5';
+	$result   = chip_affiliatewp_sanitize_description( $written, 140, $fallback );
+
+	check( 'a non-Latin description still says which payout it is', $fallback === $result );
+	check( 'and it is not empty', '' !== $result );
+}
+
+// The API minimum is one character; assert against it rather than a proxy.
+check(
+	'every description clears the one-character minimum',
+	1 <= strlen( chip_affiliatewp_sanitize_description( '日本語', 140, 'Payout No.5' ) )
+);
+
+// A usable description is still used, and is still normalized.
+check(
+	'a usable description is kept',
+	'Order No.42 coffee' === chip_affiliatewp_sanitize_description( 'Order #42 coffee', 140, 'fallback' )
+);
+
+check(
+	'the fallback is not used when text survives',
+	'fallback' !== chip_affiliatewp_sanitize_description( 'Order #42 coffee', 140, 'fallback' )
+);
+
+// The length budget still applies to what is sent.
+check(
+	'a long description is still trimmed to the budget',
+	140 === strlen( chip_affiliatewp_sanitize_description( str_repeat( 'a', 300 ), 140, 'fallback' ) )
+);
+
+check(
+	'the fallback is also trimmed to the budget',
+	140 === strlen( chip_affiliatewp_sanitize_description( '日本語', 140, str_repeat( 'b', 300 ) ) )
+);
+
+// With no fallback supplied the generic one still applies, so the argument is
+// additive rather than a new way to send nothing.
+check(
+	'the generic fallback still applies without one supplied',
+	'Affiliate commission payout' === chip_affiliatewp_sanitize_description( '日本語' )
+);
+
+/*
+ * And the call sites pass one: the description the merchant sees at CHIP should
+ * name the payout, not just say a commission happened.
+ */
+$payouts_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check( 'the payout path passes a fallback', false !== strpos( $payouts_src, '$referral_fallback' ) );
+check( 'the referral path builds a named fallback', false !== strpos( $payouts_src, "'Commission for referral No.%d'" ) );
+
+echo "\n== Test 110: a transient is written and dropped under one key ==\n";
+reset_state();
+
+/*
+ * A cache written under one spelling and cleared under another is never
+ * invalidated: the stale value survives until it expires, which is how a
+ * converted balance keeps showing the pre-conversion figure.
+ */
+$account_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-account.php' );
+
+check(
+	'the key is spelled once, inside its helper',
+	1 === substr_count( $account_src, "chip_affiliatewp_account_' . ( 'test'" )
+);
+
+check(
+	'the key helper is used',
+	false !== strpos( $account_src, 'chip_affiliatewp_account_cache_key(' )
+);
+
+check( 'the helper is used more than once', 1 < substr_count( $account_src, 'chip_affiliatewp_account_cache_key(' ) );
+
+// The helper itself.
+check(
+	'test mode gets its own key',
+	'chip_affiliatewp_account_test' === chip_affiliatewp_account_cache_key( 'test' )
+);
+
+check(
+	'live mode gets its own key',
+	'chip_affiliatewp_account_live' === chip_affiliatewp_account_cache_key( 'live' )
+);
+
+check(
+	'an unknown mode resolves to live',
+	chip_affiliatewp_account_cache_key( 'live' ) === chip_affiliatewp_account_cache_key( 'staging' )
+);
+
+check(
+	'case does not create a third key',
+	chip_affiliatewp_account_cache_key( 'live' ) === chip_affiliatewp_account_cache_key( 'TEST' )
+);
+
+/*
+ * And the drop actually reaches the key the read used: a conversion must not
+ * leave the old summary behind.
+ */
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+
+$key = chip_affiliatewp_account_cache_key( 'test' );
+
+set_transient( $key, array( 'current_balance' => '111.00' ), 300 );
+
+check( 'a summary is cached', is_array( get_transient( $key ) ) );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_limits', 'method' => 'POST', 'code' => 200, 'body' => array( 'approvals_required' => 1 ) );
+$GLOBALS['__http_log'] = array();
+
+$result = chip_affiliatewp_request_budget_allocation( 1.00, 'test' );
+
+check( 'the allocation succeeded', ! is_wp_error( $result ) );
+check( 'the cached summary was dropped', false === get_transient( $key ) );
+
+echo "\n== Test 111: no array key is built without a consumer ==\n";
+reset_state();
+
+/*
+ * Test 105 covers payout meta. The same waste happens one level up: an array
+ * assembled for the review list carried a `since` timestamp that no reader
+ * ever asked for - and a value nobody reads is a value nobody notices going
+ * stale.
+ *
+ * This checks the keys each module builds into a returned or stored array,
+ * against every key the plugin reads anywhere.
+ */
+$chip_plugin_dir = dirname( __DIR__ );
+$all_src         = '';
+
+foreach ( glob( $chip_plugin_dir . '/includes/*.php' ) as $chip_file ) {
+	$all_src .= (string) file_get_contents( $chip_file );
+}
+
+/*
+ * Keys assembled into a structured array: 'key' => value, where the array is
+ * returned, cached, or handed to a helper. Template rendering arrays are
+ * excluded by requiring the key to be a plain identifier and the assignment to
+ * live in a `$found[] =` / `$row =` / `return array(` context.
+ */
+preg_match_all( '/\$found\[\] = array\(\s*\n(.*?)\n\t*\);/s', $all_src, $found_blocks );
+
+$built = array();
+
+foreach ( $found_blocks[1] as $block ) {
+	if ( preg_match_all( "/'([a-z_0-9]+)'\s*=>/", $block, $keys ) ) {
+		foreach ( $keys[1] as $key ) {
+			$built[ $key ] = true;
+		}
+	}
+}
+
+check( 'keys were found in the review-list builder', ! empty( $built ) );
+
+// Where each of those keys is read.
+$unread = array();
+
+foreach ( array_keys( $built ) as $key ) {
+	// A read is an access that is not the assignment itself.
+	$pattern = '/\[[[:space:]]*\'' . preg_quote( $key, '/' ) . '\'[[:space:]]*\]/';
+
+	if ( ! preg_match( $pattern, $all_src ) ) {
+		$unread[] = $key;
+	}
+}
+
+check(
+	'every review-list key has a reader (unread: ' . implode( ', ', $unread ) . ')',
+	array() === $unread
+);
+
+check( 'the dead timestamp key is gone', ! isset( $built['since'] ) );
+
+echo "\n== Test 112: every path that creates a payout checks the currency ==\n";
+reset_state();
+
+/*
+ * CHIP Send settles MYR and the API takes a bare number, so a store on another
+ * currency would send "100.00" that CHIP reads as RM100. Three code paths can
+ * create a payout row; each must refuse when the store is not on MYR, because a
+ * payout the plugin is not willing to send must not appear in the list.
+ */
+$payouts_src  = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' );
+$webhooks_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-webhooks.php' );
+
+$creators = array(
+	'payouts module'  => array( $payouts_src, substr_count( $payouts_src, 'affwp_add_payout(' ) ),
+	'webhooks module' => array( $webhooks_src, substr_count( $webhooks_src, 'affwp_add_payout(' ) ),
+);
+
+$total = 0;
+
+foreach ( $creators as $label => $pair ) {
+	$total += $pair[1];
+}
+
+check( 'payout-creating paths were found', $total >= 3 );
+
+// Each module that creates a payout must also carry the guard.
+check(
+	'the payouts module guards the currency',
+	false !== strpos( $payouts_src, "'MYR' !== chip_affiliatewp_currency()" )
+);
+
+check(
+	'the webhooks module guards the currency',
+	false !== strpos( $webhooks_src, "'MYR' !== chip_affiliatewp_currency()" )
+);
+
+/*
+ * And the guard is effective: a non-MYR store cannot create a payout from a
+ * delivery. Drive the webhook path with a referral-only reference.
+ */
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__currency'] = 'USD';
+
+$GLOBALS['__referral_rows'][2450] = new Fake_Referral( 2450, 3, '9.00', 'unpaid', 0 );
+
+$before_keys = array_keys( $GLOBALS['__payout_rows'] ?? array() );
+
+chip_affiliatewp_process_instruction_webhook(
+	array(
+		'id'        => 9100,
+		'reference' => 'XT-R-2450',
+		'state'     => 'executing',
+	),
+	'test'
+);
+
+$after = count( $GLOBALS['__payouts'] ?? array() );
+
+check( 'a non-MYR store creates no payout from a delivery', $before === $after );
+
+// The same delivery on an MYR store does create one, so the guard is the
+// reason rather than something else failing.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__currency'] = 'MYR';
+
+$GLOBALS['__referral_rows'][2451] = new Fake_Referral( 2451, 3, '9.00', 'unpaid', 0 );
+
+$before_keys = array_keys( $GLOBALS['__payout_rows'] ?? array() );
+
+chip_affiliatewp_process_instruction_webhook(
+	array(
+		'id'        => 9101,
+		'reference' => 'XT-R-2451',
+		'state'     => 'executing',
+	),
+	'test'
+);
+
+$after = count( $GLOBALS['__payouts'] ?? array() );
+
+$new_keys = array_values( array_diff( array_keys( $GLOBALS['__payout_rows'] ?? array() ), $before_keys ) );
+
+check( 'an MYR store does create one', 1 === count( $new_keys ) );
+
+if ( 1 === count( $new_keys ) ) {
+	$row = $GLOBALS['__payout_rows'][ $new_keys[0] ];
+
+	check( 'the recovered payout carries the instruction id', 9101 === (int) $row->service_id );
+	check( 'the recovered payout is for the right affiliate', 3 === (int) $row->affiliate_id );
+	check( 'the recovered payout is processing', 'processing' === $row->status );
+}
+
+echo "\n== Test 113: a reassigned referral is not paid from the old payout ==\n";
+reset_state();
+
+/*
+ * AffiliateWP lets an admin reassign a referral to a different affiliate
+ * (affwp_update_referral with an affiliate_id). The payout's recipient bank
+ * account belongs to the affiliate the payout was built for, so paying here
+ * would move the reassigned commission into the wrong person's account - and
+ * the status check alone does not catch it: the referral is still unpaid, and
+ * still unattached to any payout.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+// Affiliate 3 has usable bank details, so the only thing wrong is ownership.
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+// The payout is for affiliate 3, but its referral now belongs to affiliate 8.
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3000 ),
+		'amount'        => '50.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3000] = new Fake_Referral( 3000, 8, '50.00', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+
+$result = chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'the payout is refused', is_wp_error( $result ) );
+/*
+ * The pre-check that asks CHIP whether the reference already exists is a GET,
+ * and read-only. What must not happen is a submission.
+ */
+$sent_posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' );
+		}
+	)
+);
+
+check( 'no instruction was submitted', array() === $sent_posts );
+
+
+/*
+ * The failure is recorded as a payout failure, so assert on the reason the
+ * merchant is shown rather than the wrapper code.
+ */
+check(
+	'the reason says the referrals are no longer payable',
+	false !== strpos( $result->get_error_message(), 'awaiting payment any more' )
+);
+
+/*
+ * The cause is recorded as the payout's failure reason, which is what the
+ * merchant's list shows. (`error_status` holds an HTTP status, not the code.)
+ */
+$stored_payout = affwp_get_payout( $payout_id );
+$stored        = chip_affiliatewp_payout_data( $stored_payout );
+
+check(
+	'the payout records the specific cause',
+	false !== strpos( (string) ( $stored['error'] ?? '' ), 'awaiting payment any more' )
+);
+
+check(
+	'the failed payout is listed as failed',
+	'failed' === $stored_payout->status
+);
+
+// And the payout really did not go out under that reference.
+check(
+	'the payout was not marked paid',
+	'paid' !== affwp_get_payout( $payout_id )->status
+);
+
+// A referral that still belongs to the payout's affiliate does go out, so the
+// check is the reason rather than something else failing.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_ok = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3001 ),
+		'amount'        => '50.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3001] = new Fake_Referral( 3001, 3, '50.00', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8200, 'state' => 'executing' ) );
+$GLOBALS['__http_log'] = array();
+
+$ok = chip_affiliatewp_submit_payout( $payout_ok );
+
+check( 'a referral still owned by the payout pays normally', true === $ok );
+
+$posts = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'exactly one instruction was sent for the good payout', 1 === count( $posts ) );
+
+echo "\n== Test 114: a mode flip cannot make a submitted payout pay twice ==\n";
+reset_state();
+
+/*
+ * A payout records the mode it was submitted in. If the site flips to the other
+ * mode and the payout is submitted again, the instruction already exists in the
+ * ORIGINAL mode's environment — but the reference would be new to the OTHER
+ * one. Two instructions for one commission is the worst outcome this plugin
+ * can produce, so the guard has to be the stored instruction, not the mode.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_live_api_key']     = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']  = 'ls';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3100 ),
+		'amount'        => '25.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3100] = new Fake_Referral( 3100, 3, '25.00', 'unpaid', $payout_id );
+
+// First submission, in test mode.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8300, 'state' => 'executing' ) );
+$GLOBALS['__http_log'] = array();
+
+$first = chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'the first submission succeeds', true === $first );
+
+$posts_first = count( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'one instruction was sent', 1 === $posts_first );
+
+$stored = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the instruction is recorded', 8300 === (int) ( $stored['instruction_id'] ?? 0 ) );
+check( 'the mode it was sent in is recorded', 'test' === (string) ( $stored['mode'] ?? '' ) );
+
+/*
+ * Flip to live and submit again. The reference is identical, but live has never
+ * seen it - so a resubmission would create a second instruction and pay the
+ * commission twice.
+ *
+ * The queue deliberately holds a reply for a submission: if the guard does not
+ * stop the resubmission, the POST goes out and this test fails. Leaving the
+ * queue empty would let the request fail as unmocked, which reads the same as
+ * not sending at all.
+ */
+$GLOBALS['__options']['chip_test_mode'] = 0;
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9999, 'state' => 'executing' ) );
+$GLOBALS['__http_log']   = array();
+
+$second = chip_affiliatewp_submit_payout( $payout_id );
+
+check( 'the second submission reports success', true === $second );
+
+$posts_second = array_values( array_filter( $GLOBALS['__http_log'], function ( $e ) { return 'POST' === ( $e['method'] ?? '' ); } ) );
+
+check( 'no second instruction was sent', array() === $posts_second );
+
+// And the payout still points at the instruction it was actually sent under.
+$after = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+
+check( 'the instruction id is unchanged', 8300 === (int) ( $after['instruction_id'] ?? 0 ) );
+
+/*
+ * And the same for a delivery arriving after the flip: it must resolve the
+ * payout through the stored instruction, not create a new one for the live
+ * mode's reference.
+ */
+$before_keys = array_keys( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8300, 'state' => 'completed', 'reference' => 'XT-PO-' . $payout_id ),
+	'test'
+);
+
+$new_keys = array_values( array_diff( array_keys( $GLOBALS['__payout_rows'] ), $before_keys ) );
+
+check( 'the delivery did not create a second payout', array() === $new_keys );
+check( 'the payout completed', 'paid' === affwp_get_payout( $payout_id )->status );
+
+echo "\n== Test 115: a scheduled action delivers its arguments the way Action Scheduler does ==\n";
+reset_state();
+
+/*
+ * Action Scheduler runs a scheduled callback as:
+ *
+ *     do_action_ref_array( $hook, array_values( $this->get_args() ) );
+ *
+ * The plugin schedules `array( 'payout_id' => N )`. array_values() turns that
+ * into `array( N )`, so the callback's first parameter is the payout id - which
+ * is why the callback signatures take a bare `$payout_id`. Nothing tested that:
+ * the harness recorded schedule() calls without ever invoking the callback, so
+ * a signature that mismatched the args array would only show up in production,
+ * where the requery would silently run against payout 1.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+$payout_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3200 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3200] = new Fake_Referral( 3200, 3, '30.00', 'unpaid', $payout_id );
+
+// Record the instruction so the requery has something to resolve.
+chip_affiliatewp_update_payout_data(
+	$payout_id,
+	array(
+		'instruction_id' => 8400,
+		'mode'           => 'test',
+		'state'          => 'executing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s', time() - 3600 ),
+	)
+);
+
+chip_affiliatewp_schedule_check( $payout_id, 60 );
+
+$scheduled = array_values(
+	array_filter(
+		$GLOBALS['__as'],
+		function ( $entry ) {
+			return 'chip_affiliatewp_check_payout_status' === ( $entry[1] ?? '' );
+		}
+	)
+);
+
+check( 'a check was scheduled', 1 === count( $scheduled ) );
+
+$args = $scheduled[0][2] ?? array();
+
+check( 'the args name the payout', $payout_id === (int) ( $args['payout_id'] ?? 0 ) );
+
+/*
+ * Now run it the way Action Scheduler does, and confirm the callback requeries
+ * THIS payout rather than a default.
+ */
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions/', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 8400, 'state' => 'completed', 'receipt_url' => '' ) );
+$GLOBALS['__http_log'] = array();
+
+do_action_ref_array( 'chip_affiliatewp_check_payout_status', array_values( $args ) );
+
+$gets = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'GET' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), '/send_instructions/8400' );
+		}
+	)
+);
+
+check( 'the callback requeried the instruction of the right payout', 1 === count( $gets ) );
+check( 'the payout completed', 'paid' === affwp_get_payout( $payout_id )->status );
+
+/*
+ * The submission callback has the same shape, so exercise it too: if its
+ * parameter did not match the args array it would try to submit payout 1.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__chip_bank_lookup_override'] = array( 'id' => 84, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) );
+
+$pay_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3201 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3201] = new Fake_Referral( 3201, 3, '30.00', 'unpaid', $pay_id );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 8401, 'state' => 'executing' ) );
+$GLOBALS['__http_log'] = array();
+
+do_action_ref_array( 'chip_affiliatewp_submit_payout_action', array_values( array( 'payout_id' => $pay_id ) ) );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' );
+		}
+	)
+);
+
+check( 'the submission callback submitted the right payout', 1 === count( $posts ) );
+
+$body = json_decode( (string) $posts[0]['body'], true );
+
+check(
+	'the instruction was sent under that payout\'s reference',
+	'XT-PO-' . $pay_id === (string) ( $body['reference'] ?? '' )
+);
+
+echo "\n== Test 116: the payout-method filter honours AffiliateWP's contract ==\n";
+reset_state();
+
+/*
+ * AffiliateWP registers payout methods through the `affwp_payout_methods`
+ * filter, which is handed an array of `method => label` and must return the
+ * same shape. Core reads the result with array_key_exists() and foreach
+ * ($methods as $key => $label), so returning a list instead of a map, or
+ * dropping the incoming entries, breaks every other method on the screen - and
+ * nothing in the plugin's tests exercised this filter.
+ */
+$incoming = array(
+	'manual' => 'Manual',
+	'paypal' => 'PayPal',
+);
+
+// Enabled: CHIP Send is added alongside what was there, keeping the shape.
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$out = chip_affiliatewp_register_payout_method( $incoming );
+
+check( 'the result is an array', is_array( $out ) );
+check( 'the incoming methods survive', isset( $out['manual'], $out['paypal'] ) );
+check( 'CHIP Send was added', isset( $out['chip'] ) );
+check( 'the label is a plain string', is_string( $out['chip'] ) );
+check( 'the label is not empty', '' !== trim( (string) $out['chip'] ) );
+check( 'manual is unchanged', 'Manual' === $out['manual'] );
+check( 'no extra keys were introduced', array( 'manual', 'paypal', 'chip' ) === array_values( array_keys( $out ) ) );
+
+// Disabled: the incoming map is returned untouched.
+$GLOBALS['__options']['chip_payouts'] = 0;
+
+$off = chip_affiliatewp_register_payout_method( $incoming );
+
+check( 'disabled leaves the methods alone', $incoming === $off );
+check( 'disabled adds nothing', ! isset( $off['chip'] ) );
+
+// A store that already has a chip entry keeps its own label rather than
+// gaining a duplicate key.
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$existing = chip_affiliatewp_register_payout_method( array( 'chip' => 'Something else' ) );
+
+check( 'an existing chip key is not duplicated', 1 === count( $existing ) );
+
+// Non-array input cannot be assumed away: a filter chain may pass anything.
+$GLOBALS['__options']['chip_payouts'] = 1;
+
+$wild = chip_affiliatewp_register_payout_method( null );
+
+check( 'a non-array value does not produce a warning', is_array( $wild ) || null === $wild );
+
+echo "\n== Test 117: the bank-detail forms honour their hook contracts ==\n";
+reset_state();
+
+/*
+ * Two hooks render the bank-detail form:
+ *
+ *   affwp_edit_affiliate_end( \AffWP\Affiliate $affiliate )     admin screen
+ *   affwp_affiliate_dashboard_payments_section( $affiliate_id, $affiliate_user_id )
+ *
+ * Neither had a test. A signature that does not match what core passes fails
+ * silently: the form either renders nothing or renders for the wrong affiliate.
+ */
+$bank_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-bank-accounts.php' );
+$area_src = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-affiliate-area.php' );
+
+check(
+	'the admin form is registered for one argument',
+	false !== strpos( $bank_src, "add_action( 'affwp_edit_affiliate_end', 'chip_affiliatewp_affiliate_bank_fields'" )
+);
+
+check(
+	'the affiliate-area form is registered for two arguments',
+	false !== strpos( $area_src, "add_action( 'affwp_affiliate_dashboard_payments_section', 'chip_affiliatewp_affiliate_bank_form', 10, 2 )" )
+);
+
+$GLOBALS['__options']['chip_payouts']         = 1;
+$GLOBALS['__options']['chip_test_mode']       = 1;
+$GLOBALS['__options']['chip_test_api_key']    = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__current_affiliate_id'] = 3;
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+
+// The section only renders for affiliates actually paid through CHIP Send.
+// The affiliate-area form, called the way core calls it.
+ob_start();
+chip_affiliatewp_affiliate_bank_form( 3, 7 );
+$rendered = ob_get_clean();
+
+check( 'the area form renders', '' !== trim( $rendered ) );
+check( 'it renders a bank-code field', false !== strpos( $rendered, 'payment_bank_code' ) );
+check( 'it renders an account-number field', false !== strpos( $rendered, 'payment_account_number' ) );
+check( 'it carries a nonce', false !== strpos( $rendered, 'chip_affiliatewp_bank_nonce' ) );
+
+/*
+ * Called with no arguments — core may or may not supply them — it must fall back
+ * to the session rather than render for affiliate 0.
+ */
+ob_start();
+chip_affiliatewp_affiliate_bank_form();
+$without_args = ob_get_clean();
+
+check( 'the area form works without arguments', '' !== trim( $without_args ) );
+check( 'the fallback rendered the same form', false !== strpos( $without_args, 'payment_bank_code' ) );
+
+// Disabled: nothing renders at all.
+$GLOBALS['__options']['chip_payouts'] = 0;
+
+ob_start();
+chip_affiliatewp_affiliate_bank_form( 3, 7 );
+$disabled = ob_get_clean();
+
+check( 'a disabled method renders nothing', '' === trim( $disabled ) );
+
+// The admin form takes an affiliate object, as core passes one.
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$affiliate = new Fake_Affiliate( 3, 7 );
+
+ob_start();
+chip_affiliatewp_affiliate_bank_fields( $affiliate );
+$admin_rendered = ob_get_clean();
+
+check( 'the admin form renders for an affiliate object', '' !== trim( $admin_rendered ) );
+check( 'it renders the bank fields', false !== strpos( $admin_rendered, 'payment_bank_code' ) );
+check( 'it renders the saved account number', false !== strpos( $admin_rendered, '157380112229' ) );
+
+// And with the method off, the admin screen gains no rows.
+$GLOBALS['__options']['chip_payouts'] = 0;
+
+ob_start();
+chip_affiliatewp_affiliate_bank_fields( $affiliate );
+$admin_disabled = ob_get_clean();
+
+check( 'a disabled method adds no admin rows', '' === trim( $admin_disabled ) );
+
+echo "\n== Test 118: i18n invariants hold for every user-facing string ==\n";
+reset_state();
+
+/*
+ * Two things break a translation silently:
+ *
+ * 1. A sprintf() whose format needs more arguments than it is given. PHP 8
+ *    throws ArgumentCountError; PHP 7 emits a warning and returns a truncated
+ *    string, so the merchant sees half a sentence.
+ * 2. A string with a placeholder and no `translators:` comment, which leaves a
+ *    translator guessing what %s expands to.
+ */
+$chip_files = array_merge(
+	glob( dirname( __DIR__ ) . '/includes/*.php' ),
+	array( dirname( __DIR__ ) . '/chip-for-affiliatewp.php' )
+);
+
+$formats_checked = 0;
+$placeholder_total = 0;
+
+foreach ( $chip_files as $chip_file ) {
+	$src   = (string) file_get_contents( $chip_file );
+	$lines = explode( "\n", $src );
+
+	// Every translation call whose own string carries a placeholder.
+	if ( preg_match_all( "/\\b(?:__|_n)\\(\\s*'((?:[^'\\\\]|\\\\.)*)'/", $src, $hits, PREG_SET_ORDER | PREG_OFFSET_CAPTURE ) ) {
+		foreach ( $hits as $hit ) {
+			$text = $hit[1][0];
+
+			if ( ! preg_match( '/%(?:\d+\$)?[sd]/', $text ) ) {
+				continue;
+			}
+
+			++$placeholder_total;
+
+			$line_no = substr_count( substr( $src, 0, $hit[0][1] ), "\n" );
+			$above   = implode( "\n", array_slice( $lines, max( 0, $line_no - 4 ), min( 4, $line_no ) ) );
+
+			check(
+				'a placeholder string carries a translators comment: ' . substr( $text, 0, 38 ),
+				false !== strpos( $above, 'translators:' )
+			);
+		}
+	}
+}
+
+check( 'placeholder strings were found', $placeholder_total > 0 );
+
+/*
+ * The format/argument counts, run rather than parsed: calling sprintf with the
+ * real arguments is the only way to know PHP accepts them.
+ */
+foreach ( $chip_files as $chip_file ) {
+	$src = (string) file_get_contents( $chip_file );
+
+	if ( preg_match_all(
+		"/sprintf\\(\\s*\\/\\*[^*]*\\*\\/\\s*__\\(\\s*'((?:[^'\\\\]|\\\\.)*)'\\s*,\\s*'[^']+'\\s*\\)\\s*,([^;]*?)\\)\\s*;/s",
+		$src,
+		$rows,
+		PREG_SET_ORDER
+	) ) {
+		foreach ( $rows as $row ) {
+			$format = $row[1];
+
+			preg_match_all( '/%(?:(\d+)\$)?[bcdeEfFgGosuxX]/', $format, $ph );
+
+			$needs = 0;
+
+			foreach ( $ph[1] as $i => $pos ) {
+				$needs = max( $needs, '' !== $pos ? (int) $pos : $i + 1 );
+			}
+
+			// Supply exactly what the format says it needs; if the format is
+			// wrong, sprintf raises an error we catch rather than assert on a
+			// count we guessed.
+			$dummy = array_fill( 0, max( 0, $needs ), 'x' );
+
+			$threw = false;
+
+			try {
+				$out = @sprintf( $format, ...$dummy );
+			} catch ( \Throwable $e ) {
+				$threw = true;
+				$out   = '';
+			}
+
+			++$formats_checked;
+
+			check(
+				'format renders: ' . substr( $format, 0, 40 ),
+				! $threw && '' !== $out
+			);
+		}
+	}
+}
+
+check( 'formats were exercised', $formats_checked > 0 );
+
+// The catalogue is complete for the strings this plugin ships.
+$pot = (string) file_get_contents( dirname( __DIR__ ) . '/languages/chip-for-affiliatewp.pot' );
+$po  = (string) file_get_contents( dirname( __DIR__ ) . '/languages/chip-for-affiliatewp-ms_MY.po' );
+
+check( 'the catalogue exists', '' !== $pot && '' !== $po );
+check( 'the Malay catalogue is not a stub', strlen( $po ) > 5000 );
+
+echo "\n== Test 119: the compiled catalogue matches the source catalogue ==\n";
+reset_state();
+
+/*
+ * WordPress reads the compiled .mo, not the .po. Saving only the .po leaves the
+ * shipped .mo at whatever it held the last time it was built by hand, so a
+ * string translates in the source and stays English at runtime. That is exactly
+ * what had happened: ten entries were in the .po and absent from the .mo.
+ *
+ * The two files are compared by reading their msgid lists the way a .mo reader
+ * does - the binary is parsed here rather than shelled out to msgfmt, so the
+ * test runs anywhere the plugin does.
+ */
+$languages = dirname( __DIR__ ) . '/languages';
+$po_file   = $languages . '/chip-for-affiliatewp-ms_MY.po';
+$mo_file   = $languages . '/chip-for-affiliatewp-ms_MY.mo';
+
+check( 'the source catalogue exists', file_exists( $po_file ) );
+check( 'the compiled catalogue exists', file_exists( $mo_file ) );
+
+/*
+ * Read the .mo's string table: a 32-bit magic, a count, then count pairs of
+ * (length, offset) pointing into the string table.
+ */
+function chip_test_mo_msgids( $file ) {
+	$data = (string) file_get_contents( $file );
+
+	if ( strlen( $data ) < 12 ) {
+		return array();
+	}
+
+	$magic = unpack( 'V', substr( $data, 0, 4 ) )[1];
+
+	// 0x950412de little-endian, or byte-swapped.
+	$swap = 0xde120495 === $magic;
+
+	$read = function ( $offset ) use ( $data, $swap ) {
+		$raw = substr( $data, $offset, 4 );
+		if ( 4 !== strlen( $raw ) ) {
+			return 0;
+		}
+		$v = unpack( 'V', $raw )[1];
+		return $swap ? (int) ( ( $v >> 24 & 0xFF ) | ( $v >> 8 & 0xFF00 ) | ( $v << 8 & 0xFF0000 ) | ( $v << 24 & 0xFF000000 ) ) : $v;
+	};
+
+	$count     = $read( 8 );
+	$orig_base = $read( 12 );
+
+	$ids = array();
+
+	for ( $i = 0; $i < $count; $i++ ) {
+		$len    = $read( $orig_base + $i * 8 );
+		$str_at = $read( $orig_base + $i * 8 + 4 );
+
+		if ( $len > 0 ) {
+			$ids[] = substr( $data, $str_at, $len );
+		}
+	}
+
+	return $ids;
+}
+
+$mo_ids = chip_test_mo_msgids( $mo_file );
+
+check( 'the compiled catalogue has entries', count( $mo_ids ) > 100 );
+
+// Read the .po's msgids: lines starting with msgid, skipping the header.
+$po_src = (string) file_get_contents( $po_file );
+
+/*
+ * Read the .po's msgids. A long msgid is wrapped across several lines, each
+ * continuation being a bare quoted string, so lines after `msgid` are joined
+ * until the next directive.
+ */
+$po_lines   = explode( "\n", $po_src );
+$po_msgids  = array();
+$current    = null;
+
+foreach ( $po_lines as $po_line ) {
+	$po_line = rtrim( $po_line, "\r" );
+
+	if ( 0 === strpos( $po_line, 'msgid ' ) ) {
+		if ( null !== $current ) {
+			$id = stripcslashes( $current );
+			if ( '' !== $id ) {
+				$po_msgids[] = $id;
+			}
+		}
+
+		$current = trim( trim( substr( $po_line, 6 ) ), '"' );
+		continue;
+	}
+
+	// A continuation: a bare quoted line.
+	if ( null !== $current && preg_match( '/^"(.*)"\s*$/', $po_line, $cont ) ) {
+		$current .= stripcslashes( $cont[1] );
+		continue;
+	}
+
+	// Any other directive ends the current msgid.
+	if ( '' !== $po_line && 0 !== strpos( $po_line, '#' ) && 0 !== strpos( $po_line, 'msgid' ) ) {
+		if ( null !== $current ) {
+			$id = stripcslashes( $current );
+			if ( '' !== $id ) {
+				$po_msgids[] = $id;
+			}
+			$current = null;
+		}
+	}
+}
+
+if ( null !== $current ) {
+	$id = stripcslashes( $current );
+	if ( '' !== $id ) {
+		$po_msgids[] = $id;
+	}
+}
+
+check( 'the source catalogue has entries', count( $po_msgids ) > 100 );
+
+/*
+ * Every translatable string in the source must be in the compiled file, or it
+ * ships in English.
+ */
+$missing = array_values( array_diff( $po_msgids, $mo_ids ) );
+
+check(
+	'no translated string is missing from the compiled catalogue (' . count( $missing ) . ' missing)',
+	array() === $missing
+);
+
+// And the compiled file carries nothing the source does not, which would mean
+// the two were built from different trees.
+$stale = array_values( array_diff( $mo_ids, $po_msgids ) );
+
+check(
+	'the compiled catalogue carries no stale strings (' . count( $stale ) . ' stale)',
+	array() === $stale
+);
+
+// The builder must write the .mo, not just the .po.
+$builder = (string) file_get_contents( dirname( __DIR__ ) . '/scripts/build-translations.py' );
+
+check( 'the builder compiles the catalogue', false !== strpos( $builder, '.mo' ) );
+
+echo "\n== Test 120: the catalogue covers every translatable string ==\n";
+reset_state();
+
+/*
+ * The extractor read __() and the esc_* family, but not _n(). Plural strings
+ * never reached the catalogue, so they stayed English on the site - and nothing
+ * compared the source against the catalogue, so the gap was invisible.
+ *
+ * This walks the source for every translation call, including the plural forms
+ * whose arguments sit on their own lines, and asserts each string is in the
+ * compiled catalogue.
+ */
+$chip_plugin = dirname( __DIR__ );
+$source_strings = array();
+
+foreach ( glob( $chip_plugin . '/includes/*.php' ) as $chip_file ) {
+	$src = (string) file_get_contents( $chip_file );
+
+	// __() and the esc_* family.
+	if ( preg_match_all(
+		"/\\b(?:__|esc_html__|esc_attr__|esc_html_e|esc_attr_e|_e|_x)\\(\\s*'((?:[^'\\\\]|\\\\.)*)'/",
+		$src,
+		$hits
+	) ) {
+		foreach ( $hits[1] as $text ) {
+			$source_strings[ $text ] = true;
+		}
+	}
+
+	// _n() across lines: singular and plural are both translatable.
+	if ( preg_match_all(
+		"/_n\\(\\s*'((?:[^'\\\\]|\\\\.)*)'\\s*,\\s*'((?:[^'\\\\]|\\\\.)*)'/s",
+		$src,
+		$plurals,
+		PREG_SET_ORDER
+	) ) {
+		foreach ( $plurals as $pair ) {
+			$source_strings[ $pair[1] ] = true;
+			$source_strings[ $pair[2] ] = true;
+		}
+	}
+}
+
+unset( $source_strings[''] );
+
+check( 'translatable strings were found', count( $source_strings ) > 100 );
+
+// The compiled catalogue's msgids, read from its string table.
+$mo_file = $chip_plugin . '/languages/chip-for-affiliatewp-ms_MY.mo';
+
+$mo_data = (string) file_get_contents( $mo_file );
+$mo_count = unpack( 'V', substr( $mo_data, 8, 4 ) )[1];
+$mo_base  = unpack( 'V', substr( $mo_data, 12, 4 ) )[1];
+
+$mo_ids = array();
+
+for ( $i = 0; $i < $mo_count; $i++ ) {
+	$len = unpack( 'V', substr( $mo_data, $mo_base + $i * 8, 4 ) )[1];
+	$at  = unpack( 'V', substr( $mo_data, $mo_base + $i * 8 + 4, 4 ) )[1];
+
+	if ( $len > 0 ) {
+		$mo_ids[] = substr( $mo_data, $at, $len );
+	}
+}
+
+check( 'the compiled catalogue has entries', count( $mo_ids ) > 100 );
+
+$missing = array();
+
+foreach ( array_keys( $source_strings ) as $text ) {
+	if ( ! in_array( $text, $mo_ids, true ) ) {
+		$missing[] = $text;
+	}
+}
+
+check(
+	'every translatable string is in the catalogue (' . count( $missing ) . ' missing)',
+	array() === $missing
+);
+
+if ( ! empty( $missing ) ) {
+	foreach ( array_slice( $missing, 0, 5 ) as $one ) {
+		echo '        - ' . substr( $one, 0, 72 ) . "\n";
+	}
+}
+
+// The extractor must handle plurals: if it stops, the count drops and this
+// fails rather than quietly shipping English.
+$builder = (string) file_get_contents( $chip_plugin . '/scripts/build-translations.py' );
+
+check( 'the extractor reads plural calls', false !== strpos( $builder, '_n_re' ) );
+
+check(
+	'the extractor scans plurals file-wide, not line by line',
+	false !== strpos( $builder, 're.S' )
+);
+
+echo "\n== Test 121: uninstall removes every meta key the plugin writes ==\n";
+reset_state();
+
+/*
+ * A meta key that outlives an uninstall is not just clutter. Burnt references
+ * suppress a fresh reference, a cached bank account carries the previous
+ * affiliate's account number, and payout meta holds CHIP's own notes - so each
+ * one changes behaviour on a later reinstall.
+ *
+ * Every write is discovered from the source, so a key added later is covered
+ * without anyone remembering to update this test.
+ */
+$chip_root = dirname( __DIR__ );
+
+$write_patterns = array(
+	"/update_user_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_referral_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_affiliate_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_payout_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+	"/affwp_update_referral_meta\\([^,]+,\\s*'([a-z_0-9]+)'/",
+);
+
+$written = array();
+
+foreach ( glob( $chip_root . '/includes/*.php' ) as $chip_file ) {
+	$src = (string) file_get_contents( $chip_file );
+
+	foreach ( $write_patterns as $pattern ) {
+		if ( preg_match_all( $pattern, $src, $hits ) ) {
+			foreach ( $hits[1] as $key ) {
+				$written[ $key ] = true;
+			}
+		}
+	}
+}
+
+check( 'meta keys were found in the source', ! empty( $written ) );
+
+$uninstall = (string) file_get_contents( $chip_root . '/uninstall.php' );
+
+$not_cleaned = array();
+
+foreach ( array_keys( $written ) as $key ) {
+	// Either named in the uninstall sweep, or deleted through a helper that the
+	// uninstall calls with the key.
+	if ( false === strpos( $uninstall, "'" . $key . "'" ) ) {
+		$not_cleaned[] = $key;
+	}
+}
+
+check(
+	'every meta key is removed at uninstall (' . implode( ', ', $not_cleaned ) . ')',
+	array() === $not_cleaned
+);
+
+// The keys that must be there, spelled out so a rename is caught too.
+foreach ( array( 'chip_bank_account', 'chip_payout_data', 'payment_account_number', 'payment_bank_code', 'chip_burnt_references' ) as $expected ) {
+	check( 'uninstall clears ' . $expected, false !== strpos( $uninstall, "'" . $expected . "'" ) );
+}
+
+/*
+ * The referral-meta sweep must read the table name from AffiliateWP: on a
+ * network with AFFILIATE_WP_NETWORK_WIDE the table carries no site prefix, and
+ * a literal name would find nothing and leave the rows behind.
+ */
+check(
+	'the referral-meta sweep uses AffiliateWP\'s table name',
+	false !== strpos( $uninstall, 'referral_meta->table_name' )
+);
+
+check(
+	'the referral-meta sweep does not hard-code a prefixed table',
+	false === strpos( $uninstall, "{\$wpdb->prefix}affiliate_wp_referralmeta" )
+);
+
+// And the helper it relies on exists in AffiliateWP.
+check( 'uninstall guards on the core helper', false !== strpos( $uninstall, 'affwp_delete_referral_meta' ) );
+
+echo "\n== Test 122: the request signature matches CHIP Send's published vector ==\n";
+reset_state();
+
+/*
+ * CHIP Send's documentation publishes a worked example: for a given epoch, API
+ * key and secret, the checksum is a specific hex string. That is the only
+ * external check on the signing implementation - a wrong concatenation order,
+ * the wrong hash, or the arguments swapped between key and message all produce
+ * a plausible-looking hex string that CHIP rejects with Unauthorized.
+ *
+ * The plugin sets:
+ *   checksum = hash_hmac( 'sha512', $epoch . $api_key, $secret_key )
+ */
+$epoch      = '1689826456';
+$api_key    = 'e0645c9e-fcf2-4f29-a327-202f7ed3d969';
+$secret_key = 'a118729e-4243-4145-83b3-0b8cb213fe8e';
+
+$expected = '45bee62dba8087ab1e7e767d92f8d6e26f8bd19ee5fd2fef6386bb9425976498a86ffdbddb7a49919998e993c20626196ea652320f438a9528d2b8c9d19ec266';
+
+$actual = hash_hmac( 'sha512', $epoch . $api_key, $secret_key );
+
+check( 'the published checksum vector reproduces', hash_equals( $expected, $actual ) );
+
+// The signing string is epoch then API key, concatenated with no separator.
+check( 'the signing string is epoch followed by the api key', $epoch . $api_key === '1689826456e0645c9e-fcf2-4f29-a327-202f7ed3d969' );
+
+/* A swapped key/message pair gives a different string, which is the mistake
+ * this vector catches. */
+check(
+	'a swapped key and message does not reproduce the vector',
+	! hash_equals( $expected, hash_hmac( 'sha512', $secret_key, $epoch . $api_key ) )
+);
+
+check(
+	'a different hash algorithm does not reproduce the vector',
+	! hash_equals( $expected, hash_hmac( 'sha256', $epoch . $api_key, $secret_key ) )
+);
+
+check(
+	'a separator between the parts does not reproduce the vector',
+	! hash_equals( $expected, hash_hmac( 'sha512', $epoch . ':' . $api_key, $secret_key ) )
+);
+
+/*
+ * And the plugin's own client sends exactly these headers - asserted against
+ * the real request rather than the formula, so a change in the client is caught
+ * too.
+ */
+$GLOBALS['__options']['chip_test_api_key']    = $api_key;
+$GLOBALS['__options']['chip_test_secret_key'] = $secret_key;
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_request( 'GET', '/send/send_instructions', array(), array(), 'test' );
+
+check( 'a request was made', 1 === count( $GLOBALS['__http_log'] ) );
+
+$sent    = $GLOBALS['__http_log'][0];
+$headers = $sent['headers'] ?? array();
+
+check( 'the request carries an epoch header', ! empty( $headers['epoch'] ) );
+check( 'the request carries a checksum header', ! empty( $headers['checksum'] ) );
+check(
+	'the authorization header is a bearer token',
+	'Bearer ' . $api_key === (string) ( $headers['Authorization'] ?? '' )
+);
+
+// Recompute the checksum from the headers the client actually sent.
+$recomputed = hash_hmac( 'sha512', (string) $headers['epoch'] . $api_key, $secret_key );
+
+check( 'the checksum sent matches the formula', hash_equals( $recomputed, (string) $headers['checksum'] ) );
+
+check( 'the epoch is a unix timestamp', ctype_digit( (string) $headers['epoch'] ) );
+check( 'the epoch is recent', abs( time() - (int) $headers['epoch'] ) < 60 );
+
+// The secret must never travel in a header.
+$header_blob = strtolower( (string) wp_json_encode( $headers ) );
+
+check( 'the secret is not sent', false === strpos( $header_blob, strtolower( $secret_key ) ) );
+
+echo "\n== Test 123: the webhook endpoint fails closed and is idempotent ==\n";
+reset_state();
+
+/*
+ * The endpoint accepts data from outside, so its failures must be on the safe
+ * side: anything that is not a verified delivery changes nothing. And because
+ * CHIP's payloads carry no nonce or timestamp, a replay is indistinguishable
+ * from a retry - so the handler has to be idempotent rather than rely on
+ * freshness.
+ */
+$cp_keypair = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+openssl_pkey_export( $cp_keypair, $cp_priv );
+$cp_pub = openssl_pkey_get_details( $cp_keypair )['key'];
+
+$GLOBALS['__options']['chip_payouts']              = 1;
+$GLOBALS['__options']['chip_test_mode']            = 1;
+$GLOBALS['__options']['chip_test_api_key']         = 'k';
+$GLOBALS['__options']['chip_test_secret_key']      = 's';
+$GLOBALS['__options']['chip_reference_prefix']     = 'XT';
+$GLOBALS['__options']['currency']                  = 'MYR';
+$GLOBALS['__options']['chip_webhook_public_key']   = $cp_pub;
+$GLOBALS['__options']['chip_webhook_secret']       = 'fixedharnesssecret000000000000000000';
+$GLOBALS['__options']['chip_webhook_checked_test'] = time();
+
+$cp_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3300 ),
+		'amount'        => '40.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'service_id'    => 8500,
+		'description'   => wp_json_encode( array( 'instruction_id' => 8500, 'reference' => 'XT-PO-501' ) ),
+	)
+);
+
+$GLOBALS['__referral_rows'][3300] = new Fake_Referral( 3300, 3, '40.00', 'unpaid', $cp_payout );
+
+chip_affiliatewp_update_payout_data(
+	$cp_payout,
+	array(
+		'instruction_id' => 8500,
+		'mode'           => 'test',
+		'state'          => 'executing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
+	)
+);
+
+$GLOBALS['wpdb'] = new Fake_WPDO();
+
+$cp_body = wp_json_encode( array( 'id' => 8500, 'state' => 'completed', 'reference' => 'XT-PO-501' ) );
+
+function cp_sign( $raw, $key ) {
+	openssl_sign( $raw, $sig, $key, OPENSSL_ALGO_SHA512 );
+	return base64_encode( $sig );
+}
+
+function cp_request( $raw, $signature ) {
+	$r = new Fake_Request();
+	$r->body = $raw;
+	$r->headers['HTTP_X_SIGNATURE'] = $signature;
+	$r->headers['HTTP_EVENT_TYPE']  = 'send_instruction_status';
+	return $r;
+}
+
+// A tampered body fails and the payout is untouched.
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body . 'x', cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'a tampered body is refused', is_wp_error( $cp_resp ) );
+check( 'the payout is untouched after a bad signature', 'processing' === affwp_get_payout( $cp_payout )->status );
+check( 'the referral is untouched', 'unpaid' === $GLOBALS['__referral_rows'][3300]->status );
+
+// No signature at all.
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, '' ) );
+
+check( 'a missing signature is refused', is_wp_error( $cp_resp ) );
+check( 'the payout is untouched after a missing signature', 'processing' === affwp_get_payout( $cp_payout )->status );
+
+// Undecodable base64 must not pass for a signature.
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, '!!!not-base64!!!' ) );
+
+check( 'undecodable base64 is refused', is_wp_error( $cp_resp ) );
+check( 'the payout is untouched after undecodable base64', 'processing' === affwp_get_payout( $cp_payout )->status );
+
+// No configured key: refuse in a way CHIP will retry rather than give up on.
+$GLOBALS['__options']['chip_webhook_public_key'] = '';
+
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'an unconfigured endpoint refuses', is_wp_error( $cp_resp ) );
+check( 'it asks for a retry rather than a rejection', 503 === (int) ( $cp_resp->get_error_data()['status'] ?? 0 ) );
+check( 'the payout is untouched while unconfigured', 'processing' === affwp_get_payout( $cp_payout )->status );
+
+// Configured again: the valid delivery applies.
+$GLOBALS['__options']['chip_webhook_public_key'] = $cp_pub;
+
+$cp_resp = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'a valid delivery is accepted', is_array( $cp_resp ) );
+check( 'the payout completed', 'paid' === affwp_get_payout( $cp_payout )->status );
+check( 'the referral is paid', 'paid' === $GLOBALS['__referral_rows'][3300]->status );
+
+/*
+ * Replay: the same signed delivery again. There is no nonce in the payload, so
+ * the handler has to be idempotent - paying twice here would be a second bank
+ * transfer for one commission.
+ */
+$cp_rows = count( $GLOBALS['__payout_rows'] );
+$cp_log  = count( $GLOBALS['__http_log'] );
+
+$cp_r2 = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+$cp_r3 = chip_affiliatewp_handle_webhook( cp_request( $cp_body, cp_sign( $cp_body, $cp_priv ) ) );
+
+check( 'a replayed delivery is acknowledged', is_array( $cp_r2 ) && is_array( $cp_r3 ) );
+check( 'a replayed delivery creates no payout', $cp_rows === count( $GLOBALS['__payout_rows'] ) );
+check( 'a replayed delivery sends nothing', $cp_log === count( $GLOBALS['__http_log'] ) );
+check( 'a replayed delivery leaves the payout paid', 'paid' === affwp_get_payout( $cp_payout )->status );
+check( 'a replayed delivery leaves the referral paid', 'paid' === $GLOBALS['__referral_rows'][3300]->status );
+
+
+echo "\n== Test 124: a completed batch queues each payout once ==\n";
+reset_state();
+
+/*
+ * `affwp_batch_generate_payouts_completed` fires whenever a batch completes,
+ * and a batch can complete more than once - saved again, retried, or resumed.
+ * The handler fans out one Action Scheduler action per payout, so without the
+ * dedupe a re-fired hook grows the queue with rows that only ever re-read the
+ * same locked payout.
+ *
+ * Submitting twice is not a payment risk (the submission path locks and returns
+ * early once an instruction exists), but the queue should not grow for it - and
+ * a batch of a thousand payouts makes that visible.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+$batch_id = 77;
+$ids      = array();
+
+foreach ( array( 3400, 3401, 3402 ) as $i => $referral_id ) {
+	$pid = affiliate_wp()->affiliates->payouts->add(
+		array(
+			'affiliate_id'  => 3,
+			'referrals'     => array( $referral_id ),
+			'amount'        => '10.00',
+			'payout_method' => 'chip',
+			'status'        => 'processing',
+			'batch_id'      => $batch_id,
+		)
+	);
+
+	$ids[] = $pid;
+
+	$GLOBALS['__referral_rows'][ $referral_id ] = new Fake_Referral( $referral_id, 3, '10.00', 'unpaid', $pid );
+}
+
+// A payout in another batch, and one not on CHIP, must both be left alone.
+$other = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3499 ),
+		'amount'        => '10.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'batch_id'      => 88,
+	)
+);
+
+$manual = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3498 ),
+		'amount'        => '10.00',
+		'payout_method' => 'manual',
+		'status'        => 'processing',
+		'batch_id'      => $batch_id,
+	)
+);
+
+$GLOBALS['__as'] = array();
+
+chip_affiliatewp_process_generated_batch( $batch_id );
+
+$first = array_values(
+	array_filter(
+		$GLOBALS['__as'],
+		function ( $e ) {
+			return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+		}
+	)
+);
+
+check( 'each payout in the batch was queued', 3 === count( $first ) );
+
+// The hook fires again: the queue must not grow.
+chip_affiliatewp_process_generated_batch( $batch_id );
+
+$second = array_values(
+	array_filter(
+		$GLOBALS['__as'],
+		function ( $e ) {
+			return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+		}
+	)
+);
+
+check( 'a re-fired batch adds nothing to the queue', count( $first ) === count( $second ) );
+
+// The payouts queued are the batch's own.
+$queued = array();
+
+foreach ( $second as $entry ) {
+	$queued[] = (int) ( $entry[2]['payout_id'] ?? 0 );
+}
+
+sort( $queued );
+$expected = $ids;
+sort( $expected );
+
+check( 'the batch\'s own payouts were queued', $expected === $queued );
+check( 'another batch is not queued', ! in_array( $other, $queued, true ) );
+check( 'a non-CHIP payout is not queued', ! in_array( $manual, $queued, true ) );
+
+// Staggering: submissions are spread so bank-account lookups do not pile up.
+$times = array_map( function ( $e ) { return (int) $e[0]; }, $second );
+
+check( 'submissions are staggered, not simultaneous', count( array_unique( $times ) ) === count( $times ) );
+
+// A batch with no credentials queues nothing, rather than half a batch.
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']     = 1;
+$GLOBALS['__options']['chip_test_mode']   = 1;
+$GLOBALS['__options']['chip_test_api_key']    = '';
+$GLOBALS['__options']['chip_test_secret_key'] = '';
+
+$pid = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3500 ),
+		'amount'        => '10.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'batch_id'      => 99,
+	)
+);
+
+$GLOBALS['__referral_rows'][3500] = new Fake_Referral( 3500, 3, '10.00', 'unpaid', $pid );
+$GLOBALS['__as'] = array();
+
+chip_affiliatewp_process_generated_batch( 99 );
+
+$queued_without_creds = array_filter(
+	$GLOBALS['__as'],
+	function ( $e ) {
+		return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+	}
+);
+
+check( 'no credentials means nothing is queued', array() === $queued_without_creds );
+
+// A batch id of zero cannot match anything and must not queue the world.
+$GLOBALS['__as'] = array();
+
+chip_affiliatewp_process_generated_batch( 0 );
+
+$queued_zero = array_filter(
+	$GLOBALS['__as'],
+	function ( $e ) {
+		return 'chip_affiliatewp_submit_payout_action' === ( $e[1] ?? '' );
+	}
+);
+
+check( 'a zero batch id queues nothing', array() === $queued_zero );
+
+echo "\n== Test 125: the receipt-URL validator only accepts CHIP hosts ==\n";
+reset_state();
+
+/*
+ * The receipt URL comes from CHIP and is rendered as a link for the merchant.
+ * Validating it is defence in depth: if CHIP ever returned a hostile value, or
+ * a proxy altered one, the link must not become a phishing target. The host
+ * check is a suffix match, which is the shape that usually goes wrong - so the
+ * lookalikes and suffix tricks are asserted explicitly.
+ */
+$accepted = array(
+	'https://chip-in.asia/receipt/abc',
+	'https://api.chip-in.asia/receipt/abc',
+	'https://staging-api.chip-in.asia/receipt/abc',
+	'https://a.b.c.chip-in.asia/r',
+	'http://chip-in.asia/r',
+	// DNS is case-insensitive, so an upper-case host is the same host.
+	'https://CHIP-IN.ASIA/r',
+);
+
+foreach ( $accepted as $url ) {
+	check(
+		'a CHIP URL is accepted: ' . substr( $url, 0, 40 ),
+		chip_affiliatewp_safe_receipt_url( $url ) !== ''
+	);
+}
+
+$rejected = array(
+	// Hosts that merely contain the string.
+	'https://notchip-in.asia/r',
+	'https://evilchip-in.asia/r',
+	'https://xchip-in.asia/r',
+	'https://chip-in.asiax/r',
+	// CHIP's domain as a subdomain of something else.
+	'https://chip-in.asia.evil.com/r',
+	// CHIP's domain in the path, query or fragment rather than the host.
+	'https://evil.com/chip-in.asia/r',
+	'https://evil.com?.chip-in.asia',
+	'https://evil.com#.chip-in.asia',
+	// A userinfo segment does not change where the link goes.
+	'https://chip-in.asia@evil.com/r',
+	// Non-http schemes.
+	'javascript:alert(1)',
+	'data:text/html,<script>alert(1)</script>',
+	'ftp://chip-in.asia/r',
+	'file:///etc/passwd',
+	// No scheme at all: protocol-relative is resolved by the browser.
+	'//chip-in.asia/r',
+	// Nothing to render.
+	'',
+	'   ',
+);
+
+foreach ( $rejected as $url ) {
+	check(
+		'a non-CHIP URL is rejected: ' . substr( $url, 0, 40 ),
+		'' === chip_affiliatewp_safe_receipt_url( $url )
+	);
+}
+
+/*
+ * The userinfo case deserves its own assertion: `evil.com@chip-in.asia` reads
+ * as evil.com to a person but resolves to chip-in.asia, and the reverse
+ * (`chip-in.asia@evil.com`) resolves to evil.com. Only the second is rejected.
+ */
+check(
+	'a URL whose host is CHIP is accepted even with userinfo',
+	'' !== chip_affiliatewp_safe_receipt_url( 'https://someone@chip-in.asia/r' )
+);
+
+check(
+	'a URL that only mentions CHIP in its userinfo is rejected',
+	'' === chip_affiliatewp_safe_receipt_url( 'https://chip-in.asia@evil.com/r' )
+);
+
+// Stored receipt URLs are validated on the way in as well as on the way out.
+check(
+	'the payout path validates before storing',
+	false !== strpos(
+		(string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' ),
+		'chip_affiliatewp_safe_receipt_url'
+	)
+);
+
+check(
+	'the payout path does not store a raw receipt_url',
+	false === strpos(
+		(string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' ),
+		"'receipt_url'] = (string) chip_affiliatewp_array_value( \$instruction, 'receipt_url' )"
+	)
+);
+
+echo "\n== Test 126: the submission lock serialises concurrent workers ==\n";
+reset_state();
+
+/*
+ * The instruction_id guard before submission is a read-then-write: two workers
+ * handling the same payout at once - a duplicate scheduled action, or a requery
+ * racing a webhook - could both read it empty and both send money. The advisory
+ * lock closes that window, and it is the only thing that does.
+ *
+ * The lock had no test: the existing one covers the webhook's lock, which is a
+ * different name and a different code path.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+
+$GLOBALS['wpdb'] = new Fake_WPDO();
+
+$lock_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3600 ),
+		'amount'        => '25.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3600] = new Fake_Referral( 3600, 3, '25.00', 'unpaid', $lock_payout );
+
+// A second worker holds the lock for this payout.
+$GLOBALS['__lock_held'] = 'chip_affiliatewp_submit_' . absint( $lock_payout );
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+$blocked = chip_affiliatewp_submit_payout( $lock_payout );
+
+check( 'a blocked submission reports success, not failure', true === $blocked );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), 'send_instructions' );
+		}
+	)
+);
+
+check( 'a blocked submission sends nothing', array() === $posts );
+check( 'a blocked submission records no instruction', empty( chip_affiliatewp_payout_data( affwp_get_payout( $lock_payout ) )['instruction_id'] ) );
+
+/*
+ * Returning true without sending is deliberate: the other worker owns the
+ * submission, so this one must not report a failure for doing nothing.
+ */
+
+// With the lock free, the submission proceeds and sends. The bank-account
+// lookup runs first, then creation, then the instruction.
+$GLOBALS['__lock_held']  = null;
+$GLOBALS['__http_log']   = array();
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 601, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9700, 'state' => 'received' ) );
+
+$sent = chip_affiliatewp_submit_payout( $lock_payout );
+
+check( 'an unblocked submission succeeds', true === $sent );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), 'send_instructions' );
+		}
+	)
+);
+
+check( 'an unblocked submission sends exactly one instruction', 1 === count( $posts ) );
+check( 'the instruction id is recorded', 9700 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $lock_payout ) )['instruction_id'] ?? 0 ) );
+
+/*
+ * Now that an instruction exists, a second worker must return early even with
+ * the lock free - the instruction_id guard, which the lock protects.
+ */
+$GLOBALS['__http_log'] = array();
+
+$again = chip_affiliatewp_submit_payout( $lock_payout );
+
+check( 'a submitted payout is not resubmitted', true === $again );
+
+$posts = array_values(
+	array_filter(
+		$GLOBALS['__http_log'],
+		function ( $e ) {
+			return 'POST' === ( $e['method'] ?? '' ) && false !== strpos( (string) ( $e['url'] ?? '' ), 'send_instructions' );
+		}
+	)
+);
+
+check( 'no second instruction is sent', array() === $posts );
+
+/*
+ * The lock must be released even when the submission fails, or a transient
+ * error would block that payout's submissions forever.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['wpdb'] = new Fake_WPDO();
+
+$fail_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3601 ),
+		'amount'        => '25.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3601] = new Fake_Referral( 3601, 3, '25.00', 'unpaid', $fail_payout );
+
+// The submission fails: CHIP answers 500.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 603, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 500, 'body' => array( 'error' => 'boom' ) );
+$GLOBALS['__http_log'] = array();
+$GLOBALS['__lock_released'] = array();
+
+$result = chip_affiliatewp_submit_payout( $fail_payout );
+
+check( 'a failing submission is reported', is_wp_error( $result ) );
+
+// The lock must have been released on the way out.
+check(
+	'the lock is released after a failure',
+	false !== strpos( implode( '|', $GLOBALS['__lock_released'] ?? array() ), 'RELEASE_LOCK' )
+);
+
+// And a later attempt is free to try again rather than finding the lock held.
+$GLOBALS['__lock_held']  = null;
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 602, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9701, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+$retry = chip_affiliatewp_submit_payout( $fail_payout );
+
+check( 'a retry after a failure proceeds', true === $retry );
+check( 'the retry recorded its instruction', 9701 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $fail_payout ) )['instruction_id'] ?? 0 ) );
+
+echo "\n== Test 127: a failed payout detaches its referrals ==\n";
+reset_state();
+
+/*
+ * When a payout fails, its referrals go back to `unpaid` so they can be paid
+ * again. But `affwp_set_referral_status()` only writes the status - it leaves
+ * `payout_id` pointing at the dead payout. Single-pay refuses any referral that
+ * still carries one ("This referral is already attached to a payout"), so the
+ * referral is unpaid, listed as payable, and unpayable.
+ *
+ * AffiliateWP's own Stripe integration detaches for exactly this reason; its
+ * comment says so: "single-pay blocks any referral still carrying a payout_id,
+ * so it would stay unpayable."
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$dead_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3700, 3701 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+// Both referrals sit inside the dead payout.
+$GLOBALS['__referral_rows'][3700] = new Fake_Referral( 3700, 3, '15.00', 'unpaid', $dead_payout );
+$GLOBALS['__referral_rows'][3701] = new Fake_Referral( 3701, 3, '15.00', 'unpaid', $dead_payout );
+
+chip_affiliatewp_fail_payout( $dead_payout, 'CHIP refused the transfer.', 'chip_instruction_rejected', 422 );
+
+check( 'the payout failed', 'failed' === affwp_get_payout( $dead_payout )->status );
+check( 'referral 3700 is unpaid again', 'unpaid' === $GLOBALS['__referral_rows'][3700]->status );
+check( 'referral 3701 is unpaid again', 'unpaid' === $GLOBALS['__referral_rows'][3701]->status );
+
+/*
+ * The point of the test: they must also be detached, or the single-pay path
+ * refuses them and the money can never move again.
+ */
+check( 'referral 3700 is detached from the dead payout', empty( $GLOBALS['__referral_rows'][3700]->payout_id ) );
+check( 'referral 3701 is detached from the dead payout', empty( $GLOBALS['__referral_rows'][3701]->payout_id ) );
+
+// And the single-pay path now accepts it, which is the merchant-visible effect.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 611, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9800, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+$retry = chip_affiliatewp_pay_single_referral( 3700 );
+
+check( 'the released referral can be paid again', ! is_wp_error( $retry ) );
+
+if ( is_wp_error( $retry ) ) {
+	echo '        reason: ' . $retry->get_error_code() . ' - ' . substr( $retry->get_error_message(), 0, 80 ) . "\n";
+}
+
+// A referral attached to a *live* payout must still be refused, so the fix does
+// not widen into paying something twice.
+$live_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3702 ),
+		'amount'        => '15.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3702] = new Fake_Referral( 3702, 3, '15.00', 'unpaid', $live_payout );
+
+$blocked = chip_affiliatewp_pay_single_referral( 3702 );
+
+check( 'a referral inside a live payout is still refused', is_wp_error( $blocked ) );
+check( 'and it is refused for the right reason', 'chip_referral_has_payout' === $blocked->get_error_code() );
+
+echo "\n== Test 128: no duplicated statement block in the plugin ==\n";
+reset_state();
+
+/*
+ * A block of statements copied directly above itself is dead code: the first
+ * one always returns before the second runs. It reads as two checks - and when
+ * the block is a guard, the reader believes the value is checked twice.
+ *
+ * This found a duplicated ownership check inside the submission path, left
+ * behind by an earlier edit. The test scans every source file for a run of
+ * lines that repeats immediately, ignoring comments and blank lines so
+ * formatted blocks are still caught.
+ */
+$chip_root = dirname( __DIR__ );
+$dupes     = array();
+
+foreach ( glob( $chip_root . '/includes/*.php' ) as $chip_file ) {
+	$src   = (string) file_get_contents( $chip_file );
+	$lines = explode( "\n", $src );
+
+	$count = count( $lines );
+
+	for ( $size = 8; $size >= 4; $size-- ) {
+		for ( $i = 0; $i + 2 * $size <= $count; $i++ ) {
+			$first  = array();
+			$second = array();
+
+			for ( $k = 0; $k < $size; $k++ ) {
+				$first[]  = rtrim( $lines[ $i + $k ] );
+				$second[] = rtrim( $lines[ $i + $size + $k ] );
+			}
+
+			if ( $first !== $second ) {
+				continue;
+			}
+
+			// Ignore runs that are only comments or blank lines.
+			$meaningful = false;
+
+			foreach ( $first as $line ) {
+				$trimmed = trim( $line );
+
+				if ( '' !== $trimmed && 0 !== strpos( $trimmed, '*' ) && 0 !== strpos( $trimmed, '/*' ) && 0 !== strpos( $trimmed, '//' ) ) {
+					$meaningful = true;
+					break;
+				}
+			}
+
+			if ( ! $meaningful ) {
+				continue;
+			}
+
+			$dupes[] = basename( $chip_file ) . ':' . ( $i + 1 ) . ' (' . $size . ' lines)';
+			break 2;
+		}
+	}
+}
+
+check(
+	'no block of statements repeats immediately (' . implode( ', ', $dupes ) . ')',
+	array() === $dupes
+);
+
+// The specific guard that was duplicated must appear once.
+$submit_src = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check(
+	'the ownership guard is not duplicated',
+	1 === substr_count( $submit_src, "if ( ! chip_affiliatewp_instruction_belongs_to_payout( \$payout, \$existing ) ) {" )
+);
+
+echo "\n== Test 129: every tag in the failure email resolves ==\n";
+reset_state();
+
+/*
+ * AffiliateWP renders an unknown tag literally - `do_tag()` returns the match
+ * unchanged when the tag is not registered - so a tag nobody provides reaches
+ * the affiliate as raw text where a link should be.
+ *
+ * `{affiliate_payout_settings_url}` is not in AffiliateWP's core tag set: the
+ * canonical implementation lives in the Stripe module, which loads only when
+ * Connect is configured. The plugin's failure email used it regardless, so on a
+ * site without Connect the affiliate received
+ * "Please open your settings and check your bank details:
+ * {affiliate_payout_settings_url}".
+ *
+ * The test reads the plugin's own email bodies, collects every {tag} they use,
+ * and asserts each one is either registered by the plugin or supplied by the
+ * modules AffiliateWP always loads.
+ */
+$chip_root = dirname( __DIR__ );
+
+$bodies = array();
+
+foreach ( array( 'class-chip-affiliatewp-failures.php', 'class-chip-affiliatewp-review-notices.php' ) as $name ) {
+	$bodies[ $name ] = (string) file_get_contents( $chip_root . '/includes/' . $name );
+}
+
+// Every {tag} appearing in a plugin email body.
+$used = array();
+
+foreach ( $bodies as $name => $src ) {
+	foreach ( array( 'failure_email_body', 'register_failure_email_template' ) as $fn ) {
+		$at = strpos( $src, 'function chip_affiliatewp_' . $fn );
+
+		if ( false === $at ) {
+			continue;
+		}
+
+		$chunk = substr( $src, $at, 2600 );
+
+		if ( preg_match_all( '/\{([a-z0-9_\-]+)\}/', $chunk, $m ) ) {
+			foreach ( $m[1] as $tag ) {
+				$used[ $tag ] = true;
+			}
+		}
+	}
+}
+
+check( 'the email bodies use tags', ! empty( $used ) );
+
+// Tags AffiliateWP's always-loaded code provides.
+$core_tags = array( 'name', 'user_name', 'user_email', 'website', 'amount', 'site_name', 'affiliate_id' );
+
+// Tags this plugin registers.
+$plugin_src = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-failures.php' );
+
+$plugin_tags = array();
+
+if ( preg_match_all( "/'tag'\s*=>\s*'([a-z0-9_\-]+)'/", $plugin_src, $m ) ) {
+	foreach ( $m[1] as $tag ) {
+		$plugin_tags[ $tag ] = true;
+	}
+}
+
+$unresolved = array();
+
+foreach ( array_keys( $used ) as $tag ) {
+	if ( ! in_array( $tag, $core_tags, true ) && ! isset( $plugin_tags[ $tag ] ) ) {
+		$unresolved[] = $tag;
+	}
+}
+
+check(
+	'every tag is resolvable (' . implode( ', ', $unresolved ) . ')',
+	array() === $unresolved
+);
+
+// The specific tag that only Stripe provided.
+check(
+	'the plugin provides the payout-settings URL tag',
+	isset( $plugin_tags['affiliate_payout_settings_url'] )
+);
+
+check(
+	'it registers the tag on the email-tags filter',
+	false !== strpos( $plugin_src, "add_filter( 'affwp_email_tags', 'chip_affiliatewp_register_payout_settings_url_tag'" )
+);
+
+// And it does not shadow the canonical implementation: the registration
+// returns the incoming list untouched when the tag is already there.
+$reg_at = strpos( $plugin_src, 'function chip_affiliatewp_register_payout_settings_url_tag' );
+$reg    = false !== $reg_at ? substr( $plugin_src, $reg_at, 700 ) : '';
+
+check( 'the registration function is defined', '' !== $reg );
+check(
+	'the registration defers to an existing tag',
+	false !== strpos( $reg, "'affiliate_payout_settings_url' === ( \$tag['tag'] ?? '' )" )
+);
+
+// The resolver falls back rather than returning nothing.
+$resolver_at = strpos( $plugin_src, 'function chip_affiliatewp_email_tag_payout_settings_url' );
+$resolver    = false !== $resolver_at ? substr( $plugin_src, $resolver_at, 900 ) : '';
+
+check( 'the resolver is defined', '' !== $resolver );
+check( 'the resolver falls back to the affiliate area', false !== strpos( $resolver, 'affwp_get_affiliate_area_page_url' ) );
+check( 'the resolver never returns empty', false !== strpos( $resolver, 'return home_url();' ) );
+
+// Called for real, it produces a usable URL rather than a placeholder.
+$GLOBALS['__affiliate_area_urls'] = array(
+	'settings' => 'https://example.test/affiliate-area/?tab=settings',
+);
+
+$url = chip_affiliatewp_email_tag_payout_settings_url( 3 );
+
+check( 'the resolver returns the settings URL', false !== strpos( $url, 'tab=settings' ) );
+check( 'the resolver returns no braces', false === strpos( $url, '{' ) );
+
+echo "\n== Test 130: release metadata agrees with the plugin version ==\n";
+reset_state();
+
+/*
+ * Five places carry the version, and a release is only correct when they agree:
+ *
+ *   chip-for-affiliatewp.php   header + constant (the plugin's own version)
+ *   readme.txt                 Stable tag
+ *   readme.txt changelog       the latest release only
+ *   changelog.txt              every release, newest first
+ *   README.md                  the download link
+ *
+ * They drifted before: readme.txt's changelog still described 1.0.0 while the
+ * audit work was unreleased, and the README's download link pointed at a
+ * source archive containing vendor/ and tests/ rather than the installable zip.
+ */
+$chip_root = dirname( __DIR__ );
+
+$plugin_src = (string) file_get_contents( $chip_root . '/chip-for-affiliatewp.php' );
+
+preg_match( '/^ \* Version:\s*([0-9.]+)/m', $plugin_src, $header_match );
+preg_match( "/define\( 'CHIP_AFFILIATEWP_VERSION', '([0-9.]+)' \)/", $plugin_src, $const_match );
+
+$header_version = $header_match[1] ?? '';
+$const_version  = $const_match[1] ?? '';
+
+check( 'the header declares a version', '' !== $header_version );
+check( 'the constant matches the header', $header_version === $const_version );
+
+$readme = (string) file_get_contents( $chip_root . '/readme.txt' );
+
+preg_match( '/^Stable tag:\s*([0-9.]+)/m', $readme, $stable_match );
+$stable = $stable_match[1] ?? '';
+
+check( 'readme.txt declares a stable tag', '' !== $stable );
+check( 'the stable tag matches the plugin version', $header_version === $stable );
+
+/*
+ * readme.txt carries only the latest release. Older entries belong in
+ * changelog.txt - the convention this repository follows.
+ */
+$readme_changelog = '';
+
+if ( preg_match( '/== Changelog ==(.*?)(?:== Upgrade Notice ==|$)/s', $readme, $cm ) ) {
+	$readme_changelog = $cm[1];
+}
+
+preg_match_all( '/^= ([0-9.]+) =/m', $readme_changelog, $readme_versions );
+
+check( 'readme.txt has one changelog entry', 1 === count( $readme_versions[1] ?? array() ) );
+check( 'and it is the current version', ( $readme_versions[1][0] ?? '' ) === $header_version );
+
+// The upgrade notice describes the same release.
+$notice = '';
+
+if ( preg_match( '/== Upgrade Notice ==(.*)$/s', $readme, $nm ) ) {
+	$notice = $nm[1];
+}
+
+preg_match_all( '/^= ([0-9.]+) =/m', $notice, $notice_versions );
+
+check( 'readme.txt has one upgrade notice', 1 === count( $notice_versions[1] ?? array() ) );
+check( 'and it is the current version', ( $notice_versions[1][0] ?? '' ) === $header_version );
+
+/*
+ * changelog.txt keeps every release, newest first, and must contain the
+ * current one.
+ */
+$changelog = (string) file_get_contents( $chip_root . '/changelog.txt' );
+
+preg_match_all( '/^= ([0-9.]+)(?: - [0-9-]+)? =/m', $changelog, $log_versions );
+
+check( 'changelog.txt has entries', ! empty( $log_versions[1] ) );
+check( 'changelog.txt includes the current version', in_array( $header_version, $log_versions[1] ?? array(), true ) );
+
+// Newest first: the first entry must not be older than the second.
+$logged = $log_versions[1] ?? array();
+
+if ( count( $logged ) >= 2 ) {
+	check( 'changelog.txt is newest first', version_compare( $logged[0], $logged[1], '>=' ) );
+} else {
+	check( 'changelog.txt is newest first', true );
+}
+
+check( 'changelog.txt is newer than readme.txt\'s convention allows', count( $logged ) > 1 );
+
+// Every changelog entry must name the current version's changes before older
+// ones: the current version sits at the top.
+check( 'the current version is the first entry in changelog.txt', ( $logged[0] ?? '' ) === $header_version );
+
+/*
+ * The README's download link must point at the release asset, not a source
+ * archive: main.zip carries vendor/, tests/ and CI config, which WordPress
+ * copies into wp-content/plugins/.
+ */
+$readme_md = (string) file_get_contents( $chip_root . '/README.md' );
+
+check( 'the README does not link the source archive', false === strpos( $readme_md, '/archive/main.zip' ) );
+check( 'the README links the latest release asset', false !== strpos( $readme_md, '/releases/latest/download/' ) );
+
+// That link only resolves if the release carries an asset under a stable name.
+check( 'the release asset name is version-less', false !== strpos( $readme_md, '/releases/latest/download/chip-for-affiliatewp.zip' ) );
+
+$build = (string) file_get_contents( $chip_root . '/scripts/build-dist.sh' );
+
+check( 'the build produces a version-less copy', false !== strpos( $build, 'dist/chip-for-affiliatewp.zip' ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
