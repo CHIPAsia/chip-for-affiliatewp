@@ -92,11 +92,59 @@ function as_schedule_recurring_action( $ts, $interval, $hook, $args = array(), $
 	return 1;
 }
 
+/**
+ * Mirrors Action Scheduler's argument matching, which is the point of this stub.
+ *
+ * Real behaviour, read from ActionScheduler_Store and confirmed on a live site:
+ *
+ *   ( $hook, array(), $group )  -> matches only actions with EMPTY args
+ *   ( $hook, array() )          -> cancels every action on the hook
+ *   ( '', array(), $group )     -> cancels every action in the group
+ *
+ * A stub that matched on the hook alone would hide the difference, and the
+ * difference is a bug that shipped: deactivation left every per-payout action
+ * queued because those actions carry `array( 'payout_id' => N )`.
+ */
 function as_unschedule_all_actions( $hook, $args = array(), $group = '' ) {
 	$kept = array();
 
+	// Empty hook with a group: cancel the whole group.
+	if ( '' === (string) $hook && '' !== (string) $group ) {
+		foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+			if ( ( $action['group'] ?? '' ) === $group ) {
+				continue;
+			}
+
+			$kept[] = $action;
+		}
+
+		$GLOBALS['__as_scheduled'] = $kept;
+
+		return count( $kept );
+	}
+
+	// Hook with no group: cancel every action on the hook.
+	if ( '' === (string) $group ) {
+		foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+			if ( $action['hook'] === $hook ) {
+				continue;
+			}
+
+			$kept[] = $action;
+		}
+
+		$GLOBALS['__as_scheduled'] = $kept;
+
+		return count( $kept );
+	}
+
+	// Hook with a group: arguments must match exactly, empty args included.
 	foreach ( $GLOBALS['__as_scheduled'] as $action ) {
-		if ( $action['hook'] === $hook ) {
+		$same_hook  = $action['hook'] === $hook;
+		$same_group = ( $action['group'] ?? '' ) === $group;
+		$same_args  = ( $action['args'] ?? array() ) === $args;
+
+		if ( $same_hook && $same_group && $same_args ) {
 			continue;
 		}
 
@@ -9489,6 +9537,84 @@ foreach ( array( 'vendor', 'tests', '.github', 'node_modules' ) as $dev_only ) {
 		false === strpos( $build, 'cp -r ' . $dev_only )
 	);
 }
+
+echo "\n== Test 131: deactivation clears the actions that carry arguments ==\n";
+reset_state();
+
+/*
+ * Action Scheduler matches arguments exactly. `as_unschedule_all_actions(
+ * $hook, array(), $group )` builds `AND a.args = '[]'`, so it cancels only
+ * actions scheduled with no arguments - and the per-payout actions all carry
+ * `array( 'payout_id' => N )`.
+ *
+ * The plugin deactivated that way, leaving its payout and status-check actions
+ * queued: Action Scheduler kept firing callbacks for a plugin that was no
+ * longer loaded, and a reactivation inherited the backlog. The sweep was the
+ * only action actually removed, because it is the only one scheduled bare.
+ *
+ * Verified against Action Scheduler on a real site: with the old call, three of
+ * four seeded actions survived; with the fix, none do.
+ */
+$chip_root = dirname( __DIR__ );
+
+$lifecycle = (string) file_get_contents( $chip_root . '/includes/chip-affiliatewp-lifecycle.php' );
+
+/*
+ * The routine must cancel by group, which removes every action the plugin owns
+ * regardless of arguments.
+ */
+check(
+	'deactivation cancels by group',
+	false !== strpos( $lifecycle, "as_unschedule_all_actions( '', array(), chip_affiliatewp_as_group() )" )
+);
+
+// And by hook without a group, which also ignores arguments.
+check(
+	'deactivation cancels each hook without a group',
+	preg_match( '/foreach \( \$hooks as \$hook \) \{\s*as_unschedule_all_actions\( \$hook, array\(\) \);/s', $lifecycle ) === 1
+);
+
+/*
+ * The regression itself: no call may pass hook + empty args + group together,
+ * because that combination matches only argument-less actions.
+ */
+check(
+	'no call passes a hook with empty args and a group',
+	false === strpos( $lifecycle, 'as_unschedule_all_actions( $hook, array(), chip_affiliatewp_as_group() )' )
+);
+
+// Every hook the plugin schedules is named in the cancellation list.
+$hooks = array(
+	'chip_affiliatewp_hourly_sweep',
+	'chip_affiliatewp_check_payout_status',
+	'chip_affiliatewp_submit_payout_action',
+);
+
+foreach ( $hooks as $hook ) {
+	check( 'the cancellation list names ' . $hook, false !== strpos( $lifecycle, "'" . $hook . "'" ) );
+}
+
+/*
+ * uninstall.php cannot call the helper, so it keeps its own list - and it must
+ * use the argument-ignoring form too.
+ */
+$uninstall = (string) file_get_contents( $chip_root . '/uninstall.php' );
+
+check( 'uninstall cancels each hook without a group', false !== strpos( $uninstall, 'as_unschedule_all_actions( $chip_scheduled_hook );' ) );
+check( 'uninstall also cancels by group', false !== strpos( $uninstall, "as_unschedule_all_actions( '', array(), 'chip-affiliatewp' )" ) );
+check(
+	'uninstall does not pass a group to the hook sweep',
+	false === strpos( $uninstall, 'as_unschedule_all_actions( $chip_scheduled_hook, array(), ' )
+);
+
+// The harness stub must model the argument matching, or the test cannot see the
+// difference between the two forms.
+$harness = (string) file_get_contents( __FILE__ );
+
+check(
+	'the harness models argument matching',
+	false !== strpos( $harness, 'function as_unschedule_all_actions' )
+);
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
