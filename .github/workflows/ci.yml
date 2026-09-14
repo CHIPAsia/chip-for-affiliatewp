@@ -42,6 +42,7 @@ jobs:
 
       - name: Install WordPress coding standards
         run: |
+          composer global config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer global require wp-coding-standards/wpcs dealerdirect/phpcodesniffer-composer-installer --no-interaction
           echo "$(composer global config home --absolute 2>/dev/null)/vendor/bin" >> "$GITHUB_PATH"
           phpcs --config-set installed_paths "$(composer global config home --absolute 2>/dev/null)/vendor/wp-coding-standards/wpcs"
