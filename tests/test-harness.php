@@ -9746,6 +9746,119 @@ if ( null !== $created ) {
 	check( 'and not the flipped setting', 'live' !== ( $stored['mode'] ?? '' ) );
 }
 
+echo "\n== Test 133: the bank account is registered in the payout's own mode ==\n";
+reset_state();
+
+/*
+ * `chip_affiliatewp_ensure_bank_account()` resolved the mode from the setting
+ * inside itself, while the submission path resolved it once at the top and used
+ * that value for the instruction and the record. So the function deciding where
+ * the money goes was not the function deciding which CHIP account the recipient
+ * is registered in: a merchant toggling test mode between the two had the bank
+ * account registered in one environment and the instruction created in the
+ * other - a production object created from a test run.
+ *
+ * The mode is now a parameter, and the three call sites pass the mode that
+ * belongs to their context.
+ */
+$chip_root = dirname( __DIR__ );
+
+$bank_src   = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-bank-accounts.php' );
+$pay_src    = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check( 'ensure_bank_account accepts a mode', false !== strpos( $bank_src, 'function chip_affiliatewp_ensure_bank_account( $affiliate_id, $mode = null )' ) );
+check( 'get_bank_account accepts a mode', false !== strpos( $bank_src, 'function chip_affiliatewp_get_bank_account( $affiliate_id, $mode = null )' ) );
+
+// The lookup must use the mode it was given, not the setting.
+check(
+	'the lookup passes the resolved mode to the request',
+	false !== strpos( $bank_src, "'reference' => \$reference," ) && preg_match( '/\$mode\s*\n\t\);/', substr( $bank_src, strpos( $bank_src, 'function chip_affiliatewp_get_bank_account' ), 2000 ) ) === 1
+);
+
+// Every call site passes a mode.
+check(
+	'the submission path passes its resolved mode',
+	false !== strpos( $pay_src, 'chip_affiliatewp_ensure_bank_account( $payout->affiliate_id, $mode )' )
+);
+
+check(
+	'the single-referral path passes its resolved mode',
+	false !== strpos( $pay_src, 'chip_affiliatewp_ensure_bank_account( $referral->affiliate_id, $mode )' )
+);
+
+check(
+	'the ownership check uses the payout\'s stored mode',
+	false !== strpos( $pay_src, 'chip_affiliatewp_ensure_bank_account( $affiliate_id, $payout_mode )' )
+);
+
+/*
+ * Behaviour: submit in test mode and flip the setting during the bank-account
+ * lookup - which is the first request the submission makes - then assert both
+ * the account registration and the instruction went to the test host.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_live_api_key']     = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']  = 'ls';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$GLOBALS['__referral_rows'][3900] = new Fake_Referral( 3900, 3, '45.00', 'unpaid', 0 );
+
+$GLOBALS['__hosts_seen'] = array();
+$GLOBALS['__flip_done']  = false;
+
+$GLOBALS['__on_request'] = function ( $url, $method = 'GET' ) {
+	if ( false !== strpos( $url, '/send/' ) ) {
+		$GLOBALS['__hosts_seen'][] = ( false !== strpos( $url, 'staging-api' ) ? 'test' : 'live' ) . ':' . strtoupper( (string) $method );
+	}
+
+	/*
+	 * Flip on the first request the submission makes - the reference probe -
+	 * which is after the mode is resolved and before the bank account is
+	 * registered. That is the merchant's window: the value is already decided,
+	 * and anything that re-reads the setting resolves the other environment.
+	 */
+	if ( empty( $GLOBALS['__flip_done'] ) ) {
+		$GLOBALS['__flip_done']            = true;
+		$GLOBALS['__options']['chip_test_mode'] = 0;
+	}
+};
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 631, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9950, 'state' => 'received' ) );
+
+$result = chip_affiliatewp_pay_single_referral( 3900 );
+
+$GLOBALS['__on_request'] = null;
+
+check( 'the referral submitted', true === $result );
+
+if ( is_wp_error( $result ) ) {
+	echo '        reason: ' . $result->get_error_code() . "\n";
+}
+
+check( 'the setting was flipped mid-flow', 0 === (int) $GLOBALS['__options']['chip_test_mode'] );
+check( 'requests were made', ! empty( $GLOBALS['__hosts_seen'] ) );
+
+// Every request in the submission must have gone to one environment.
+$hosts = array_values( array_unique( array_map( function ( $h ) { return explode( ':', $h )[0]; }, $GLOBALS['__hosts_seen'] ) ) );
+
+check(
+	'all requests went to one environment (' . implode( ', ', $hosts ) . ')',
+	1 === count( $hosts )
+);
+
+check( 'and it was the test environment', array( 'test' ) === $hosts );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

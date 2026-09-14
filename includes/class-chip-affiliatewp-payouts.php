@@ -229,7 +229,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 	 */
 	$mode = chip_affiliatewp_current_mode();
 
-	$bank_account = chip_affiliatewp_ensure_bank_account( $payout->affiliate_id );
+	$bank_account = chip_affiliatewp_ensure_bank_account( $payout->affiliate_id, $mode );
 
 	if ( is_wp_error( $bank_account ) ) {
 		return chip_affiliatewp_fail_payout(
@@ -571,7 +571,15 @@ function chip_affiliatewp_instruction_belongs_to_payout( $payout, $instruction )
 		return false;
 	}
 
-	$account = chip_affiliatewp_ensure_bank_account( $affiliate_id );
+	/*
+	 * The payout's own mode, not the site-wide setting: this compares the
+	 * account against an instruction the payout already carries, and that
+	 * instruction lives in the mode the payout was submitted in.
+	 */
+	$payout_mode = (string) chip_affiliatewp_array_value( chip_affiliatewp_payout_data( $payout ), 'mode', '' );
+	$payout_mode = in_array( $payout_mode, array( 'test', 'live' ), true ) ? $payout_mode : null;
+
+	$account = chip_affiliatewp_ensure_bank_account( $affiliate_id, $payout_mode );
 
 	if ( is_wp_error( $account ) || empty( $account['id'] ) ) {
 		return false;
@@ -1646,7 +1654,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 		}
 	}
 
-	$bank_account = chip_affiliatewp_ensure_bank_account( $referral->affiliate_id );
+	$bank_account = chip_affiliatewp_ensure_bank_account( $referral->affiliate_id, $mode );
 
 	if ( is_wp_error( $bank_account ) ) {
 		return $bank_account;
