@@ -1765,7 +1765,7 @@ function chip_affiliatewp_pay_single_referral( $referral_id ) {
 			'referral_ids'   => array( $referral_id ),
 			'last_checked'   => gmdate( 'Y-m-d H:i:s' ),
 			'poll_count'     => 0,
-			'mode'           => affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live',
+			'mode'           => $mode,
 		)
 	);
 

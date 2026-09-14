@@ -322,6 +322,15 @@ function wp_remote_request( $url, $args ) {
 	);
 
 	/*
+	 * A test can run code at the moment a request goes out, which is the only
+	 * way to simulate something changing mid-submission - a merchant toggling a
+	 * setting while the CHIP round-trips are in flight.
+	 */
+	if ( ! empty( $GLOBALS['__on_request'] ) ) {
+		call_user_func( $GLOBALS['__on_request'], $url, $args['method'] ?? 'GET' );
+	}
+
+	/*
 	 * Transport-failure simulation: a test can make the next request fail the
 	 * way an unreachable CHIP does, so the error path is exercised rather than
 	 * assumed. The call is still logged above, because a failed request is
@@ -9615,6 +9624,127 @@ check(
 	'the harness models argument matching',
 	false !== strpos( $harness, 'function as_unschedule_all_actions' )
 );
+
+echo "\n== Test 132: the recorded mode is the one the instruction was sent in ==\n";
+reset_state();
+
+/*
+ * The single-referral path resolves the mode once and threads it through the
+ * lookups and adoption, so a merchant toggling test mode mid-flow cannot land
+ * the instruction and its record in different environments. The record line was
+ * the one place that read the setting again:
+ *
+ *   'mode' => affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live',
+ *
+ * The window is real - the CHIP round-trips between the resolve and the record
+ * take seconds - and the cost is not cosmetic: the requery would ask the live
+ * API for a test instruction id, get 404, and fail the payout as
+ * instruction_not_found while the money sat in the test account.
+ *
+ * Tested by flipping the setting between the resolve and the record: with the
+ * fix the record keeps the sending mode; with the raw read it follows the flip.
+ */
+$chip_root = dirname( __DIR__ );
+$pay_src   = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+// The submission path must not read the setting for the record.
+check(
+	'the single-referral record does not re-read the mode setting',
+	false === strpos( $pay_src, "'mode'           => affiliate_wp()->settings->get( 'chip_test_mode' )" )
+);
+
+check(
+	'the single-referral record stores the resolved mode',
+	false !== strpos( $pay_src, "'mode'           => \$mode," )
+);
+
+/*
+ * Both other record sites use the resolved value too, so the three agree.
+ */
+check(
+	'the batch record stores the resolved mode',
+	false !== strpos( $pay_src, "\$data['mode']            = \$mode;" )
+);
+
+check(
+	'the adoption record stores the resolved mode',
+	false !== strpos( $pay_src, "'mode'            => \$mode," )
+);
+
+/*
+ * Behaviour: submit a single referral in test mode, flip the setting while the
+ * request is in flight, and assert the payout records test.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$GLOBALS['__referral_rows'][3800] = new Fake_Referral( 3800, 3, '35.00', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 621, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+
+/*
+ * The mode flip is simulated on the instruction POST: the mock records the mode
+ * the request went to, and turns the setting off as a merchant would.
+ */
+$GLOBALS['__on_request'] = function ( $url, $method = 'GET' ) {
+	if ( false !== strpos( $url, 'staging-api' ) ) {
+		$GLOBALS['__mode_at_send'] = 'test';
+	} elseif ( false !== strpos( $url, 'api.chip-in.asia' ) ) {
+		$GLOBALS['__mode_at_send'] = 'live';
+	}
+
+	/*
+	 * Flip the setting after the instruction POST - not after the lookup that
+	 * shares its path, and not before the send, or the request would use the
+	 * other environment's credentials and fail for that reason instead.
+	 */
+	if ( 'POST' === strtoupper( (string) $method ) && false !== strpos( $url, '/send/send_instructions' ) ) {
+		$GLOBALS['__options']['chip_test_mode'] = 0;
+	}
+};
+
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9900, 'state' => 'received' ) );
+
+$result = chip_affiliatewp_pay_single_referral( 3800 );
+
+$GLOBALS['__on_request'] = null;
+
+check( 'the single referral submitted', true === $result );
+
+if ( is_wp_error( $result ) ) {
+	echo '        reason: ' . $result->get_error_code() . ' - ' . substr( $result->get_error_message(), 0, 90 ) . "\n";
+}
+
+check( 'the instruction went to the test environment', 'test' === ( $GLOBALS['__mode_at_send'] ?? '' ) );
+check( 'the setting was flipped mid-flight', 0 === (int) $GLOBALS['__options']['chip_test_mode'] );
+
+// The payout's record must name the mode the instruction was sent in.
+$created = null;
+
+foreach ( $GLOBALS['__payout_rows'] as $row ) {
+	if ( 3 === (int) $row->affiliate_id ) {
+		$created = $row;
+	}
+}
+
+check( 'a payout was created', null !== $created );
+
+if ( null !== $created ) {
+	$stored = chip_affiliatewp_payout_data( $created );
+
+	check( 'the payout records test mode', 'test' === ( $stored['mode'] ?? '' ) );
+	check( 'and not the flipped setting', 'live' !== ( $stored['mode'] ?? '' ) );
+}
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
