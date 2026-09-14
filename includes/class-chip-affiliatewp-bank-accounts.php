@@ -178,7 +178,8 @@ function chip_affiliatewp_payout_attempt( $data ) {
  * record no longer matches the current details (a changed account number or
  * bank invalidates the id — reusing it would pay the old account).
  *
- * @param int $affiliate_id Affiliate ID.
+ * @param int         $affiliate_id Affiliate ID.
+ * @param string|null $mode         'test' or 'live'; null uses the current mode.
  * @return array|null Bank account record, or null when none exists.
  */
 function chip_affiliatewp_get_bank_account( $affiliate_id, $mode = null ) {
@@ -550,7 +551,8 @@ function chip_affiliatewp_bank_account_name( $affiliate_id ) {
  * rejects a duplicate registration of the same recipient, and this plugin
  * looks the account up first so repeat payouts reuse the existing record.
  *
- * @param int $affiliate_id Affiliate ID.
+ * @param int         $affiliate_id Affiliate ID.
+ * @param string|null $mode         'test' or 'live'; null uses the current mode.
  * @return array|WP_Error Bank account record with at least "id" and "status".
  */
 function chip_affiliatewp_ensure_bank_account( $affiliate_id, $mode = null ) {
