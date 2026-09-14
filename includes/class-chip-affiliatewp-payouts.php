@@ -295,14 +295,6 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 				);
 			}
 
-			if ( ! chip_affiliatewp_instruction_belongs_to_payout( $payout, $existing ) ) {
-				return chip_affiliatewp_fail_payout(
-					$payout_id,
-					__( 'A different payment already uses this reference at CHIP, so this payout cannot be sent under it. Each site sharing a CHIP account needs its own reference prefix.', 'chip-for-affiliatewp' ),
-					'chip_reference_conflict'
-				);
-			}
-
 			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $reference );
 
 			return true;

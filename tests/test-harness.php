@@ -9158,6 +9158,77 @@ $blocked = chip_affiliatewp_pay_single_referral( 3702 );
 check( 'a referral inside a live payout is still refused', is_wp_error( $blocked ) );
 check( 'and it is refused for the right reason', 'chip_referral_has_payout' === $blocked->get_error_code() );
 
+echo "\n== Test 128: no duplicated statement block in the plugin ==\n";
+reset_state();
+
+/*
+ * A block of statements copied directly above itself is dead code: the first
+ * one always returns before the second runs. It reads as two checks - and when
+ * the block is a guard, the reader believes the value is checked twice.
+ *
+ * This found a duplicated ownership check inside the submission path, left
+ * behind by an earlier edit. The test scans every source file for a run of
+ * lines that repeats immediately, ignoring comments and blank lines so
+ * formatted blocks are still caught.
+ */
+$chip_root = dirname( __DIR__ );
+$dupes     = array();
+
+foreach ( glob( $chip_root . '/includes/*.php' ) as $chip_file ) {
+	$src   = (string) file_get_contents( $chip_file );
+	$lines = explode( "\n", $src );
+
+	$count = count( $lines );
+
+	for ( $size = 8; $size >= 4; $size-- ) {
+		for ( $i = 0; $i + 2 * $size <= $count; $i++ ) {
+			$first  = array();
+			$second = array();
+
+			for ( $k = 0; $k < $size; $k++ ) {
+				$first[]  = rtrim( $lines[ $i + $k ] );
+				$second[] = rtrim( $lines[ $i + $size + $k ] );
+			}
+
+			if ( $first !== $second ) {
+				continue;
+			}
+
+			// Ignore runs that are only comments or blank lines.
+			$meaningful = false;
+
+			foreach ( $first as $line ) {
+				$trimmed = trim( $line );
+
+				if ( '' !== $trimmed && 0 !== strpos( $trimmed, '*' ) && 0 !== strpos( $trimmed, '/*' ) && 0 !== strpos( $trimmed, '//' ) ) {
+					$meaningful = true;
+					break;
+				}
+			}
+
+			if ( ! $meaningful ) {
+				continue;
+			}
+
+			$dupes[] = basename( $chip_file ) . ':' . ( $i + 1 ) . ' (' . $size . ' lines)';
+			break 2;
+		}
+	}
+}
+
+check(
+	'no block of statements repeats immediately (' . implode( ', ', $dupes ) . ')',
+	array() === $dupes
+);
+
+// The specific guard that was duplicated must appear once.
+$submit_src = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check(
+	'the ownership guard is not duplicated',
+	1 === substr_count( $submit_src, "if ( ! chip_affiliatewp_instruction_belongs_to_payout( \$payout, \$existing ) ) {" )
+);
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
