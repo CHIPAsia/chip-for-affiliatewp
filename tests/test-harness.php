@@ -824,6 +824,20 @@ function affwp_get_affiliate_id() {
 	return $GLOBALS['__current_affiliate_id'] ?? 0;
 }
 
+/**
+ * Mirrors core: the affiliate area's page URL, optionally for a tab. Driven by
+ * __affiliate_area_urls so a test can put the site in the state it needs.
+ */
+function affwp_get_affiliate_area_page_url( $tab = '' ) {
+	$urls = $GLOBALS['__affiliate_area_urls'] ?? array();
+
+	if ( '' !== $tab ) {
+		return (string) ( $urls[ $tab ] ?? '' );
+	}
+
+	return (string) ( $urls[''] ?? 'https://example.test/affiliate-area/' );
+}
+
 function affwp_get_affiliate_usable_payout_method( $affiliate_id ) {
 	$pick = $GLOBALS['__affiliate_meta'][ (int) $affiliate_id ]['payout_method_pick'] ?? '';
 
@@ -9228,6 +9242,123 @@ check(
 	'the ownership guard is not duplicated',
 	1 === substr_count( $submit_src, "if ( ! chip_affiliatewp_instruction_belongs_to_payout( \$payout, \$existing ) ) {" )
 );
+
+echo "\n== Test 129: every tag in the failure email resolves ==\n";
+reset_state();
+
+/*
+ * AffiliateWP renders an unknown tag literally - `do_tag()` returns the match
+ * unchanged when the tag is not registered - so a tag nobody provides reaches
+ * the affiliate as raw text where a link should be.
+ *
+ * `{affiliate_payout_settings_url}` is not in AffiliateWP's core tag set: the
+ * canonical implementation lives in the Stripe module, which loads only when
+ * Connect is configured. The plugin's failure email used it regardless, so on a
+ * site without Connect the affiliate received
+ * "Please open your settings and check your bank details:
+ * {affiliate_payout_settings_url}".
+ *
+ * The test reads the plugin's own email bodies, collects every {tag} they use,
+ * and asserts each one is either registered by the plugin or supplied by the
+ * modules AffiliateWP always loads.
+ */
+$chip_root = dirname( __DIR__ );
+
+$bodies = array();
+
+foreach ( array( 'class-chip-affiliatewp-failures.php', 'class-chip-affiliatewp-review-notices.php' ) as $name ) {
+	$bodies[ $name ] = (string) file_get_contents( $chip_root . '/includes/' . $name );
+}
+
+// Every {tag} appearing in a plugin email body.
+$used = array();
+
+foreach ( $bodies as $name => $src ) {
+	foreach ( array( 'failure_email_body', 'register_failure_email_template' ) as $fn ) {
+		$at = strpos( $src, 'function chip_affiliatewp_' . $fn );
+
+		if ( false === $at ) {
+			continue;
+		}
+
+		$chunk = substr( $src, $at, 2600 );
+
+		if ( preg_match_all( '/\{([a-z0-9_\-]+)\}/', $chunk, $m ) ) {
+			foreach ( $m[1] as $tag ) {
+				$used[ $tag ] = true;
+			}
+		}
+	}
+}
+
+check( 'the email bodies use tags', ! empty( $used ) );
+
+// Tags AffiliateWP's always-loaded code provides.
+$core_tags = array( 'name', 'user_name', 'user_email', 'website', 'amount', 'site_name', 'affiliate_id' );
+
+// Tags this plugin registers.
+$plugin_src = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-failures.php' );
+
+$plugin_tags = array();
+
+if ( preg_match_all( "/'tag'\s*=>\s*'([a-z0-9_\-]+)'/", $plugin_src, $m ) ) {
+	foreach ( $m[1] as $tag ) {
+		$plugin_tags[ $tag ] = true;
+	}
+}
+
+$unresolved = array();
+
+foreach ( array_keys( $used ) as $tag ) {
+	if ( ! in_array( $tag, $core_tags, true ) && ! isset( $plugin_tags[ $tag ] ) ) {
+		$unresolved[] = $tag;
+	}
+}
+
+check(
+	'every tag is resolvable (' . implode( ', ', $unresolved ) . ')',
+	array() === $unresolved
+);
+
+// The specific tag that only Stripe provided.
+check(
+	'the plugin provides the payout-settings URL tag',
+	isset( $plugin_tags['affiliate_payout_settings_url'] )
+);
+
+check(
+	'it registers the tag on the email-tags filter',
+	false !== strpos( $plugin_src, "add_filter( 'affwp_email_tags', 'chip_affiliatewp_register_payout_settings_url_tag'" )
+);
+
+// And it does not shadow the canonical implementation: the registration
+// returns the incoming list untouched when the tag is already there.
+$reg_at = strpos( $plugin_src, 'function chip_affiliatewp_register_payout_settings_url_tag' );
+$reg    = false !== $reg_at ? substr( $plugin_src, $reg_at, 700 ) : '';
+
+check( 'the registration function is defined', '' !== $reg );
+check(
+	'the registration defers to an existing tag',
+	false !== strpos( $reg, "'affiliate_payout_settings_url' === ( \$tag['tag'] ?? '' )" )
+);
+
+// The resolver falls back rather than returning nothing.
+$resolver_at = strpos( $plugin_src, 'function chip_affiliatewp_email_tag_payout_settings_url' );
+$resolver    = false !== $resolver_at ? substr( $plugin_src, $resolver_at, 900 ) : '';
+
+check( 'the resolver is defined', '' !== $resolver );
+check( 'the resolver falls back to the affiliate area', false !== strpos( $resolver, 'affwp_get_affiliate_area_page_url' ) );
+check( 'the resolver never returns empty', false !== strpos( $resolver, 'return home_url();' ) );
+
+// Called for real, it produces a usable URL rather than a placeholder.
+$GLOBALS['__affiliate_area_urls'] = array(
+	'settings' => 'https://example.test/affiliate-area/?tab=settings',
+);
+
+$url = chip_affiliatewp_email_tag_payout_settings_url( 3 );
+
+check( 'the resolver returns the settings URL', false !== strpos( $url, 'tab=settings' ) );
+check( 'the resolver returns no braces', false === strpos( $url, '{' ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();

@@ -40,6 +40,7 @@ TRANSLATIONS = {
     'Webhook Public Key': 'Kunci Awam Webhook',
     # --- bank / affiliate labels ---
     'Bank Code': 'Kod Bank',
+    'Link to the affiliate payout settings page': 'Pautan ke halaman tetapan pembayaran afiliasi',
     'Bank Account Number': 'Nombor Akaun Bank',
     'Send Receipt to Affiliate': 'Hantar Resit ke Afiliasi',
     '— Select bank —': '— Pilih bank —',

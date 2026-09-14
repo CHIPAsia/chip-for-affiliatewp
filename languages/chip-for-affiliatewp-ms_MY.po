@@ -141,7 +141,7 @@ msgstr "Kedua-dua medan diperlukan"
 #: includes/class-chip-affiliatewp-admin.php:20
 #: includes/class-chip-affiliatewp-admin.php:201
 #: includes/class-chip-affiliatewp-admin.php:1158
-#: includes/class-chip-affiliatewp-failures.php:245
+#: includes/class-chip-affiliatewp-failures.php:313
 msgid "CHIP Send"
 msgstr "CHIP Send"
 
@@ -399,6 +399,10 @@ msgstr "Masukkan kunci rahsia CHIP Send live anda"
 #: includes/class-chip-affiliatewp-admin.php:614
 msgid "Let affiliates choose CHIP Send"
 msgstr "Benarkan afiliasi memilih CHIP Send"
+
+#: includes/class-chip-affiliatewp-failures.php:243
+msgid "Link to the affiliate payout settings page"
+msgstr "Pautan ke halaman tetapan pembayaran afiliasi"
 
 #: includes/class-chip-affiliatewp-admin.php:664
 msgid "Live Credentials"

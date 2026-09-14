@@ -212,6 +212,74 @@ function chip_affiliatewp_failure_email_body( $body, $payout, $method, $state ) 
 add_filter( 'affwp_payout_failure_email_body', 'chip_affiliatewp_failure_email_body', 10, 4 );
 
 /**
+ * Provides the `{affiliate_payout_settings_url}` email tag for this plugin's
+ * failure email.
+ *
+ * The tag is not part of AffiliateWP's core set: the canonical implementation
+ * ships inside the Stripe (Connect) module, which only loads when Connect is
+ * configured. On a site without it the tag is unknown, and AffiliateWP renders
+ * an unknown tag literally - the affiliate receives the raw text
+ * `{affiliate_payout_settings_url}` where a link should be. AffiliateWP's own
+ * Global Payouts module carries a fallback for this exact reason, and says so.
+ *
+ * Registered with a lower priority than Stripe's so that when the canonical
+ * implementation is present it wins and this is a no-op; the plugin only fills
+ * the gap.
+ *
+ * @param array $email_tags Registered email tags.
+ * @return array
+ */
+function chip_affiliatewp_register_payout_settings_url_tag( $email_tags ) {
+	$email_tags = is_array( $email_tags ) ? $email_tags : array();
+
+	foreach ( $email_tags as $tag ) {
+		if ( is_array( $tag ) && 'affiliate_payout_settings_url' === ( $tag['tag'] ?? '' ) ) {
+			return $email_tags;
+		}
+	}
+
+	$email_tags[] = array(
+		'tag'         => 'affiliate_payout_settings_url',
+		'description' => __( 'Link to the affiliate payout settings page', 'chip-for-affiliatewp' ),
+		'function'    => 'chip_affiliatewp_email_tag_payout_settings_url',
+	);
+
+	return $email_tags;
+}
+add_filter( 'affwp_email_tags', 'chip_affiliatewp_register_payout_settings_url_tag', 20 );
+
+/**
+ * Resolves the affiliate's payout settings URL.
+ *
+ * Mirrors what AffiliateWP's own fallback does: the affiliate area's Settings
+ * tab, which is where this plugin's bank-details form lives. Returns the
+ * affiliate area when the tab URL cannot be built, so the affiliate never
+ * receives a dead placeholder.
+ *
+ * @param int $affiliate_id Affiliate ID (unused; the tag is per-recipient).
+ * @return string
+ */
+function chip_affiliatewp_email_tag_payout_settings_url( $affiliate_id = 0 ) {
+	unset( $affiliate_id );
+
+	if ( function_exists( 'affwp_get_affiliate_area_page_url' ) ) {
+		$url = affwp_get_affiliate_area_page_url( 'settings' );
+
+		if ( is_string( $url ) && '' !== $url ) {
+			return $url;
+		}
+
+		$url = affwp_get_affiliate_area_page_url();
+
+		if ( is_string( $url ) && '' !== $url ) {
+			return $url;
+		}
+	}
+
+	return home_url();
+}
+
+/**
  * Registers the classifier with AffiliateWP.
  *
  * @return void

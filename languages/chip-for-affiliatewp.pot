@@ -126,7 +126,7 @@ msgstr ""
 #: includes/class-chip-affiliatewp-admin.php:20
 #: includes/class-chip-affiliatewp-admin.php:201
 #: includes/class-chip-affiliatewp-admin.php:1158
-#: includes/class-chip-affiliatewp-failures.php:245
+#: includes/class-chip-affiliatewp-failures.php:313
 msgid "CHIP Send"
 msgstr ""
 
@@ -349,6 +349,10 @@ msgstr ""
 #: includes/class-chip-affiliatewp-admin.php:602
 #: includes/class-chip-affiliatewp-admin.php:614
 msgid "Let affiliates choose CHIP Send"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-failures.php:243
+msgid "Link to the affiliate payout settings page"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:664
