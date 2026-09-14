@@ -784,6 +784,23 @@ function chip_affiliatewp_fail_payout( $payout_id, $reason, $error_code = '', $h
 
 		foreach ( chip_affiliatewp_payout_referral_ids( $payout ) as $referral_id ) {
 			affwp_set_referral_status( $referral_id, 'unpaid' );
+
+			/*
+			 * Detach the referral from this payout as well.
+			 *
+			 * `affwp_set_referral_status()` writes only the status, so the
+			 * referral is left unpaid while still carrying a payout_id. The
+			 * single-pay path refuses any referral that has one ("already
+			 * attached to a payout"), which leaves it listed as payable and
+			 * impossible to pay. AffiliateWP's Stripe integration detaches for
+			 * the same reason.
+			 */
+			affiliate_wp()->referrals->update(
+				$referral_id,
+				array( 'payout_id' => 0 ),
+				'',
+				'referral'
+			);
 		}
 
 		// A failure is terminal for the batch roll-up: recount so the batch can

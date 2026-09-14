@@ -519,20 +519,44 @@ class Fake_WP_Settings {
 class Fake_AffiliateWP {
 	public $settings;
 	public $affiliates;
+	public $referrals;
 
 	public function __construct() {
-		$this->settings = new Fake_WP_Settings();
+		$this->settings   = new Fake_WP_Settings();
 		$this->affiliates = new Fake_Affiliates_Container();
+		$this->referrals  = new Fake_Referrals_DB();
 	}
 }
 
 class Fake_Affiliates_Container {
 	public $payouts;
 	public $payout_batches;
+	public $referrals;
 
 	public function __construct() {
 		$this->payouts        = new Fake_Payouts_DB();
 		$this->payout_batches = new Fake_Payout_Batches_DB();
+		$this->referrals      = new Fake_Referrals_DB();
+	}
+}
+
+/**
+ * Mirrors core's referrals store for the one write the plugin makes on it:
+ * detaching a referral from a failed payout.
+ */
+class Fake_Referrals_DB {
+	public function update( $referral_id, $data, $where = '', $type = '' ) {
+		$referral_id = (int) $referral_id;
+
+		if ( ! isset( $GLOBALS['__referral_rows'][ $referral_id ] ) ) {
+			return false;
+		}
+
+		foreach ( (array) $data as $field => $value ) {
+			$GLOBALS['__referral_rows'][ $referral_id ]->$field = $value;
+		}
+
+		return true;
 	}
 }
 
@@ -9046,6 +9070,93 @@ $retry = chip_affiliatewp_submit_payout( $fail_payout );
 
 check( 'a retry after a failure proceeds', true === $retry );
 check( 'the retry recorded its instruction', 9701 === (int) ( chip_affiliatewp_payout_data( affwp_get_payout( $fail_payout ) )['instruction_id'] ?? 0 ) );
+
+echo "\n== Test 127: a failed payout detaches its referrals ==\n";
+reset_state();
+
+/*
+ * When a payout fails, its referrals go back to `unpaid` so they can be paid
+ * again. But `affwp_set_referral_status()` only writes the status - it leaves
+ * `payout_id` pointing at the dead payout. Single-pay refuses any referral that
+ * still carries one ("This referral is already attached to a payout"), so the
+ * referral is unpaid, listed as payable, and unpayable.
+ *
+ * AffiliateWP's own Stripe integration detaches for exactly this reason; its
+ * comment says so: "single-pay blocks any referral still carrying a payout_id,
+ * so it would stay unpayable."
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$dead_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3700, 3701 ),
+		'amount'        => '30.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+// Both referrals sit inside the dead payout.
+$GLOBALS['__referral_rows'][3700] = new Fake_Referral( 3700, 3, '15.00', 'unpaid', $dead_payout );
+$GLOBALS['__referral_rows'][3701] = new Fake_Referral( 3701, 3, '15.00', 'unpaid', $dead_payout );
+
+chip_affiliatewp_fail_payout( $dead_payout, 'CHIP refused the transfer.', 'chip_instruction_rejected', 422 );
+
+check( 'the payout failed', 'failed' === affwp_get_payout( $dead_payout )->status );
+check( 'referral 3700 is unpaid again', 'unpaid' === $GLOBALS['__referral_rows'][3700]->status );
+check( 'referral 3701 is unpaid again', 'unpaid' === $GLOBALS['__referral_rows'][3701]->status );
+
+/*
+ * The point of the test: they must also be detached, or the single-pay path
+ * refuses them and the money can never move again.
+ */
+check( 'referral 3700 is detached from the dead payout', empty( $GLOBALS['__referral_rows'][3700]->payout_id ) );
+check( 'referral 3701 is detached from the dead payout', empty( $GLOBALS['__referral_rows'][3701]->payout_id ) );
+
+// And the single-pay path now accepts it, which is the merchant-visible effect.
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+$GLOBALS['__affiliate_meta'][3]['payout_method_pick'] = 'chip';
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 611, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9800, 'state' => 'received' ) );
+$GLOBALS['__http_log'] = array();
+
+$retry = chip_affiliatewp_pay_single_referral( 3700 );
+
+check( 'the released referral can be paid again', ! is_wp_error( $retry ) );
+
+if ( is_wp_error( $retry ) ) {
+	echo '        reason: ' . $retry->get_error_code() . ' - ' . substr( $retry->get_error_message(), 0, 80 ) . "\n";
+}
+
+// A referral attached to a *live* payout must still be refused, so the fix does
+// not widen into paying something twice.
+$live_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 3702 ),
+		'amount'        => '15.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][3702] = new Fake_Referral( 3702, 3, '15.00', 'unpaid', $live_payout );
+
+$blocked = chip_affiliatewp_pay_single_referral( 3702 );
+
+check( 'a referral inside a live payout is still refused', is_wp_error( $blocked ) );
+check( 'and it is refused for the right reason', 'chip_referral_has_payout' === $blocked->get_error_code() );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
