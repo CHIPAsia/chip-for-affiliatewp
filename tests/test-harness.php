@@ -8773,6 +8773,98 @@ $queued_zero = array_filter(
 
 check( 'a zero batch id queues nothing', array() === $queued_zero );
 
+echo "\n== Test 125: the receipt-URL validator only accepts CHIP hosts ==\n";
+reset_state();
+
+/*
+ * The receipt URL comes from CHIP and is rendered as a link for the merchant.
+ * Validating it is defence in depth: if CHIP ever returned a hostile value, or
+ * a proxy altered one, the link must not become a phishing target. The host
+ * check is a suffix match, which is the shape that usually goes wrong - so the
+ * lookalikes and suffix tricks are asserted explicitly.
+ */
+$accepted = array(
+	'https://chip-in.asia/receipt/abc',
+	'https://api.chip-in.asia/receipt/abc',
+	'https://staging-api.chip-in.asia/receipt/abc',
+	'https://a.b.c.chip-in.asia/r',
+	'http://chip-in.asia/r',
+	// DNS is case-insensitive, so an upper-case host is the same host.
+	'https://CHIP-IN.ASIA/r',
+);
+
+foreach ( $accepted as $url ) {
+	check(
+		'a CHIP URL is accepted: ' . substr( $url, 0, 40 ),
+		chip_affiliatewp_safe_receipt_url( $url ) !== ''
+	);
+}
+
+$rejected = array(
+	// Hosts that merely contain the string.
+	'https://notchip-in.asia/r',
+	'https://evilchip-in.asia/r',
+	'https://xchip-in.asia/r',
+	'https://chip-in.asiax/r',
+	// CHIP's domain as a subdomain of something else.
+	'https://chip-in.asia.evil.com/r',
+	// CHIP's domain in the path, query or fragment rather than the host.
+	'https://evil.com/chip-in.asia/r',
+	'https://evil.com?.chip-in.asia',
+	'https://evil.com#.chip-in.asia',
+	// A userinfo segment does not change where the link goes.
+	'https://chip-in.asia@evil.com/r',
+	// Non-http schemes.
+	'javascript:alert(1)',
+	'data:text/html,<script>alert(1)</script>',
+	'ftp://chip-in.asia/r',
+	'file:///etc/passwd',
+	// No scheme at all: protocol-relative is resolved by the browser.
+	'//chip-in.asia/r',
+	// Nothing to render.
+	'',
+	'   ',
+);
+
+foreach ( $rejected as $url ) {
+	check(
+		'a non-CHIP URL is rejected: ' . substr( $url, 0, 40 ),
+		'' === chip_affiliatewp_safe_receipt_url( $url )
+	);
+}
+
+/*
+ * The userinfo case deserves its own assertion: `evil.com@chip-in.asia` reads
+ * as evil.com to a person but resolves to chip-in.asia, and the reverse
+ * (`chip-in.asia@evil.com`) resolves to evil.com. Only the second is rejected.
+ */
+check(
+	'a URL whose host is CHIP is accepted even with userinfo',
+	'' !== chip_affiliatewp_safe_receipt_url( 'https://someone@chip-in.asia/r' )
+);
+
+check(
+	'a URL that only mentions CHIP in its userinfo is rejected',
+	'' === chip_affiliatewp_safe_receipt_url( 'https://chip-in.asia@evil.com/r' )
+);
+
+// Stored receipt URLs are validated on the way in as well as on the way out.
+check(
+	'the payout path validates before storing',
+	false !== strpos(
+		(string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' ),
+		'chip_affiliatewp_safe_receipt_url'
+	)
+);
+
+check(
+	'the payout path does not store a raw receipt_url',
+	false === strpos(
+		(string) file_get_contents( dirname( __DIR__ ) . '/includes/class-chip-affiliatewp-payouts.php' ),
+		"'receipt_url'] = (string) chip_affiliatewp_array_value( \$instruction, 'receipt_url' )"
+	)
+);
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
