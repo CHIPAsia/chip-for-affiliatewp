@@ -9951,6 +9951,124 @@ chip_affiliatewp_check_payout_status( $cred_payout, false );
 check( 'with credentials restored it settles', 'paid' === affwp_get_payout( $cred_payout )->status );
 check( 'and the referral is paid', 'paid' === $GLOBALS['__referral_rows'][4000]->status );
 
+echo "\n== Test 135: every terminal payout state refreshes its batch ==\n";
+reset_state();
+
+/*
+ * A payout batch stays on "Processing" until every payout in it is terminal, so
+ * each transition into a terminal state has to recount the batch. There are
+ * exactly two: paid, and failed via fail_payout.
+ *
+ * A third transition added later without a recount would leave the batch stuck
+ * on Processing forever with no payout left to move it - the merchant sees a
+ * batch that never finishes.
+ *
+ * This asserts the source: every place that writes a terminal payout status
+ * must reach the recount. It is checked structurally because the two live in
+ * different functions.
+ */
+$chip_root = dirname( __DIR__ );
+$pay_src   = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+// The two terminal statuses the plugin writes.
+preg_match_all( "/'status'\s*=>\s*'(paid|failed)'/", $pay_src, $terminal );
+
+$statuses = array_unique( $terminal[1] ?? array() );
+
+sort( $statuses );
+
+check( 'the plugin writes exactly the terminal statuses paid and failed (' . implode( ', ', $statuses ) . ')', array( 'failed', 'paid' ) === $statuses );
+
+/*
+ * Every function that writes one must call the recount. Split the source into
+ * functions and check each writer.
+ */
+$functions = array();
+
+if ( preg_match_all( '/^function\s+(\w+)\s*\([^)]*\)\s*\{/m', $pay_src, $fn, PREG_OFFSET_CAPTURE ) ) {
+	foreach ( $fn[1] as $i => $entry ) {
+		$name  = $entry[0];
+		$start = $entry[1];
+		$next  = $fn[0][ $i + 1 ][1] ?? strlen( $pay_src );
+
+		$functions[ $name ] = substr( $pay_src, $start, $next - $start );
+	}
+}
+
+check( 'functions were parsed', count( $functions ) > 10 );
+
+$writers_without_recount = array();
+
+foreach ( $functions as $name => $body ) {
+	if ( ! preg_match( "/'status'\s*=>\s*'(paid|failed)'/", $body ) ) {
+		continue;
+	}
+
+	// A writer must reach the recount, either directly or by delegating.
+	$recounts = false !== strpos( $body, 'chip_affiliatewp_recount_batch_for_payout' )
+		|| false !== strpos( $body, 'chip_affiliatewp_fail_payout' );
+
+	if ( ! $recounts ) {
+		$writers_without_recount[] = $name;
+	}
+}
+
+check(
+	'every terminal writer refreshes the batch (' . implode( ', ', $writers_without_recount ) . ')',
+	array() === $writers_without_recount
+);
+
+/*
+ * Behaviour: a payout in a batch that fails must leave the batch recounted, so
+ * the batch can settle.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$batch_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 4100 ),
+		'amount'        => '20.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'batch_id'      => 555,
+	)
+);
+
+$GLOBALS['__referral_rows'][4100] = new Fake_Referral( 4100, 3, '20.00', 'unpaid', $batch_payout );
+
+$GLOBALS['__batch_recounts'] = array();
+
+chip_affiliatewp_fail_payout( $batch_payout, 'CHIP refused the transfer.', 'chip_instruction_rejected', 422 );
+
+check( 'the batch was recounted on failure', in_array( 555, $GLOBALS['__batch_recounts'], true ) );
+
+// And a payout outside any batch must not attempt a recount at all.
+$GLOBALS['__batch_recounts'] = array();
+
+$loose = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 4101 ),
+		'amount'        => '20.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][4101] = new Fake_Referral( 4101, 3, '20.00', 'unpaid', $loose );
+
+chip_affiliatewp_fail_payout( $loose, 'CHIP refused the transfer.', 'chip_instruction_rejected', 422 );
+
+check( 'a payout with no batch recounts nothing', array() === $GLOBALS['__batch_recounts'] );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;
