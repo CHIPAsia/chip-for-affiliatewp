@@ -10179,6 +10179,86 @@ $result = chip_affiliatewp_sanitize_settings( array( 'chip_reference_prefix' => 
 
 check( 'the reference prefix is still capped', 'AB' === ( $result['chip_reference_prefix'] ?? '' ) );
 
+echo "\n== Test 137: no user-visible message carries the webhook secret ==\n";
+reset_state();
+
+/*
+ * The webhook URL ends in a 32-hex per-install secret, and that secret is the
+ * only thing keeping the endpoint undiscoverable - the bare /webhook path
+ * answers 404 for exactly that reason. The RSA signature protects the payload,
+ * not the path.
+ *
+ * The unreachable-site error used to interpolate the whole URL, and it is
+ * rendered as a settings notice: in front of every admin session and anything
+ * that can read the screen. The merchant does not need the secret path to act on
+ * an unreachable site, so the message names the host instead.
+ *
+ * Verified on the live site that the endpoint's own guards are unaffected: the
+ * URL is what is sent to CHIP, and only the notice changed.
+ */
+$chip_root = dirname( __DIR__ );
+$hook_src  = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-webhooks.php' );
+
+// The unreachable message must not take the URL.
+$unreachable_at = strpos( $hook_src, "'chip_webhook_unreachable'" );
+$unreachable    = false !== $unreachable_at ? substr( $hook_src, $unreachable_at, 1200 ) : '';
+
+check( 'the unreachable error exists', '' !== $unreachable );
+check( 'it names the host, not the URL', false !== strpos( $unreachable, 'wp_parse_url( $url, PHP_URL_HOST )' ) );
+check( 'it does not pass the full url to the message', false === strpos( $unreachable, "__( 'The webhook URL (%1\$s) is not reachable" ) );
+
+// No message in the module may interpolate the webhook URL.
+$url_vars = array();
+
+foreach ( array( 'chip_affiliatewp_webhook_url()', '$url' ) as $needle ) {
+	if ( preg_match_all( '/sprintf\([^;]{0,600}?' . preg_quote( $needle, '/' ) . '[^;]{0,600}?\)/', $hook_src, $m, PREG_OFFSET_CAPTURE ) ) {
+		foreach ( $m[0] as $hit ) {
+			$context = $hit[0];
+
+			// A message is user-visible when it is wrapped in __().
+			if ( false !== strpos( $context, '__(' ) ) {
+				$line = substr_count( substr( $hook_src, 0, $hit[1] ), "\n" ) + 1;
+				$url_vars[] = 'line ' . $line;
+			}
+		}
+	}
+}
+
+check(
+	'no translated message interpolates the webhook url (' . implode( ', ', $url_vars ) . ')',
+	array() === $url_vars
+);
+
+/*
+ * Behaviour: the error a merchant sees must not contain the secret.
+ */
+$GLOBALS['__options']['chip_webhook_secret'] = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+$GLOBALS['__probe_response'] = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' );
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__options']['chip_test_api_key'] = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+
+delete_transient( 'chip_affiliatewp_webhook_reachable' );
+
+$reachable = chip_affiliatewp_site_publicly_reachable();
+$GLOBALS['__http_transport_error'] = false;
+
+$GLOBALS['__probe_response'] = null;
+
+
+check( 'an unreachable site reports an error', is_wp_error( $reachable ) );
+
+$message = is_wp_error( $reachable ) ? $reachable->get_error_message() : '';
+
+check( 'the error message exists', '' !== $message );
+check( 'the message does not contain the webhook secret', false === strpos( $message, 'a1b2c3d4e5f60718293a4b5c6d7e8f90' ) );
+check( 'the message does not contain the webhook path', false === strpos( $message, 'chip-affiliatewp/v1/webhook' ) );
+
+// It should still be actionable: the merchant learns it is reachability.
+check( 'the message says what is wrong', false !== stripos( $message, 'reachable' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

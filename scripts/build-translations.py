@@ -46,6 +46,8 @@ TRANSLATIONS = {
     'A key is saved. Enter a new one to replace it.': 'Kunci telah disimpan. Masukkan yang baharu untuk menggantikannya.',
     'A secret is saved. Enter a new one to replace it.': 'Rahsia telah disimpan. Masukkan yang baharu untuk menggantikannya.',
     'Saved — leave blank to keep it': 'Disimpan — biarkan kosong untuk mengekalkannya',
+    'The webhook endpoint on %1$s is not reachable from outside: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).': 'Titik akhir webhook pada %1$s tidak boleh dicapai dari luar: %2$s. Webhook tidak didaftarkan — baiki kebolehcapaian laman atau konfigurasikan pembayaran tanpa webhook (sapuan requery setiap jam masih berfungsi).',
+    'this site': 'laman ini',
     'live': 'langsung',
     'Bank Account Number': 'Nombor Akaun Bank',
     'Send Receipt to Affiliate': 'Hantar Resit ke Afiliasi',

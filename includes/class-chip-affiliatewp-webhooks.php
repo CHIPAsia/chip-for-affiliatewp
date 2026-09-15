@@ -137,12 +137,22 @@ function chip_affiliatewp_site_publicly_reachable() {
 	if ( is_wp_error( $response ) && 0 === (int) wp_remote_retrieve_response_code( $response ) ) {
 		set_transient( $cache_key, 'no', 10 * MINUTE_IN_SECONDS );
 
+		/*
+		 * The message names the host, not the full URL: the path carries this
+		 * site's webhook secret, and that secret is what keeps the endpoint from
+		 * being discovered - the bare path answers 404 for the same reason.
+		 * Rendering it into a settings notice puts it in front of every admin
+		 * session and anything that can read the screen, and the merchant does
+		 * not need it to act on an unreachable site.
+		 */
+		$host = (string) wp_parse_url( $url, PHP_URL_HOST );
+
 		return new WP_Error(
 			'chip_webhook_unreachable',
 			sprintf(
-				/* translators: 1: Webhook URL, 2: Technical error message */
-				__( 'The webhook URL (%1$s) is not reachable: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).', 'chip-for-affiliatewp' ),
-				$url,
+				/* translators: 1: Site host, 2: Technical error message */
+				__( 'The webhook endpoint on %1$s is not reachable from outside: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).', 'chip-for-affiliatewp' ),
+				'' !== $host ? $host : __( 'this site', 'chip-for-affiliatewp' ),
 				$response->get_error_message()
 			)
 		);

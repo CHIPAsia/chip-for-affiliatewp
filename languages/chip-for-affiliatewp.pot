@@ -140,7 +140,7 @@ msgstr ""
 
 #: includes/class-chip-affiliatewp-account.php:43
 #: includes/class-chip-affiliatewp-api.php:139
-#: includes/class-chip-affiliatewp-webhooks.php:215
+#: includes/class-chip-affiliatewp-webhooks.php:225
 msgid "CHIP Send API credentials are not configured."
 msgstr ""
 
@@ -178,7 +178,7 @@ msgstr ""
 msgid "CHIP Send did not return a send instruction ID."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:340
+#: includes/class-chip-affiliatewp-webhooks.php:350
 msgid "CHIP Send did not return a webhook ID."
 msgstr ""
 
@@ -219,7 +219,7 @@ msgid ""
 "and no real money moves."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:211
+#: includes/class-chip-affiliatewp-webhooks.php:221
 msgid "CHIP Send payout method is not enabled."
 msgstr ""
 
@@ -381,11 +381,11 @@ msgid ""
 "rather than paid."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:489
+#: includes/class-chip-affiliatewp-webhooks.php:499
 msgid "Malformed payload."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:457
+#: includes/class-chip-affiliatewp-webhooks.php:467
 msgid "Missing signature."
 msgstr ""
 
@@ -397,7 +397,7 @@ msgstr ""
 msgid "No bank details"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:820
+#: includes/class-chip-affiliatewp-webhooks.php:830
 msgid "No route was found matching the URL and request method."
 msgstr ""
 
@@ -411,7 +411,7 @@ msgstr ""
 msgid "Pay affiliate commissions straight to Malaysian bank accounts"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:425
+#: includes/class-chip-affiliatewp-webhooks.php:435
 msgid "Payload too large."
 msgstr ""
 
@@ -505,8 +505,8 @@ msgstr ""
 msgid "Secret Key"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:464
-#: includes/class-chip-affiliatewp-webhooks.php:483
+#: includes/class-chip-affiliatewp-webhooks.php:474
+#: includes/class-chip-affiliatewp-webhooks.php:493
 msgid "Signature verification failed."
 msgstr ""
 
@@ -544,7 +544,7 @@ msgstr ""
 msgid "That bank is not supported"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:530
+#: includes/class-chip-affiliatewp-webhooks.php:540
 msgid "The payload is missing a send instruction ID or state."
 msgstr ""
 
@@ -567,15 +567,15 @@ msgstr ""
 msgid "The specified referral does not exist."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:144
-msgid ""
-"The webhook URL (%1$s) is not reachable: %2$s. The webhook was not "
-"registered — fix site reachability or configure payouts without webhooks "
-"(the hourly requery sweep still works)."
-msgstr ""
-
 #: includes/class-chip-affiliatewp-webhooks.php:123
 msgid "The webhook URL is not publicly reachable from this site."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:154
+msgid ""
+"The webhook endpoint on %1$s is not reachable from outside: %2$s. The "
+"webhook was not registered — fix site reachability or configure payouts "
+"without webhooks (the hourly requery sweep still works)."
 msgstr ""
 
 #: includes/class-chip-affiliatewp-webhook-reset.php:182
@@ -672,7 +672,7 @@ msgstr ""
 msgid "Webhook not set up yet (%s)"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-webhooks.php:453
+#: includes/class-chip-affiliatewp-webhooks.php:463
 msgid "Webhook signature verification is not configured yet."
 msgstr ""
 
@@ -746,6 +746,10 @@ msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:814
 msgid "test-mode"
+msgstr ""
+
+#: includes/class-chip-affiliatewp-webhooks.php:155
+msgid "this site"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:548
