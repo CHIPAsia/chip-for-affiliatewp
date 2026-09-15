@@ -10069,6 +10069,116 @@ chip_affiliatewp_fail_payout( $loose, 'CHIP refused the transfer.', 'chip_instru
 
 check( 'a payout with no batch recounts nothing', array() === $GLOBALS['__batch_recounts'] );
 
+echo "\n== Test 136: stored credentials never reach the page ==\n";
+reset_state();
+
+/*
+ * An input's `value` attribute is in the HTML source. A masked (type=password)
+ * field with a real value in it therefore still hands the secret to the browser,
+ * to every script on the screen, and to anything that can read the response -
+ * masking is a display choice, not a boundary.
+ *
+ * The credentials card used to pass the stored key and secret as the field
+ * value. Verified on a live site: both appeared verbatim in the rendered form.
+ *
+ * The fix renders an empty value and a saved-state hint. That makes the save
+ * path load-bearing in a new way - the field always posts empty unless the
+ * merchant types a replacement - so the sanitizer must keep the stored value
+ * when it receives an empty one, or every save of the panel would erase the
+ * credentials and silently disable payouts.
+ */
+$chip_root = dirname( __DIR__ );
+$admin_src = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-admin.php' );
+
+// The card must not receive the stored values at all.
+check(
+	'the live card is not given the stored key',
+	false === strpos( $admin_src, "'key_value'   => \$live_key" )
+);
+
+check(
+	'the live card is not given the stored secret',
+	false === strpos( $admin_src, "'sec_value'   => \$live_secret" )
+);
+
+check(
+	'the test card is not given the stored key',
+	false === strpos( $admin_src, "'key_value'   => \$test_key" )
+);
+
+check(
+	'the test card is not given the stored secret',
+	false === strpos( $admin_src, "'sec_value'   => \$test_secret" )
+);
+
+// It is given a boolean instead, so it can say a credential exists.
+check( 'the card is told whether a key is saved', false !== strpos( $admin_src, "'key_saved'   => '' !== \$test_key" ) );
+check( 'the card is told whether a secret is saved', false !== strpos( $admin_src, "'sec_saved'   => '' !== \$test_secret" ) );
+
+// And the fields render empty.
+check(
+	'the api-key field renders an empty value',
+	1 === substr_count( $admin_src, "'id'          => 'chip-' . \$args['id'] . '-api-key'," )
+);
+
+$card_at = strpos( $admin_src, 'function chip_affiliatewp_render_credentials_card' );
+$card    = false !== $card_at ? substr( $admin_src, $card_at, 4200 ) : '';
+
+check( 'the card function exists', '' !== $card );
+check(
+	'the api-key field passes an empty value',
+	false !== strpos( $card, "'value'       => ''," )
+);
+
+// No `value` in the card may come from a stored credential.
+check(
+	'the card never passes a stored value to a field',
+	false === strpos( $card, "'value'       => (string) \$args['key_value']" )
+	&& false === strpos( $card, "'value'       => (string) \$args['sec_value']" )
+);
+
+/*
+ * The sanitizer must keep a stored credential when the submission is empty.
+ */
+$sanitize_at = strpos( $admin_src, 'function chip_affiliatewp_sanitize_settings' );
+$sanitize    = false !== $sanitize_at ? substr( $admin_src, $sanitize_at, 6000 ) : '';
+
+check( 'the sanitizer exists', '' !== $sanitize );
+check( 'the sanitizer names the credential keys', false !== strpos( $sanitize, "'chip_live_api_key', 'chip_live_secret_key', 'chip_test_api_key', 'chip_test_secret_key'" ) );
+check( 'the sanitizer keeps the stored value on an empty submission', false !== strpos( $sanitize, '$input[ $key ] = $stored;' ) );
+
+/*
+ * Behaviour: an empty credential submission keeps what is stored, and a
+ * non-empty one replaces it.
+ */
+$GLOBALS['__options']['chip_test_api_key']    = 'stored-key';
+$GLOBALS['__options']['chip_test_secret_key'] = 'stored-secret';
+
+$result = chip_affiliatewp_sanitize_settings(
+	array(
+		'chip_test_api_key'    => '',
+		'chip_test_secret_key' => '',
+	)
+);
+
+check( 'an empty api key keeps the stored one', 'stored-key' === ( $result['chip_test_api_key'] ?? '' ) );
+check( 'an empty secret keeps the stored one', 'stored-secret' === ( $result['chip_test_secret_key'] ?? '' ) );
+
+$result = chip_affiliatewp_sanitize_settings(
+	array(
+		'chip_test_api_key'    => 'new-key',
+		'chip_test_secret_key' => 'new-secret',
+	)
+);
+
+check( 'a typed api key replaces the stored one', 'new-key' === ( $result['chip_test_api_key'] ?? '' ) );
+check( 'a typed secret replaces the stored one', 'new-secret' === ( $result['chip_test_secret_key'] ?? '' ) );
+
+// The reference prefix still truncates: the credential branch must not swallow it.
+$result = chip_affiliatewp_sanitize_settings( array( 'chip_reference_prefix' => 'abcdEFGH' ) );
+
+check( 'the reference prefix is still capped', 'AB' === ( $result['chip_reference_prefix'] ?? '' ) );
+
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
 $GLOBALS['__options']['chip_payouts'] = 1;

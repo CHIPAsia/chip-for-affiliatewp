@@ -17,7 +17,7 @@ msgstr ""
 msgid "%d payouts are waiting on CHIP"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1158
+#: includes/class-chip-affiliatewp-admin.php:1185
 msgid "%s: bank details"
 msgstr ""
 
@@ -34,10 +34,18 @@ msgid ""
 "reference prefix."
 msgstr ""
 
+#: includes/class-chip-affiliatewp-admin.php:1042
+msgid "A key is saved. Enter a new one to replace it."
+msgstr ""
+
 #: includes/class-chip-affiliatewp-payouts.php:1545
 msgid ""
 "A payment cannot be processed for this referral since it is not marked as "
 "Unpaid."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:1069
+msgid "A secret is saved. Enter a new one to replace it."
 msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:669
@@ -125,7 +133,7 @@ msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:20
 #: includes/class-chip-affiliatewp-admin.php:201
-#: includes/class-chip-affiliatewp-admin.php:1158
+#: includes/class-chip-affiliatewp-admin.php:1185
 #: includes/class-chip-affiliatewp-failures.php:313
 msgid "CHIP Send"
 msgstr ""
@@ -136,7 +144,7 @@ msgstr ""
 msgid "CHIP Send API credentials are not configured."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1374
+#: includes/class-chip-affiliatewp-admin.php:1424
 msgid ""
 "CHIP Send API credentials are not set yet — payouts are disabled until they "
 "are configured."
@@ -204,8 +212,8 @@ msgstr ""
 msgid "CHIP Send instruction %1$s. %2$s"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1191
-#: includes/class-chip-affiliatewp-admin.php:1203
+#: includes/class-chip-affiliatewp-admin.php:1218
+#: includes/class-chip-affiliatewp-admin.php:1230
 msgid ""
 "CHIP Send is in Test Mode — payouts go to the CHIP Send staging environment "
 "and no real money moves."
@@ -215,8 +223,8 @@ msgstr ""
 msgid "CHIP Send payout method is not enabled."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1192
-#: includes/class-chip-affiliatewp-admin.php:1204
+#: includes/class-chip-affiliatewp-admin.php:1219
+#: includes/class-chip-affiliatewp-admin.php:1231
 msgid ""
 "CHIP Send pays each affiliate directly to their bank account. Payouts stay "
 "in Processing until CHIP confirms the transfer, then the referral is marked "
@@ -236,7 +244,7 @@ msgid ""
 "soon as verification completes."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1401
+#: includes/class-chip-affiliatewp-admin.php:1451
 msgid ""
 "CHIP Send webhook is not set up yet (%1$s). Payouts still work — statuses "
 "are requeried hourly — but confirmations arrive faster with the webhook."
@@ -385,7 +393,7 @@ msgstr ""
 msgid "Mode"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1155
+#: includes/class-chip-affiliatewp-admin.php:1182
 msgid "No bank details"
 msgstr ""
 
@@ -451,7 +459,7 @@ msgstr ""
 msgid "Process sandbox payouts with CHIP test credentials"
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1154
+#: includes/class-chip-affiliatewp-admin.php:1181
 msgid "Ready"
 msgstr ""
 
@@ -486,6 +494,11 @@ msgstr ""
 msgid ""
 "Save your credentials under Settings → Payouts → CHIP Send so the webhook "
 "can register."
+msgstr ""
+
+#: includes/class-chip-affiliatewp-admin.php:1033
+#: includes/class-chip-affiliatewp-admin.php:1059
+msgid "Saved — leave blank to keep it"
 msgstr ""
 
 #: includes/class-chip-affiliatewp-admin.php:673
@@ -577,7 +590,7 @@ msgstr ""
 msgid "This affiliate account does not have a payment email."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1160
+#: includes/class-chip-affiliatewp-admin.php:1187
 msgid "This affiliate has bank details on file and can be paid via CHIP Send."
 msgstr ""
 
@@ -585,7 +598,7 @@ msgstr ""
 msgid "This affiliate has no bank account details on file."
 msgstr ""
 
-#: includes/class-chip-affiliatewp-admin.php:1161
+#: includes/class-chip-affiliatewp-admin.php:1188
 msgid ""
 "This affiliate has no bank code or account number on file, so a CHIP Send "
 "payout would fail."
