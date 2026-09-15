@@ -2713,15 +2713,25 @@ $GLOBALS['__options']['chip_webhook_key_test'] = 'OUR_KEY';
 $GLOBALS['__options']['chip_webhook_secret'] = 'fixed-test-secret';
 $our_url = chip_affiliatewp_webhook_url();
 
-// The account holds: our recorded webhook, another entry pointing at our URL,
-// a same-named entry from an old site URL, and a merchant's own integration.
+/*
+ * The account holds: our recorded webhook, another entry pointing at our URL,
+ * a same-named webhook belonging to ANOTHER site on the same CHIP account, and
+ * a merchant's own integration.
+ *
+ * The name is identical on every install, so 9103 is not evidence of ownership:
+ * it is what a second site's webhook looks like. Deleting it would take that
+ * site's deliveries away. 9105 carries our host and our route but a different
+ * secret - a leftover from before the secret was regenerated - and that one IS
+ * ours.
+ */
 $GLOBALS['__http_queue'] = array();
 $account = array(
 	'results' => array(
 		array( 'id' => 9101, 'name' => 'AffiliateWP Payouts', 'callback_url' => $our_url ),
 		array( 'id' => 9102, 'name' => 'Something else', 'callback_url' => $our_url ),
-		array( 'id' => 9103, 'name' => 'AffiliateWP Payouts', 'callback_url' => 'https://old-site.example/webhook' ),
+		array( 'id' => 9103, 'name' => 'AffiliateWP Payouts', 'callback_url' => 'https://other-site.example/wp-json/chip-affiliatewp/v1/webhook/abcdef' ),
 		array( 'id' => 9104, 'name' => 'My Shop Orders', 'callback_url' => 'https://my-shop.example/hook' ),
+		array( 'id' => 9105, 'name' => 'AffiliateWP Payouts', 'callback_url' => 'http://example.test/wp-json/chip-affiliatewp/v1/webhook/older-secret' ),
 	),
 );
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => $account );
@@ -2730,15 +2740,20 @@ $found = chip_affiliatewp_find_own_webhooks( 'test' );
 
 check( 'recorded webhook is ours', in_array( '9101', array_map( 'strval', $found['ids'] ), true ) );
 check( 'webhook pointing at our URL is ours', in_array( '9102', array_map( 'strval', $found['ids'] ), true ) );
-check( 'stale same-named webhook is ours', in_array( '9103', array_map( 'strval', $found['ids'] ), true ) );
+check( 'a same-named webhook on ANOTHER site is not ours', ! in_array( '9103', array_map( 'strval', $found['ids'] ), true ) );
+check( 'a leftover of ours with a regenerated secret is ours', in_array( '9105', array_map( 'strval', $found['ids'] ), true ) );
 check( "merchant's own webhook is NOT ours", ! in_array( '9104', array_map( 'strval', $found['ids'] ), true ) );
 
-// Reset deletes exactly our three and clears the record.
+/*
+ * Reset deletes exactly ours: 9101 (recorded), 9102 (our URL), 9105 (our route,
+ * older secret). It must NOT delete 9103, which is another site's webhook that
+ * happens to share the name, nor 9104, the merchant's own integration.
+ */
 $GLOBALS['__http_queue'] = array();
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => $account );
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9101', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9102', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9103', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9105', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
 // Re-registration: an empty list, then the create. The reachability probe is
 // cached in a transient, so no probe request is made on this path.
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
@@ -2747,6 +2762,18 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'POST', 
 $result = chip_affiliatewp_reset_webhooks( 'test' );
 
 check( 'reset reports three deletions', 3 === (int) $result['deleted'] );
+
+// And it must not have asked CHIP to remove another site's webhook.
+$deleted_ids = array();
+
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'DELETE' === ( $call['method'] ?? '' ) && false !== strpos( (string) ( $call['url'] ?? '' ), '/webhooks/' ) ) {
+		$deleted_ids[] = substr( (string) $call['url'], strrpos( (string) $call['url'], '/' ) + 1 );
+	}
+}
+
+check( 'another site\'s webhook was not deleted', ! in_array( '9103', $deleted_ids, true ) );
+check( 'the merchant\'s own webhook was not deleted', ! in_array( '9104', $deleted_ids, true ) );
 check( 'reset reports no failures', array() === $result['failed'] );
 
 $deleted = array();

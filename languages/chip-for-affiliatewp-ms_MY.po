@@ -155,7 +155,7 @@ msgstr "CHIP Send"
 
 #: includes/class-chip-affiliatewp-account.php:43
 #: includes/class-chip-affiliatewp-api.php:139
-#: includes/class-chip-affiliatewp-webhooks.php:225
+#: includes/class-chip-affiliatewp-webhooks.php:265
 msgid "CHIP Send API credentials are not configured."
 msgstr "Kredensial API CHIP Send tidak dikonfigurasi."
 
@@ -199,7 +199,7 @@ msgstr "CHIP Send tidak memulangkan ID akaun bank."
 msgid "CHIP Send did not return a send instruction ID."
 msgstr "CHIP Send tidak memulangkan ID arahan penghantaran."
 
-#: includes/class-chip-affiliatewp-webhooks.php:350
+#: includes/class-chip-affiliatewp-webhooks.php:404
 msgid "CHIP Send did not return a webhook ID."
 msgstr "CHIP Send tidak memulangkan ID webhook."
 
@@ -252,7 +252,7 @@ msgstr ""
 "CHIP Send dalam Mod Ujian — pembayaran pergi ke persekitaran staging CHIP "
 "Send dan tiada wang sebenar dipindahkan."
 
-#: includes/class-chip-affiliatewp-webhooks.php:221
+#: includes/class-chip-affiliatewp-webhooks.php:261
 msgid "CHIP Send payout method is not enabled."
 msgstr "Kaedah pembayaran CHIP Send tidak diaktifkan."
 
@@ -434,11 +434,11 @@ msgstr ""
 "dengan awalan sama boleh berlanggar, jadi tapak kedua akan ditolak payoutnya"
 " dan bukan dibayar."
 
-#: includes/class-chip-affiliatewp-webhooks.php:499
+#: includes/class-chip-affiliatewp-webhooks.php:553
 msgid "Malformed payload."
 msgstr "Muatan tidak sah."
 
-#: includes/class-chip-affiliatewp-webhooks.php:467
+#: includes/class-chip-affiliatewp-webhooks.php:521
 msgid "Missing signature."
 msgstr "Tandatangan tiada."
 
@@ -450,7 +450,7 @@ msgstr "Mod"
 msgid "No bank details"
 msgstr "Tiada butiran bank"
 
-#: includes/class-chip-affiliatewp-webhooks.php:830
+#: includes/class-chip-affiliatewp-webhooks.php:884
 msgid "No route was found matching the URL and request method."
 msgstr "Tiada laluan sepadan dengan URL dan kaedah permintaan tersebut."
 
@@ -466,7 +466,7 @@ msgstr ""
 msgid "Pay affiliate commissions straight to Malaysian bank accounts"
 msgstr "Bayar komisen afiliasi terus ke akaun bank Malaysia"
 
-#: includes/class-chip-affiliatewp-webhooks.php:435
+#: includes/class-chip-affiliatewp-webhooks.php:489
 msgid "Payload too large."
 msgstr "Muatan terlalu besar."
 
@@ -571,8 +571,8 @@ msgstr "Disimpan — biarkan kosong untuk mengekalkannya"
 msgid "Secret Key"
 msgstr "Kunci Rahsia"
 
-#: includes/class-chip-affiliatewp-webhooks.php:474
-#: includes/class-chip-affiliatewp-webhooks.php:493
+#: includes/class-chip-affiliatewp-webhooks.php:528
+#: includes/class-chip-affiliatewp-webhooks.php:547
 msgid "Signature verification failed."
 msgstr "Pengesahan tandatangan gagal."
 
@@ -612,7 +612,7 @@ msgstr "Nombor akaun itu kelihatan salah"
 msgid "That bank is not supported"
 msgstr "Bank itu tidak disokong"
 
-#: includes/class-chip-affiliatewp-webhooks.php:540
+#: includes/class-chip-affiliatewp-webhooks.php:594
 msgid "The payload is missing a send instruction ID or state."
 msgstr "Muatan tiada ID atau keadaan arahan penghantaran (send instruction)."
 
@@ -638,11 +638,11 @@ msgstr "Pembayaran yang dinyatakan tidak wujud."
 msgid "The specified referral does not exist."
 msgstr "Rujukan yang dinyatakan tidak wujud."
 
-#: includes/class-chip-affiliatewp-webhooks.php:123
+#: includes/class-chip-affiliatewp-webhooks.php:163
 msgid "The webhook URL is not publicly reachable from this site."
 msgstr "URL webhook tidak dapat dicapai secara awam dari laman ini."
 
-#: includes/class-chip-affiliatewp-webhooks.php:154
+#: includes/class-chip-affiliatewp-webhooks.php:194
 msgid ""
 "The webhook endpoint on %1$s is not reachable from outside: %2$s. The "
 "webhook was not registered — fix site reachability or configure payouts "
@@ -652,7 +652,7 @@ msgstr ""
 "tidak didaftarkan — baiki kebolehcapaian laman atau konfigurasikan "
 "pembayaran tanpa webhook (sapuan requery setiap jam masih berfungsi)."
 
-#: includes/class-chip-affiliatewp-webhook-reset.php:182
+#: includes/class-chip-affiliatewp-webhook-reset.php:194
 msgid "The webhook was removed but could not be registered again: %s"
 msgstr "Webhook telah dibuang tetapi tidak dapat didaftarkan semula: %s"
 
@@ -750,7 +750,7 @@ msgstr "Kemas kini butiran bank"
 msgid "Webhook"
 msgstr "Webhook"
 
-#: includes/class-chip-affiliatewp-webhook-reset.php:145
+#: includes/class-chip-affiliatewp-webhook-reset.php:157
 msgid "Webhook %1$s could not be deleted: %2$s"
 msgstr "Webhook %1$s tidak dapat dipadam: %2$s"
 
@@ -762,7 +762,7 @@ msgstr "Webhook disambung (%s)"
 msgid "Webhook not set up yet (%s)"
 msgstr "Webhook belum disediakan (%s)"
 
-#: includes/class-chip-affiliatewp-webhooks.php:463
+#: includes/class-chip-affiliatewp-webhooks.php:517
 msgid "Webhook signature verification is not configured yet."
 msgstr "Pengesahan tandatangan webhook belum dikonfigurasi."
 
@@ -845,7 +845,7 @@ msgstr "mod ujian"
 msgid "test-mode"
 msgstr "mod ujian"
 
-#: includes/class-chip-affiliatewp-webhooks.php:155
+#: includes/class-chip-affiliatewp-webhooks.php:195
 msgid "this site"
 msgstr "laman ini"
 

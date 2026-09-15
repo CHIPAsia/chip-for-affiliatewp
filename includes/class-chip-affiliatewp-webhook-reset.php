@@ -84,8 +84,20 @@ function chip_affiliatewp_find_own_webhooks( $mode = null ) {
 		$item_url  = (string) chip_affiliatewp_array_value( $item, 'callback_url' );
 		$item_name = (string) chip_affiliatewp_array_value( $item, 'name' );
 
-		// Ours when it points at this site, or carries the plugin's name.
-		if ( $item_url !== $url && $item_name !== $name ) {
+		/*
+		 * Ours when it points at this site's own endpoint.
+		 *
+		 * The name is deliberately NOT a fallback: it is identical on every
+		 * install, so a merchant with two sites on one CHIP account has two
+		 * webhooks named "AffiliateWP Payouts", and deleting by name removes
+		 * the other site's. That site then loses its deliveries with nothing to
+		 * explain why.
+		 *
+		 * A URL is ours when it matches exactly, or when it is this site's own
+		 * route carrying an older secret - regenerating the secret must not
+		 * orphan the webhook that is still pointing here.
+		 */
+		if ( $item_url !== $url && ! chip_affiliatewp_webhook_url_belongs_to_site( $item_url ) ) {
 			continue;
 		}
 
