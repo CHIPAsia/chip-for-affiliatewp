@@ -665,11 +665,11 @@ function chip_affiliatewp_render_settings_panel() {
 				'description' => __( 'Process real payouts using your live CHIP account', 'chip-for-affiliatewp' ),
 				'active'      => $has_live && ! $test_mode,
 				'key_name'    => 'chip_live_api_key',
-				'key_value'   => $live_key,
+				'key_saved'   => '' !== $live_key,
 				'key_label'   => __( 'API Key', 'chip-for-affiliatewp' ),
 				'key_ph'      => __( 'Enter your live CHIP Send API key', 'chip-for-affiliatewp' ),
 				'sec_name'    => 'chip_live_secret_key',
-				'sec_value'   => $live_secret,
+				'sec_saved'   => '' !== $live_secret,
 				'sec_label'   => __( 'Secret Key', 'chip-for-affiliatewp' ),
 				'sec_ph'      => __( 'Enter your live CHIP Send secret key', 'chip-for-affiliatewp' ),
 			)
@@ -683,11 +683,11 @@ function chip_affiliatewp_render_settings_panel() {
 				'description' => __( 'Process sandbox payouts with CHIP test credentials', 'chip-for-affiliatewp' ),
 				'active'      => $has_test && $test_mode,
 				'key_name'    => 'chip_test_api_key',
-				'key_value'   => $test_key,
+				'key_saved'   => '' !== $test_key,
 				'key_label'   => __( 'Test API Key', 'chip-for-affiliatewp' ),
 				'key_ph'      => __( 'Enter your CHIP Send test API key', 'chip-for-affiliatewp' ),
 				'sec_name'    => 'chip_test_secret_key',
-				'sec_value'   => $test_secret,
+				'sec_saved'   => '' !== $test_secret,
 				'sec_label'   => __( 'Test Secret Key', 'chip-for-affiliatewp' ),
 				'sec_ph'      => __( 'Enter your CHIP Send test secret key', 'chip-for-affiliatewp' ),
 			)
@@ -979,11 +979,11 @@ function chip_affiliatewp_render_credentials_card( $args ) {
 			'description' => '',
 			'active'      => false,
 			'key_name'    => '',
-			'key_value'   => '',
+			'key_saved'   => false,
 			'key_label'   => '',
 			'key_ph'      => '',
 			'sec_name'    => '',
-			'sec_value'   => '',
+			'sec_saved'   => false,
 			'sec_label'   => '',
 			'sec_ph'      => '',
 		)
@@ -1015,15 +1015,33 @@ function chip_affiliatewp_render_credentials_card( $args ) {
 						<?php echo esc_html( $args['key_label'] ); ?>
 					</label>
 					<?php
+					/*
+					 * The stored credential is never written into the page: an
+					 * input's value attribute is in the HTML source, so a
+					 * password-masked field still hands the secret to the
+					 * browser, to any script on the screen, and to anything that
+					 * can read the response. An empty value means "unchanged"
+					 * on save, which the settings sanitizer already treats as
+					 * "keep the stored one".
+					 */
 					chip_affiliatewp_ui_input(
 						array(
 							'id'          => 'chip-' . $args['id'] . '-api-key',
 							'name'        => 'affwp_settings[' . $args['key_name'] . ']',
-							'value'       => (string) $args['key_value'],
-							'placeholder' => $args['key_ph'],
+							'value'       => '',
+							'placeholder' => $args['key_saved']
+								? __( 'Saved — leave blank to keep it', 'chip-for-affiliatewp' )
+								: $args['key_ph'],
 							'secret'      => true,
 						)
 					);
+
+					if ( $args['key_saved'] ) {
+						printf(
+							'<p class="mt-1 text-xs text-gray-500">%s</p>',
+							esc_html__( 'A key is saved. Enter a new one to replace it.', 'chip-for-affiliatewp' )
+						);
+					}
 					?>
 				</div>
 
@@ -1036,12 +1054,21 @@ function chip_affiliatewp_render_credentials_card( $args ) {
 						array(
 							'id'          => 'chip-' . $args['id'] . '-secret-key',
 							'name'        => 'affwp_settings[' . $args['sec_name'] . ']',
-							'value'       => (string) $args['sec_value'],
-							'placeholder' => $args['sec_ph'],
+							'value'       => '',
+							'placeholder' => $args['sec_saved']
+								? __( 'Saved — leave blank to keep it', 'chip-for-affiliatewp' )
+								: $args['sec_ph'],
 							'type'        => 'password',
 							'secret'      => true,
 						)
 					);
+
+					if ( $args['sec_saved'] ) {
+						printf(
+							'<p class="mt-1 text-xs text-gray-500">%s</p>',
+							esc_html__( 'A secret is saved. Enter a new one to replace it.', 'chip-for-affiliatewp' )
+						);
+					}
 					?>
 				</div>
 			</div>
@@ -1318,7 +1345,30 @@ function chip_affiliatewp_sanitize_settings( $input ) {
 			continue;
 		}
 
-		// Credentials: plain text, never re-encoded.
+		/*
+		 * Credentials: plain text, never re-encoded.
+		 *
+		 * An empty submission keeps the stored value. The settings form cannot
+		 * write the credential into the page - a value attribute is in the HTML
+		 * source, so a masked field still hands the secret to the browser - so
+		 * the field always posts empty unless the merchant types a replacement.
+		 * Storing that empty string would erase the credentials on every save
+		 * of the panel, silently disabling payouts.
+		 */
+		if ( in_array( $key, array( 'chip_live_api_key', 'chip_live_secret_key', 'chip_test_api_key', 'chip_test_secret_key' ), true ) ) {
+			$submitted = sanitize_text_field( (string) $input[ $key ] );
+
+			if ( '' === $submitted ) {
+				$stored = (string) affiliate_wp()->settings->get( $key );
+
+				$input[ $key ] = $stored;
+			} else {
+				$input[ $key ] = $submitted;
+			}
+
+			continue;
+		}
+
 		$input[ $key ] = sanitize_text_field( (string) $input[ $key ] );
 	}
 

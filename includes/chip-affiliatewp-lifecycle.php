@@ -85,10 +85,32 @@ function chip_affiliatewp_unschedule_sweep() {
 
 	foreach ( $hooks as $hook ) {
 		wp_clear_scheduled_hook( $hook );
+	}
 
-		if ( function_exists( 'as_unschedule_all_actions' ) ) {
-			as_unschedule_all_actions( $hook, array(), chip_affiliatewp_as_group() );
-		}
+	if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
+		return;
+	}
+
+	/*
+	 * The per-payout actions carry args (`array( 'payout_id' => N )`), and
+	 * Action Scheduler matches args exactly: `as_unschedule_all_actions( $hook,
+	 * array(), $group )` builds `AND a.args = '[]'`, which cancels nothing. The
+	 * sweep - the one action scheduled without args - was therefore the only one
+	 * actually removed, and a deactivated plugin kept firing its payout
+	 * callbacks.
+	 *
+	 * Cancelling by group is what removes them all: the group is this plugin's
+	 * own, so nothing belonging to another plugin is touched.
+	 */
+	as_unschedule_all_actions( '', array(), chip_affiliatewp_as_group() );
+
+	/*
+	 * Then by hook, without a group, for the case where an action was scheduled
+	 * outside the group (an earlier version, or a site that ran one) - `$args`
+	 * empty with a hook and no group cancels by hook.
+	 */
+	foreach ( $hooks as $hook ) {
+		as_unschedule_all_actions( $hook, array() );
 	}
 }
 

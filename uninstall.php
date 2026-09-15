@@ -238,6 +238,18 @@ foreach ( $chip_scheduled_hooks as $chip_scheduled_hook ) {
 	wp_clear_scheduled_hook( $chip_scheduled_hook );
 
 	if ( function_exists( 'as_unschedule_all_actions' ) ) {
+		/*
+		 * `$args` empty with no group cancels every action on the hook
+		 * regardless of its arguments, which is what the per-payout actions
+		 * carry. Passing a group here instead would match only actions with
+		 * empty args, and the payout actions would survive.
+		 */
 		as_unschedule_all_actions( $chip_scheduled_hook );
 	}
+}
+
+// And everything in this plugin's own Action Scheduler group, covering a hook
+// an older version scheduled that the list above does not name.
+if ( function_exists( 'as_unschedule_all_actions' ) ) {
+	as_unschedule_all_actions( '', array(), 'chip-affiliatewp' );
 }

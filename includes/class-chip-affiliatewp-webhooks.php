@@ -33,6 +33,46 @@ function chip_affiliatewp_webhook_url() {
 }
 
 /**
+ * Whether a recorded callback URL belongs to this site rather than another one.
+ *
+ * The webhook NAME is identical on every install, so it cannot tell two sites
+ * apart - a merchant running two sites on one CHIP account has two webhooks
+ * named the same. A URL can: it is built from this site's REST route.
+ *
+ * Comparison is on scheme+host+path with the secret suffix treated as opaque:
+ * the secret may have been regenerated, but a route under this site's own host
+ * and plugin namespace is still this site's endpoint. Another site on a
+ * different host therefore never matches.
+ *
+ * @param string $candidate Callback URL recorded at CHIP.
+ * @return bool
+ */
+function chip_affiliatewp_webhook_url_belongs_to_site( $candidate ) {
+	$candidate = trim( (string) $candidate );
+
+	if ( '' === $candidate ) {
+		return false;
+	}
+
+	$candidate_host = strtolower( (string) wp_parse_url( $candidate, PHP_URL_HOST ) );
+	$own_url        = chip_affiliatewp_webhook_url();
+	$own_host       = strtolower( (string) wp_parse_url( $own_url, PHP_URL_HOST ) );
+
+	if ( '' === $candidate_host || '' === $own_host || $candidate_host !== $own_host ) {
+		return false;
+	}
+
+	/*
+	 * Same host: the path must sit under this plugin's route, not merely
+	 * anywhere on the site. The secret segment is compared loosely (any single
+	 * path segment) so a regenerated secret still counts as ours.
+	 */
+	$candidate_path = (string) wp_parse_url( $candidate, PHP_URL_PATH );
+
+	return (bool) preg_match( '#/chip-affiliatewp/v1/webhook/[^/]+/?$#', $candidate_path );
+}
+
+/**
  * Returns the per-site webhook URL secret, generating it on first use.
  *
  * @return string 32-char hex secret.
@@ -137,12 +177,22 @@ function chip_affiliatewp_site_publicly_reachable() {
 	if ( is_wp_error( $response ) && 0 === (int) wp_remote_retrieve_response_code( $response ) ) {
 		set_transient( $cache_key, 'no', 10 * MINUTE_IN_SECONDS );
 
+		/*
+		 * The message names the host, not the full URL: the path carries this
+		 * site's webhook secret, and that secret is what keeps the endpoint from
+		 * being discovered - the bare path answers 404 for the same reason.
+		 * Rendering it into a settings notice puts it in front of every admin
+		 * session and anything that can read the screen, and the merchant does
+		 * not need it to act on an unreachable site.
+		 */
+		$host = (string) wp_parse_url( $url, PHP_URL_HOST );
+
 		return new WP_Error(
 			'chip_webhook_unreachable',
 			sprintf(
-				/* translators: 1: Webhook URL, 2: Technical error message */
-				__( 'The webhook URL (%1$s) is not reachable: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).', 'chip-for-affiliatewp' ),
-				$url,
+				/* translators: 1: Site host, 2: Technical error message */
+				__( 'The webhook endpoint on %1$s is not reachable from outside: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).', 'chip-for-affiliatewp' ),
+				'' !== $host ? $host : __( 'this site', 'chip-for-affiliatewp' ),
 				$response->get_error_message()
 			)
 		);
@@ -268,7 +318,21 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 				break;
 			}
 
-			if ( ! $stale_id && 'AffiliateWP Payouts' === (string) chip_affiliatewp_array_value( $row, 'name' ) ) {
+			/*
+			 * A name-only match is not safe to reuse. The name is the same on
+			 * every install ("AffiliateWP Payouts"), so a merchant running two
+			 * sites on one CHIP account has two webhooks with it - and adopting
+			 * the other site's would repoint it here, silently taking that
+			 * site's deliveries.
+			 *
+			 * The URL is the identifying part: it carries this site's own
+			 * secret. A name-only entry is only adopted when it also looks like
+			 * a leftover from this site, which the caller indicates by having no
+			 * recorded id of its own to reuse.
+			 */
+			if ( ! $stale_id
+				&& 'AffiliateWP Payouts' === (string) chip_affiliatewp_array_value( $row, 'name' )
+				&& chip_affiliatewp_webhook_url_belongs_to_site( $row_url ) ) {
 				$stale_id = absint( chip_affiliatewp_array_value( $row, 'id' ) );
 			}
 		}

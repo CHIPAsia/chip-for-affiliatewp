@@ -178,12 +178,13 @@ function chip_affiliatewp_payout_attempt( $data ) {
  * record no longer matches the current details (a changed account number or
  * bank invalidates the id — reusing it would pay the old account).
  *
- * @param int $affiliate_id Affiliate ID.
+ * @param int         $affiliate_id Affiliate ID.
+ * @param string|null $mode         'test' or 'live'; null uses the current mode.
  * @return array|null Bank account record, or null when none exists.
  */
-function chip_affiliatewp_get_bank_account( $affiliate_id ) {
+function chip_affiliatewp_get_bank_account( $affiliate_id, $mode = null ) {
 	$reference = chip_affiliatewp_bank_reference( $affiliate_id );
-	$mode      = chip_affiliatewp_current_mode();
+	$mode      = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
 
 	$stored = chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference, $mode );
 
@@ -550,12 +551,21 @@ function chip_affiliatewp_bank_account_name( $affiliate_id ) {
  * rejects a duplicate registration of the same recipient, and this plugin
  * looks the account up first so repeat payouts reuse the existing record.
  *
- * @param int $affiliate_id Affiliate ID.
+ * @param int         $affiliate_id Affiliate ID.
+ * @param string|null $mode         'test' or 'live'; null uses the current mode.
  * @return array|WP_Error Bank account record with at least "id" and "status".
  */
-function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
-	$mode     = chip_affiliatewp_current_mode();
-	$existing = chip_affiliatewp_get_bank_account( $affiliate_id );
+function chip_affiliatewp_ensure_bank_account( $affiliate_id, $mode = null ) {
+	/*
+	 * The mode is a parameter so callers that have already resolved one - the
+	 * submission path, which resolves it once for the instruction and the
+	 * record - cannot have the bank account registered in the other
+	 * environment by a setting change in between. Resolving here as well means
+	 * the function deciding where the money goes and the one deciding which CHIP
+	 * account the recipient is registered in can disagree.
+	 */
+	$mode     = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
+	$existing = chip_affiliatewp_get_bank_account( $affiliate_id, $mode );
 
 	if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 		$deleted_at = chip_affiliatewp_array_value( $existing, 'deleted_at' );

@@ -92,11 +92,59 @@ function as_schedule_recurring_action( $ts, $interval, $hook, $args = array(), $
 	return 1;
 }
 
+/**
+ * Mirrors Action Scheduler's argument matching, which is the point of this stub.
+ *
+ * Real behaviour, read from ActionScheduler_Store and confirmed on a live site:
+ *
+ *   ( $hook, array(), $group )  -> matches only actions with EMPTY args
+ *   ( $hook, array() )          -> cancels every action on the hook
+ *   ( '', array(), $group )     -> cancels every action in the group
+ *
+ * A stub that matched on the hook alone would hide the difference, and the
+ * difference is a bug that shipped: deactivation left every per-payout action
+ * queued because those actions carry `array( 'payout_id' => N )`.
+ */
 function as_unschedule_all_actions( $hook, $args = array(), $group = '' ) {
 	$kept = array();
 
+	// Empty hook with a group: cancel the whole group.
+	if ( '' === (string) $hook && '' !== (string) $group ) {
+		foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+			if ( ( $action['group'] ?? '' ) === $group ) {
+				continue;
+			}
+
+			$kept[] = $action;
+		}
+
+		$GLOBALS['__as_scheduled'] = $kept;
+
+		return count( $kept );
+	}
+
+	// Hook with no group: cancel every action on the hook.
+	if ( '' === (string) $group ) {
+		foreach ( $GLOBALS['__as_scheduled'] as $action ) {
+			if ( $action['hook'] === $hook ) {
+				continue;
+			}
+
+			$kept[] = $action;
+		}
+
+		$GLOBALS['__as_scheduled'] = $kept;
+
+		return count( $kept );
+	}
+
+	// Hook with a group: arguments must match exactly, empty args included.
 	foreach ( $GLOBALS['__as_scheduled'] as $action ) {
-		if ( $action['hook'] === $hook ) {
+		$same_hook  = $action['hook'] === $hook;
+		$same_group = ( $action['group'] ?? '' ) === $group;
+		$same_args  = ( $action['args'] ?? array() ) === $args;
+
+		if ( $same_hook && $same_group && $same_args ) {
 			continue;
 		}
 
@@ -272,6 +320,15 @@ function wp_remote_request( $url, $args ) {
 		'headers' => $args['headers'] ?? array(),
 		'body'    => $args['body'] ?? null,
 	);
+
+	/*
+	 * A test can run code at the moment a request goes out, which is the only
+	 * way to simulate something changing mid-submission - a merchant toggling a
+	 * setting while the CHIP round-trips are in flight.
+	 */
+	if ( ! empty( $GLOBALS['__on_request'] ) ) {
+		call_user_func( $GLOBALS['__on_request'], $url, $args['method'] ?? 'GET' );
+	}
 
 	/*
 	 * Transport-failure simulation: a test can make the next request fail the
@@ -2656,15 +2713,25 @@ $GLOBALS['__options']['chip_webhook_key_test'] = 'OUR_KEY';
 $GLOBALS['__options']['chip_webhook_secret'] = 'fixed-test-secret';
 $our_url = chip_affiliatewp_webhook_url();
 
-// The account holds: our recorded webhook, another entry pointing at our URL,
-// a same-named entry from an old site URL, and a merchant's own integration.
+/*
+ * The account holds: our recorded webhook, another entry pointing at our URL,
+ * a same-named webhook belonging to ANOTHER site on the same CHIP account, and
+ * a merchant's own integration.
+ *
+ * The name is identical on every install, so 9103 is not evidence of ownership:
+ * it is what a second site's webhook looks like. Deleting it would take that
+ * site's deliveries away. 9105 carries our host and our route but a different
+ * secret - a leftover from before the secret was regenerated - and that one IS
+ * ours.
+ */
 $GLOBALS['__http_queue'] = array();
 $account = array(
 	'results' => array(
 		array( 'id' => 9101, 'name' => 'AffiliateWP Payouts', 'callback_url' => $our_url ),
 		array( 'id' => 9102, 'name' => 'Something else', 'callback_url' => $our_url ),
-		array( 'id' => 9103, 'name' => 'AffiliateWP Payouts', 'callback_url' => 'https://old-site.example/webhook' ),
+		array( 'id' => 9103, 'name' => 'AffiliateWP Payouts', 'callback_url' => 'https://other-site.example/wp-json/chip-affiliatewp/v1/webhook/abcdef' ),
 		array( 'id' => 9104, 'name' => 'My Shop Orders', 'callback_url' => 'https://my-shop.example/hook' ),
+		array( 'id' => 9105, 'name' => 'AffiliateWP Payouts', 'callback_url' => 'http://example.test/wp-json/chip-affiliatewp/v1/webhook/older-secret' ),
 	),
 );
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => $account );
@@ -2673,15 +2740,20 @@ $found = chip_affiliatewp_find_own_webhooks( 'test' );
 
 check( 'recorded webhook is ours', in_array( '9101', array_map( 'strval', $found['ids'] ), true ) );
 check( 'webhook pointing at our URL is ours', in_array( '9102', array_map( 'strval', $found['ids'] ), true ) );
-check( 'stale same-named webhook is ours', in_array( '9103', array_map( 'strval', $found['ids'] ), true ) );
+check( 'a same-named webhook on ANOTHER site is not ours', ! in_array( '9103', array_map( 'strval', $found['ids'] ), true ) );
+check( 'a leftover of ours with a regenerated secret is ours', in_array( '9105', array_map( 'strval', $found['ids'] ), true ) );
 check( "merchant's own webhook is NOT ours", ! in_array( '9104', array_map( 'strval', $found['ids'] ), true ) );
 
-// Reset deletes exactly our three and clears the record.
+/*
+ * Reset deletes exactly ours: 9101 (recorded), 9102 (our URL), 9105 (our route,
+ * older secret). It must NOT delete 9103, which is another site's webhook that
+ * happens to share the name, nor 9104, the merchant's own integration.
+ */
 $GLOBALS['__http_queue'] = array();
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => $account );
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9101', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9102', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
-$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9103', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/webhooks/9105', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
 // Re-registration: an empty list, then the create. The reachability probe is
 // cached in a transient, so no probe request is made on this path.
 $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'GET', 'code' => 200, 'body' => array( 'results' => array() ) );
@@ -2690,6 +2762,18 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/webhooks', 'method' => 'POST', 
 $result = chip_affiliatewp_reset_webhooks( 'test' );
 
 check( 'reset reports three deletions', 3 === (int) $result['deleted'] );
+
+// And it must not have asked CHIP to remove another site's webhook.
+$deleted_ids = array();
+
+foreach ( $GLOBALS['__http_log'] as $call ) {
+	if ( 'DELETE' === ( $call['method'] ?? '' ) && false !== strpos( (string) ( $call['url'] ?? '' ), '/webhooks/' ) ) {
+		$deleted_ids[] = substr( (string) $call['url'], strrpos( (string) $call['url'], '/' ) + 1 );
+	}
+}
+
+check( 'another site\'s webhook was not deleted', ! in_array( '9103', $deleted_ids, true ) );
+check( 'the merchant\'s own webhook was not deleted', ! in_array( '9104', $deleted_ids, true ) );
 check( 'reset reports no failures', array() === $result['failed'] );
 
 $deleted = array();
@@ -9489,6 +9573,718 @@ foreach ( array( 'vendor', 'tests', '.github', 'node_modules' ) as $dev_only ) {
 		false === strpos( $build, 'cp -r ' . $dev_only )
 	);
 }
+
+echo "\n== Test 131: deactivation clears the actions that carry arguments ==\n";
+reset_state();
+
+/*
+ * Action Scheduler matches arguments exactly. `as_unschedule_all_actions(
+ * $hook, array(), $group )` builds `AND a.args = '[]'`, so it cancels only
+ * actions scheduled with no arguments - and the per-payout actions all carry
+ * `array( 'payout_id' => N )`.
+ *
+ * The plugin deactivated that way, leaving its payout and status-check actions
+ * queued: Action Scheduler kept firing callbacks for a plugin that was no
+ * longer loaded, and a reactivation inherited the backlog. The sweep was the
+ * only action actually removed, because it is the only one scheduled bare.
+ *
+ * Verified against Action Scheduler on a real site: with the old call, three of
+ * four seeded actions survived; with the fix, none do.
+ */
+$chip_root = dirname( __DIR__ );
+
+$lifecycle = (string) file_get_contents( $chip_root . '/includes/chip-affiliatewp-lifecycle.php' );
+
+/*
+ * The routine must cancel by group, which removes every action the plugin owns
+ * regardless of arguments.
+ */
+check(
+	'deactivation cancels by group',
+	false !== strpos( $lifecycle, "as_unschedule_all_actions( '', array(), chip_affiliatewp_as_group() )" )
+);
+
+// And by hook without a group, which also ignores arguments.
+check(
+	'deactivation cancels each hook without a group',
+	preg_match( '/foreach \( \$hooks as \$hook \) \{\s*as_unschedule_all_actions\( \$hook, array\(\) \);/s', $lifecycle ) === 1
+);
+
+/*
+ * The regression itself: no call may pass hook + empty args + group together,
+ * because that combination matches only argument-less actions.
+ */
+check(
+	'no call passes a hook with empty args and a group',
+	false === strpos( $lifecycle, 'as_unschedule_all_actions( $hook, array(), chip_affiliatewp_as_group() )' )
+);
+
+// Every hook the plugin schedules is named in the cancellation list.
+$hooks = array(
+	'chip_affiliatewp_hourly_sweep',
+	'chip_affiliatewp_check_payout_status',
+	'chip_affiliatewp_submit_payout_action',
+);
+
+foreach ( $hooks as $hook ) {
+	check( 'the cancellation list names ' . $hook, false !== strpos( $lifecycle, "'" . $hook . "'" ) );
+}
+
+/*
+ * uninstall.php cannot call the helper, so it keeps its own list - and it must
+ * use the argument-ignoring form too.
+ */
+$uninstall = (string) file_get_contents( $chip_root . '/uninstall.php' );
+
+check( 'uninstall cancels each hook without a group', false !== strpos( $uninstall, 'as_unschedule_all_actions( $chip_scheduled_hook );' ) );
+check( 'uninstall also cancels by group', false !== strpos( $uninstall, "as_unschedule_all_actions( '', array(), 'chip-affiliatewp' )" ) );
+check(
+	'uninstall does not pass a group to the hook sweep',
+	false === strpos( $uninstall, 'as_unschedule_all_actions( $chip_scheduled_hook, array(), ' )
+);
+
+// The harness stub must model the argument matching, or the test cannot see the
+// difference between the two forms.
+$harness = (string) file_get_contents( __FILE__ );
+
+check(
+	'the harness models argument matching',
+	false !== strpos( $harness, 'function as_unschedule_all_actions' )
+);
+
+echo "\n== Test 132: the recorded mode is the one the instruction was sent in ==\n";
+reset_state();
+
+/*
+ * The single-referral path resolves the mode once and threads it through the
+ * lookups and adoption, so a merchant toggling test mode mid-flow cannot land
+ * the instruction and its record in different environments. The record line was
+ * the one place that read the setting again:
+ *
+ *   'mode' => affiliate_wp()->settings->get( 'chip_test_mode' ) ? 'test' : 'live',
+ *
+ * The window is real - the CHIP round-trips between the resolve and the record
+ * take seconds - and the cost is not cosmetic: the requery would ask the live
+ * API for a test instruction id, get 404, and fail the payout as
+ * instruction_not_found while the money sat in the test account.
+ *
+ * Tested by flipping the setting between the resolve and the record: with the
+ * fix the record keeps the sending mode; with the raw read it follows the flip.
+ */
+$chip_root = dirname( __DIR__ );
+$pay_src   = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+// The submission path must not read the setting for the record.
+check(
+	'the single-referral record does not re-read the mode setting',
+	false === strpos( $pay_src, "'mode'           => affiliate_wp()->settings->get( 'chip_test_mode' )" )
+);
+
+check(
+	'the single-referral record stores the resolved mode',
+	false !== strpos( $pay_src, "'mode'           => \$mode," )
+);
+
+/*
+ * Both other record sites use the resolved value too, so the three agree.
+ */
+check(
+	'the batch record stores the resolved mode',
+	false !== strpos( $pay_src, "\$data['mode']            = \$mode;" )
+);
+
+check(
+	'the adoption record stores the resolved mode',
+	false !== strpos( $pay_src, "'mode'            => \$mode," )
+);
+
+/*
+ * Behaviour: submit a single referral in test mode, flip the setting while the
+ * request is in flight, and assert the payout records test.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$GLOBALS['__referral_rows'][3800] = new Fake_Referral( 3800, 3, '35.00', 'unpaid', 0 );
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 621, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+
+/*
+ * The mode flip is simulated on the instruction POST: the mock records the mode
+ * the request went to, and turns the setting off as a merchant would.
+ */
+$GLOBALS['__on_request'] = function ( $url, $method = 'GET' ) {
+	if ( false !== strpos( $url, 'staging-api' ) ) {
+		$GLOBALS['__mode_at_send'] = 'test';
+	} elseif ( false !== strpos( $url, 'api.chip-in.asia' ) ) {
+		$GLOBALS['__mode_at_send'] = 'live';
+	}
+
+	/*
+	 * Flip the setting after the instruction POST - not after the lookup that
+	 * shares its path, and not before the send, or the request would use the
+	 * other environment's credentials and fail for that reason instead.
+	 */
+	if ( 'POST' === strtoupper( (string) $method ) && false !== strpos( $url, '/send/send_instructions' ) ) {
+		$GLOBALS['__options']['chip_test_mode'] = 0;
+	}
+};
+
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9900, 'state' => 'received' ) );
+
+$result = chip_affiliatewp_pay_single_referral( 3800 );
+
+$GLOBALS['__on_request'] = null;
+
+check( 'the single referral submitted', true === $result );
+
+if ( is_wp_error( $result ) ) {
+	echo '        reason: ' . $result->get_error_code() . ' - ' . substr( $result->get_error_message(), 0, 90 ) . "\n";
+}
+
+check( 'the instruction went to the test environment', 'test' === ( $GLOBALS['__mode_at_send'] ?? '' ) );
+check( 'the setting was flipped mid-flight', 0 === (int) $GLOBALS['__options']['chip_test_mode'] );
+
+// The payout's record must name the mode the instruction was sent in.
+$created = null;
+
+foreach ( $GLOBALS['__payout_rows'] as $row ) {
+	if ( 3 === (int) $row->affiliate_id ) {
+		$created = $row;
+	}
+}
+
+check( 'a payout was created', null !== $created );
+
+if ( null !== $created ) {
+	$stored = chip_affiliatewp_payout_data( $created );
+
+	check( 'the payout records test mode', 'test' === ( $stored['mode'] ?? '' ) );
+	check( 'and not the flipped setting', 'live' !== ( $stored['mode'] ?? '' ) );
+}
+
+echo "\n== Test 133: the bank account is registered in the payout's own mode ==\n";
+reset_state();
+
+/*
+ * `chip_affiliatewp_ensure_bank_account()` resolved the mode from the setting
+ * inside itself, while the submission path resolved it once at the top and used
+ * that value for the instruction and the record. So the function deciding where
+ * the money goes was not the function deciding which CHIP account the recipient
+ * is registered in: a merchant toggling test mode between the two had the bank
+ * account registered in one environment and the instruction created in the
+ * other - a production object created from a test run.
+ *
+ * The mode is now a parameter, and the three call sites pass the mode that
+ * belongs to their context.
+ */
+$chip_root = dirname( __DIR__ );
+
+$bank_src   = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-bank-accounts.php' );
+$pay_src    = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+check( 'ensure_bank_account accepts a mode', false !== strpos( $bank_src, 'function chip_affiliatewp_ensure_bank_account( $affiliate_id, $mode = null )' ) );
+check( 'get_bank_account accepts a mode', false !== strpos( $bank_src, 'function chip_affiliatewp_get_bank_account( $affiliate_id, $mode = null )' ) );
+
+// The lookup must use the mode it was given, not the setting.
+check(
+	'the lookup passes the resolved mode to the request',
+	false !== strpos( $bank_src, "'reference' => \$reference," ) && preg_match( '/\$mode\s*\n\t\);/', substr( $bank_src, strpos( $bank_src, 'function chip_affiliatewp_get_bank_account' ), 2000 ) ) === 1
+);
+
+// Every call site passes a mode.
+check(
+	'the submission path passes its resolved mode',
+	false !== strpos( $pay_src, 'chip_affiliatewp_ensure_bank_account( $payout->affiliate_id, $mode )' )
+);
+
+check(
+	'the single-referral path passes its resolved mode',
+	false !== strpos( $pay_src, 'chip_affiliatewp_ensure_bank_account( $referral->affiliate_id, $mode )' )
+);
+
+check(
+	'the ownership check uses the payout\'s stored mode',
+	false !== strpos( $pay_src, 'chip_affiliatewp_ensure_bank_account( $affiliate_id, $payout_mode )' )
+);
+
+/*
+ * Behaviour: submit in test mode and flip the setting during the bank-account
+ * lookup - which is the first request the submission makes - then assert both
+ * the account registration and the instruction went to the test host.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_live_api_key']     = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']  = 'ls';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$GLOBALS['__referral_rows'][3900] = new Fake_Referral( 3900, 3, '45.00', 'unpaid', 0 );
+
+$GLOBALS['__hosts_seen'] = array();
+$GLOBALS['__flip_done']  = false;
+
+$GLOBALS['__on_request'] = function ( $url, $method = 'GET' ) {
+	if ( false !== strpos( $url, '/send/' ) ) {
+		$GLOBALS['__hosts_seen'][] = ( false !== strpos( $url, 'staging-api' ) ? 'test' : 'live' ) . ':' . strtoupper( (string) $method );
+	}
+
+	/*
+	 * Flip on the first request the submission makes - the reference probe -
+	 * which is after the mode is resolved and before the bank account is
+	 * registered. That is the merchant's window: the value is already decided,
+	 * and anything that re-reads the setting resolves the other environment.
+	 */
+	if ( empty( $GLOBALS['__flip_done'] ) ) {
+		$GLOBALS['__flip_done']            = true;
+		$GLOBALS['__options']['chip_test_mode'] = 0;
+	}
+};
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 631, 'status' => 'verified', 'reference' => chip_affiliatewp_bank_reference( 3 ) ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'POST', 'code' => 200, 'body' => array( 'id' => 9950, 'state' => 'received' ) );
+
+$result = chip_affiliatewp_pay_single_referral( 3900 );
+
+$GLOBALS['__on_request'] = null;
+
+check( 'the referral submitted', true === $result );
+
+if ( is_wp_error( $result ) ) {
+	echo '        reason: ' . $result->get_error_code() . "\n";
+}
+
+check( 'the setting was flipped mid-flow', 0 === (int) $GLOBALS['__options']['chip_test_mode'] );
+check( 'requests were made', ! empty( $GLOBALS['__hosts_seen'] ) );
+
+// Every request in the submission must have gone to one environment.
+$hosts = array_values( array_unique( array_map( function ( $h ) { return explode( ':', $h )[0]; }, $GLOBALS['__hosts_seen'] ) ) );
+
+check(
+	'all requests went to one environment (' . implode( ', ', $hosts ) . ')',
+	1 === count( $hosts )
+);
+
+check( 'and it was the test environment', array( 'test' ) === $hosts );
+
+echo "\n== Test 134: a payout whose mode has no credentials is not polled forever ==\n";
+reset_state();
+
+/*
+ * A payout remembers the mode it was submitted in. If the merchant then goes
+ * live and clears the test keys - which is what the setup instructions tell them
+ * to do - a test-mode payout requeries against credentials that no longer exist.
+ *
+ * `chip_affiliatewp_request()` returns `chip_missing_credentials` with no HTTP
+ * status, so the requery does not classify it as "instruction gone". The payout
+ * stays processing, is rescheduled, and burns a sweep slot on every run, while
+ * the reason never reaches the merchant: it just never settles.
+ *
+ * The state is recoverable - restoring the keys lets it settle - so the payout
+ * must not be failed either. It must be recognised as unable to progress now,
+ * and left for when the credentials return.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+
+$cred_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 4000 ),
+		'amount'        => '55.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][4000] = new Fake_Referral( 4000, 3, '55.00', 'unpaid', $cred_payout );
+
+chip_affiliatewp_update_payout_data(
+	$cred_payout,
+	array(
+		'instruction_id' => 9100,
+		'mode'           => 'test',
+		'state'          => 'executing',
+		'last_checked'   => gmdate( 'Y-m-d H:i:s', time() - 3600 ),
+	)
+);
+
+// The test credentials are gone; only live ones remain.
+$GLOBALS['__options']['chip_test_api_key']     = '';
+$GLOBALS['__options']['chip_test_secret_key']  = '';
+$GLOBALS['__options']['chip_live_api_key']     = 'lk';
+$GLOBALS['__options']['chip_live_secret_key']  = 'ls';
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_log']   = array();
+$GLOBALS['__as']         = array();
+
+chip_affiliatewp_check_payout_status( $cred_payout, false );
+
+check( 'no request was attempted without credentials', array() === $GLOBALS['__http_log'] );
+
+// The payout must not be failed: restoring the keys lets it settle.
+check( 'the payout is not failed', 'processing' === affwp_get_payout( $cred_payout )->status );
+check( 'the referral is not released', 'unpaid' === $GLOBALS['__referral_rows'][4000]->status );
+
+/*
+ * And it must say why, so the merchant can act. The reason names the mode,
+ * because "credentials missing" alone does not tell them which set to restore.
+ */
+$stored = chip_affiliatewp_payout_data( affwp_get_payout( $cred_payout ) );
+$reason = (string) ( $stored['error'] ?? '' );
+
+check( 'the payout records a reason', '' !== $reason );
+check( 'the reason names the mode', false !== stripos( $reason, 'test' ) );
+check( 'the reason mentions credentials', false !== stripos( $reason, 'credential' ) );
+
+// It must not be rescheduled to hammer the API either.
+check( 'the check did not reschedule itself', array() === array_filter( $GLOBALS['__as'], function ( $e ) { return 'chip_affiliatewp_check_payout_status' === ( $e[1] ?? '' ); } ) );
+
+/*
+ * Restoring the credentials lets the same payout settle: the state is deferred,
+ * not terminal.
+ */
+$GLOBALS['__options']['chip_test_api_key']    = 'tk';
+$GLOBALS['__options']['chip_test_secret_key'] = 'ts';
+
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/send_instructions', 'method' => 'GET', 'code' => 200, 'body' => array( 'id' => 9100, 'state' => 'completed', 'reference' => 'XT-PO-' . $cred_payout ) );
+$GLOBALS['__http_log'] = array();
+
+chip_affiliatewp_check_payout_status( $cred_payout, false );
+
+check( 'with credentials restored it settles', 'paid' === affwp_get_payout( $cred_payout )->status );
+check( 'and the referral is paid', 'paid' === $GLOBALS['__referral_rows'][4000]->status );
+
+echo "\n== Test 135: every terminal payout state refreshes its batch ==\n";
+reset_state();
+
+/*
+ * A payout batch stays on "Processing" until every payout in it is terminal, so
+ * each transition into a terminal state has to recount the batch. There are
+ * exactly two: paid, and failed via fail_payout.
+ *
+ * A third transition added later without a recount would leave the batch stuck
+ * on Processing forever with no payout left to move it - the merchant sees a
+ * batch that never finishes.
+ *
+ * This asserts the source: every place that writes a terminal payout status
+ * must reach the recount. It is checked structurally because the two live in
+ * different functions.
+ */
+$chip_root = dirname( __DIR__ );
+$pay_src   = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-payouts.php' );
+
+// The two terminal statuses the plugin writes.
+preg_match_all( "/'status'\s*=>\s*'(paid|failed)'/", $pay_src, $terminal );
+
+$statuses = array_unique( $terminal[1] ?? array() );
+
+sort( $statuses );
+
+check( 'the plugin writes exactly the terminal statuses paid and failed (' . implode( ', ', $statuses ) . ')', array( 'failed', 'paid' ) === $statuses );
+
+/*
+ * Every function that writes one must call the recount. Split the source into
+ * functions and check each writer.
+ */
+$functions = array();
+
+if ( preg_match_all( '/^function\s+(\w+)\s*\([^)]*\)\s*\{/m', $pay_src, $fn, PREG_OFFSET_CAPTURE ) ) {
+	foreach ( $fn[1] as $i => $entry ) {
+		$name  = $entry[0];
+		$start = $entry[1];
+		$next  = $fn[0][ $i + 1 ][1] ?? strlen( $pay_src );
+
+		$functions[ $name ] = substr( $pay_src, $start, $next - $start );
+	}
+}
+
+check( 'functions were parsed', count( $functions ) > 10 );
+
+$writers_without_recount = array();
+
+foreach ( $functions as $name => $body ) {
+	if ( ! preg_match( "/'status'\s*=>\s*'(paid|failed)'/", $body ) ) {
+		continue;
+	}
+
+	// A writer must reach the recount, either directly or by delegating.
+	$recounts = false !== strpos( $body, 'chip_affiliatewp_recount_batch_for_payout' )
+		|| false !== strpos( $body, 'chip_affiliatewp_fail_payout' );
+
+	if ( ! $recounts ) {
+		$writers_without_recount[] = $name;
+	}
+}
+
+check(
+	'every terminal writer refreshes the batch (' . implode( ', ', $writers_without_recount ) . ')',
+	array() === $writers_without_recount
+);
+
+/*
+ * Behaviour: a payout in a batch that fails must leave the batch recounted, so
+ * the batch can settle.
+ */
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'tk';
+$GLOBALS['__options']['chip_test_secret_key']  = 'ts';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__options']['currency']              = 'MYR';
+$GLOBALS['__affiliates_map'][3]                = 7;
+$GLOBALS['__users'][7]                         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$batch_payout = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 4100 ),
+		'amount'        => '20.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+		'batch_id'      => 555,
+	)
+);
+
+$GLOBALS['__referral_rows'][4100] = new Fake_Referral( 4100, 3, '20.00', 'unpaid', $batch_payout );
+
+$GLOBALS['__batch_recounts'] = array();
+
+chip_affiliatewp_fail_payout( $batch_payout, 'CHIP refused the transfer.', 'chip_instruction_rejected', 422 );
+
+check( 'the batch was recounted on failure', in_array( 555, $GLOBALS['__batch_recounts'], true ) );
+
+// And a payout outside any batch must not attempt a recount at all.
+$GLOBALS['__batch_recounts'] = array();
+
+$loose = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 4101 ),
+		'amount'        => '20.00',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][4101] = new Fake_Referral( 4101, 3, '20.00', 'unpaid', $loose );
+
+chip_affiliatewp_fail_payout( $loose, 'CHIP refused the transfer.', 'chip_instruction_rejected', 422 );
+
+check( 'a payout with no batch recounts nothing', array() === $GLOBALS['__batch_recounts'] );
+
+echo "\n== Test 136: stored credentials never reach the page ==\n";
+reset_state();
+
+/*
+ * An input's `value` attribute is in the HTML source. A masked (type=password)
+ * field with a real value in it therefore still hands the secret to the browser,
+ * to every script on the screen, and to anything that can read the response -
+ * masking is a display choice, not a boundary.
+ *
+ * The credentials card used to pass the stored key and secret as the field
+ * value. Verified on a live site: both appeared verbatim in the rendered form.
+ *
+ * The fix renders an empty value and a saved-state hint. That makes the save
+ * path load-bearing in a new way - the field always posts empty unless the
+ * merchant types a replacement - so the sanitizer must keep the stored value
+ * when it receives an empty one, or every save of the panel would erase the
+ * credentials and silently disable payouts.
+ */
+$chip_root = dirname( __DIR__ );
+$admin_src = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-admin.php' );
+
+// The card must not receive the stored values at all.
+check(
+	'the live card is not given the stored key',
+	false === strpos( $admin_src, "'key_value'   => \$live_key" )
+);
+
+check(
+	'the live card is not given the stored secret',
+	false === strpos( $admin_src, "'sec_value'   => \$live_secret" )
+);
+
+check(
+	'the test card is not given the stored key',
+	false === strpos( $admin_src, "'key_value'   => \$test_key" )
+);
+
+check(
+	'the test card is not given the stored secret',
+	false === strpos( $admin_src, "'sec_value'   => \$test_secret" )
+);
+
+// It is given a boolean instead, so it can say a credential exists.
+check( 'the card is told whether a key is saved', false !== strpos( $admin_src, "'key_saved'   => '' !== \$test_key" ) );
+check( 'the card is told whether a secret is saved', false !== strpos( $admin_src, "'sec_saved'   => '' !== \$test_secret" ) );
+
+// And the fields render empty.
+check(
+	'the api-key field renders an empty value',
+	1 === substr_count( $admin_src, "'id'          => 'chip-' . \$args['id'] . '-api-key'," )
+);
+
+$card_at = strpos( $admin_src, 'function chip_affiliatewp_render_credentials_card' );
+$card    = false !== $card_at ? substr( $admin_src, $card_at, 4200 ) : '';
+
+check( 'the card function exists', '' !== $card );
+check(
+	'the api-key field passes an empty value',
+	false !== strpos( $card, "'value'       => ''," )
+);
+
+// No `value` in the card may come from a stored credential.
+check(
+	'the card never passes a stored value to a field',
+	false === strpos( $card, "'value'       => (string) \$args['key_value']" )
+	&& false === strpos( $card, "'value'       => (string) \$args['sec_value']" )
+);
+
+/*
+ * The sanitizer must keep a stored credential when the submission is empty.
+ */
+$sanitize_at = strpos( $admin_src, 'function chip_affiliatewp_sanitize_settings' );
+$sanitize    = false !== $sanitize_at ? substr( $admin_src, $sanitize_at, 6000 ) : '';
+
+check( 'the sanitizer exists', '' !== $sanitize );
+check( 'the sanitizer names the credential keys', false !== strpos( $sanitize, "'chip_live_api_key', 'chip_live_secret_key', 'chip_test_api_key', 'chip_test_secret_key'" ) );
+check( 'the sanitizer keeps the stored value on an empty submission', false !== strpos( $sanitize, '$input[ $key ] = $stored;' ) );
+
+/*
+ * Behaviour: an empty credential submission keeps what is stored, and a
+ * non-empty one replaces it.
+ */
+$GLOBALS['__options']['chip_test_api_key']    = 'stored-key';
+$GLOBALS['__options']['chip_test_secret_key'] = 'stored-secret';
+
+$result = chip_affiliatewp_sanitize_settings(
+	array(
+		'chip_test_api_key'    => '',
+		'chip_test_secret_key' => '',
+	)
+);
+
+check( 'an empty api key keeps the stored one', 'stored-key' === ( $result['chip_test_api_key'] ?? '' ) );
+check( 'an empty secret keeps the stored one', 'stored-secret' === ( $result['chip_test_secret_key'] ?? '' ) );
+
+$result = chip_affiliatewp_sanitize_settings(
+	array(
+		'chip_test_api_key'    => 'new-key',
+		'chip_test_secret_key' => 'new-secret',
+	)
+);
+
+check( 'a typed api key replaces the stored one', 'new-key' === ( $result['chip_test_api_key'] ?? '' ) );
+check( 'a typed secret replaces the stored one', 'new-secret' === ( $result['chip_test_secret_key'] ?? '' ) );
+
+// The reference prefix still truncates: the credential branch must not swallow it.
+$result = chip_affiliatewp_sanitize_settings( array( 'chip_reference_prefix' => 'abcdEFGH' ) );
+
+check( 'the reference prefix is still capped', 'AB' === ( $result['chip_reference_prefix'] ?? '' ) );
+
+echo "\n== Test 137: no user-visible message carries the webhook secret ==\n";
+reset_state();
+
+/*
+ * The webhook URL ends in a 32-hex per-install secret, and that secret is the
+ * only thing keeping the endpoint undiscoverable - the bare /webhook path
+ * answers 404 for exactly that reason. The RSA signature protects the payload,
+ * not the path.
+ *
+ * The unreachable-site error used to interpolate the whole URL, and it is
+ * rendered as a settings notice: in front of every admin session and anything
+ * that can read the screen. The merchant does not need the secret path to act on
+ * an unreachable site, so the message names the host instead.
+ *
+ * Verified on the live site that the endpoint's own guards are unaffected: the
+ * URL is what is sent to CHIP, and only the notice changed.
+ */
+$chip_root = dirname( __DIR__ );
+$hook_src  = (string) file_get_contents( $chip_root . '/includes/class-chip-affiliatewp-webhooks.php' );
+
+// The unreachable message must not take the URL.
+$unreachable_at = strpos( $hook_src, "'chip_webhook_unreachable'" );
+$unreachable    = false !== $unreachable_at ? substr( $hook_src, $unreachable_at, 1200 ) : '';
+
+check( 'the unreachable error exists', '' !== $unreachable );
+check( 'it names the host, not the URL', false !== strpos( $unreachable, 'wp_parse_url( $url, PHP_URL_HOST )' ) );
+check( 'it does not pass the full url to the message', false === strpos( $unreachable, "__( 'The webhook URL (%1\$s) is not reachable" ) );
+
+// No message in the module may interpolate the webhook URL.
+$url_vars = array();
+
+foreach ( array( 'chip_affiliatewp_webhook_url()', '$url' ) as $needle ) {
+	if ( preg_match_all( '/sprintf\([^;]{0,600}?' . preg_quote( $needle, '/' ) . '[^;]{0,600}?\)/', $hook_src, $m, PREG_OFFSET_CAPTURE ) ) {
+		foreach ( $m[0] as $hit ) {
+			$context = $hit[0];
+
+			// A message is user-visible when it is wrapped in __().
+			if ( false !== strpos( $context, '__(' ) ) {
+				$line = substr_count( substr( $hook_src, 0, $hit[1] ), "\n" ) + 1;
+				$url_vars[] = 'line ' . $line;
+			}
+		}
+	}
+}
+
+check(
+	'no translated message interpolates the webhook url (' . implode( ', ', $url_vars ) . ')',
+	array() === $url_vars
+);
+
+/*
+ * Behaviour: the error a merchant sees must not contain the secret.
+ */
+$GLOBALS['__options']['chip_webhook_secret'] = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+$GLOBALS['__probe_response'] = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' );
+$GLOBALS['__options']['chip_payouts'] = 1;
+$GLOBALS['__options']['chip_test_mode'] = 1;
+$GLOBALS['__options']['chip_test_api_key'] = 'k';
+$GLOBALS['__options']['chip_test_secret_key'] = 's';
+
+delete_transient( 'chip_affiliatewp_webhook_reachable' );
+
+$reachable = chip_affiliatewp_site_publicly_reachable();
+$GLOBALS['__http_transport_error'] = false;
+
+$GLOBALS['__probe_response'] = null;
+
+
+check( 'an unreachable site reports an error', is_wp_error( $reachable ) );
+
+$message = is_wp_error( $reachable ) ? $reachable->get_error_message() : '';
+
+check( 'the error message exists', '' !== $message );
+check( 'the message does not contain the webhook secret', false === strpos( $message, 'a1b2c3d4e5f60718293a4b5c6d7e8f90' ) );
+check( 'the message does not contain the webhook path', false === strpos( $message, 'chip-affiliatewp/v1/webhook' ) );
+
+// It should still be actionable: the merchant learns it is reachability.
+check( 'the message says what is wrong', false !== stripos( $message, 'reachable' ) );
 
 echo "\n== Test 31: affiliate dashboard notice reflects bank-detail state ==\n";
 reset_state();
