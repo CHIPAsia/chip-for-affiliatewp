@@ -295,7 +295,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 				);
 			}
 
-			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing );
+			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $mode );
 
 			return true;
 		}
@@ -458,7 +458,7 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 				);
 			}
 
-			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing );
+			chip_affiliatewp_adopt_instruction( $payout_id, $payout, $existing, $mode );
 
 			return true;
 		}
@@ -609,14 +609,30 @@ function chip_affiliatewp_instruction_belongs_to_payout( $payout, $instruction )
  * @param int    $payout_id Payout ID.
  * @param object $payout    Payout row.
  * @param array  $instruction Instruction payload from CHIP.
+ * @param string $mode      Mode the instruction was found in.
  * @return void
  */
-function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction ) {
+function chip_affiliatewp_adopt_instruction( $payout_id, $payout, $instruction, $mode = '' ) {
 	$data = chip_affiliatewp_payout_data( $payout );
 
 	$data['instruction_id'] = (int) $instruction['id'];
 	$data['receipt_url']    = chip_affiliatewp_safe_receipt_url( chip_affiliatewp_array_value( $instruction, 'receipt_url', '' ) );
 	$data['last_checked']   = gmdate( 'Y-m-d H:i:s' );
+
+	/*
+	 * Record the account the instruction was found in.
+	 *
+	 * An id is only unique within one CHIP account, so a payout holding an id
+	 * and no mode is ambiguous: a requery falls back to the site-wide setting
+	 * and polls the other environment - where the id does not exist - and the
+	 * webhook cannot tell which account a delivery belongs to. Adoption already
+	 * resolved the mode to find the instruction, so it knows the answer.
+	 *
+	 * A payout that adopted before modes were stored keeps whatever it had.
+	 */
+	if ( in_array( $mode, array( 'test', 'live' ), true ) ) {
+		$data['mode'] = $mode;
+	}
 
 	// The instruction exists, so any earlier failure note no longer applies.
 	unset( $data['error'], $data['error_status'] );

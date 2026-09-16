@@ -1295,6 +1295,99 @@ foreach ( $GLOBALS['__http_log'] as $call ) {
 check( 'amount in payload', false !== strpos( $post_body, '"amount":"250.50"' ) );
 check( 'reference in payload', false !== strpos( $post_body, '"reference":"XT-PO-' . $payout_id . '"' ) );
 
+/*
+ * == Test 143: the reference is recorded whenever a submission succeeds ==
+ *
+ * The prefix-change fix relies on a payout recording the reference it was
+ * submitted under. It is written before the send - so the lost-response case is
+ * covered - but the in-memory data is rebuilt from the stored meta after a
+ * refusal, and the success branch then writes that same array back.
+ *
+ * If the write before the send did not survive into that array, a successful
+ * submission would store everything EXCEPT the reference, and the delivery could
+ * only be resolved while the prefix still matched. That is the exact bug the fix
+ * was for, reappearing on the path that works normally.
+ */
+check( 'the submitted reference is stored', 'XT-PO-' . $payout_id === (string) ( $data['reference'] ?? '' ) );
+check( 'the stored reference is the one sent', false !== strpos( $post_body, (string) ( $data['reference'] ?? '\0' ) ) );
+
+/*
+ * == Test 144: an adopted instruction records the account it came from ==
+ *
+ * When a submission's reply is lost, the instruction is found by reference and
+ * adopted. That adoption writes the instruction id but not the mode, so the
+ * payout has an id and no account attached to it.
+ *
+ * Two things then go wrong. The payout's own mode is unset, so a requery falls
+ * back to the site-wide setting: flipping to Test Mode points a live
+ * instruction at staging, where the id does not exist, and the payout stalls on
+ * 404s. And the webhook's fast path cannot tell which account the id belongs to,
+ * so a delivery from the other one can be applied to it.
+ *
+ * The adoption knows the mode - it resolved it to find the instruction - so it
+ * has to record it.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+
+$GLOBALS['__user_meta'][7]['payment_account_number'] = '157380112229';
+$GLOBALS['__user_meta'][7]['payment_bank_code']      = 'MBBEMYKL';
+
+$adopt_id = affiliate_wp()->affiliates->payouts->add(
+	array(
+		'affiliate_id'  => 3,
+		'referrals'     => array( 31 ),
+		'amount'        => '250.50',
+		'payout_method' => 'chip',
+		'status'        => 'processing',
+	)
+);
+
+$GLOBALS['__referral_rows'][31] = new Fake_Referral( 31, 3, '250.50', 'unpaid', $adopt_id );
+
+// Bank lookup and create, then the reference probe returns a LIVE instruction:
+// the reply to the original submission was lost, so this one is adopted.
+/* translators: none - fixture only */
+$adopt_bank_ref = chip_affiliatewp_bank_reference( 3 );
+
+// The stored record is matched on its reference, so the fixture has to carry
+// the one this affiliate's account would actually be registered under.
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'results' => array() ) );
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts', 'code' => 200, 'body' => array( 'id' => 84, 'status' => 'verified', 'reference' => $adopt_bank_ref ) );
+
+// The instruction lookup matches on the reference it carries, so the fixture has
+// to carry the one this payout would have sent.
+$GLOBALS['__http_queue'][] = array(
+	'match'  => '/send/send_instructions',
+	'method' => 'GET',
+	'code'   => 200,
+	'body'   => array(
+		'results' => array(
+			array(
+				'id'              => 9600,
+				'state'           => 'received',
+				'reference'       => 'XT-PO-' . $adopt_id,
+				'amount'          => '250.50',
+				'bank_account_id' => 84,
+			),
+		),
+	),
+);
+
+chip_affiliatewp_submit_payout( $adopt_id );
+
+$adopted = chip_affiliatewp_payout_data( affwp_get_payout( $adopt_id ) );
+
+check( 'the adopted instruction is stored', 9600 === (int) ( $adopted['instruction_id'] ?? 0 ) );
+check( 'the account it came from is stored too', 'test' === (string) ( $adopted['mode'] ?? '' ) );
+
 echo "\n== Test 7: submit idempotency (already has instruction) ==\n";
 $GLOBALS['__http_log'] = array();
 $result2 = chip_affiliatewp_submit_payout( $payout_id );
