@@ -810,6 +810,27 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 		return;
 	}
 
+	/*
+	 * The delivery must belong to the account this payout was submitted in.
+	 *
+	 * Instruction ids are unique per CHIP account, not globally: test and live
+	 * are separate accounts with separate id sequences, so a live instruction
+	 * can carry an id a test-mode payout also holds. The fast path above
+	 * resolves on that id alone, so without this check a live delivery settles
+	 * a test payout - and marks its referral paid - on the strength of an
+	 * instruction this site's account never issued.
+	 *
+	 * A payout records the mode it was submitted in. When it does not (a row
+	 * from before modes were recorded), the delivery's own mode is the only
+	 * statement available and the delivery is applied.
+	 */
+	$payout_data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+	$payout_mode = (string) chip_affiliatewp_array_value( $payout_data, 'mode', '' );
+
+	if ( in_array( $payout_mode, array( 'test', 'live' ), true ) && $payout_mode !== $verified_mode ) {
+		return;
+	}
+
 	chip_affiliatewp_apply_instruction( $payout_id, $payload );
 }
 

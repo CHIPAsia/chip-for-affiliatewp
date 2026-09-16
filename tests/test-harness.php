@@ -6858,6 +6858,58 @@ chip_affiliatewp_process_instruction_webhook(
 check( 'a redelivery still creates nothing', count( $GLOBALS['__payout_rows'] ) === $before );
 
 /*
+ * == Test 138: an instruction id is unique per CHIP account ==
+ *
+ * The webhook's fast path resolves a delivery by matching the stored
+ * service_id. Test and live are separate CHIP accounts with separate id
+ * sequences, so the same number exists in both - and the fast path matched
+ * without checking which account the delivery verified against.
+ *
+ * A live delivery carrying an id that a test-mode payout also holds would then
+ * be applied to that test payout. Here the live delivery is 'completed' and the
+ * test payout would be marked paid on the strength of an instruction that never
+ * involved this site's test account.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][5] = 11;
+$GLOBALS['__users'][11]         = new Fake_User( 11, 'other@test.dev' );
+
+// A test-mode payout holding instruction id 7700.
+$GLOBALS['__payout_rows'][9900] = (object) array(
+	'payout_id'     => 9900,
+	'affiliate_id'  => 5,
+	'referrals'     => '2300',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 7700,
+	'description'   => wp_json_encode( array( 'instruction_id' => 7700, 'mode' => 'test' ) ),
+);
+
+$GLOBALS['__referral_rows'][2300] = new Fake_Referral( 2300, 5, '20.00', 'unpaid', 9900 );
+
+// A LIVE delivery happens to carry the same instruction id 7700.
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 7700, 'state' => 'completed', 'reference' => 'ZZ-PO-9900', 'bank_account_id' => 0 ),
+	'live'
+);
+
+check(
+	'a live delivery does not settle a test-mode payout',
+	'processing' === $GLOBALS['__payout_rows'][9900]->status
+);
+check(
+	'the referral is not marked paid by another account\'s instruction',
+	'unpaid' === $GLOBALS['__referral_rows'][2300]->status
+);
+
+/*
  * An unpaid referral with no payout is still materialised: that is the ordinary
  * single-referral case the recovery path exists for.
  */
