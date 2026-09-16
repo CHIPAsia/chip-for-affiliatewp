@@ -33,6 +33,46 @@ function chip_affiliatewp_webhook_url() {
 }
 
 /**
+ * Whether a recorded callback URL belongs to this site rather than another one.
+ *
+ * The webhook NAME is identical on every install, so it cannot tell two sites
+ * apart - a merchant running two sites on one CHIP account has two webhooks
+ * named the same. A URL can: it is built from this site's REST route.
+ *
+ * Comparison is on scheme+host+path with the secret suffix treated as opaque:
+ * the secret may have been regenerated, but a route under this site's own host
+ * and plugin namespace is still this site's endpoint. Another site on a
+ * different host therefore never matches.
+ *
+ * @param string $candidate Callback URL recorded at CHIP.
+ * @return bool
+ */
+function chip_affiliatewp_webhook_url_belongs_to_site( $candidate ) {
+	$candidate = trim( (string) $candidate );
+
+	if ( '' === $candidate ) {
+		return false;
+	}
+
+	$candidate_host = strtolower( (string) wp_parse_url( $candidate, PHP_URL_HOST ) );
+	$own_url        = chip_affiliatewp_webhook_url();
+	$own_host       = strtolower( (string) wp_parse_url( $own_url, PHP_URL_HOST ) );
+
+	if ( '' === $candidate_host || '' === $own_host || $candidate_host !== $own_host ) {
+		return false;
+	}
+
+	/*
+	 * Same host: the path must sit under this plugin's route, not merely
+	 * anywhere on the site. The secret segment is compared loosely (any single
+	 * path segment) so a regenerated secret still counts as ours.
+	 */
+	$candidate_path = (string) wp_parse_url( $candidate, PHP_URL_PATH );
+
+	return (bool) preg_match( '#/chip-affiliatewp/v1/webhook/[^/]+/?$#', $candidate_path );
+}
+
+/**
  * Returns the per-site webhook URL secret, generating it on first use.
  *
  * @return string 32-char hex secret.
@@ -137,12 +177,22 @@ function chip_affiliatewp_site_publicly_reachable() {
 	if ( is_wp_error( $response ) && 0 === (int) wp_remote_retrieve_response_code( $response ) ) {
 		set_transient( $cache_key, 'no', 10 * MINUTE_IN_SECONDS );
 
+		/*
+		 * The message names the host, not the full URL: the path carries this
+		 * site's webhook secret, and that secret is what keeps the endpoint from
+		 * being discovered - the bare path answers 404 for the same reason.
+		 * Rendering it into a settings notice puts it in front of every admin
+		 * session and anything that can read the screen, and the merchant does
+		 * not need it to act on an unreachable site.
+		 */
+		$host = (string) wp_parse_url( $url, PHP_URL_HOST );
+
 		return new WP_Error(
 			'chip_webhook_unreachable',
 			sprintf(
-				/* translators: 1: Webhook URL, 2: Technical error message */
-				__( 'The webhook URL (%1$s) is not reachable: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).', 'chip-for-affiliatewp' ),
-				$url,
+				/* translators: 1: Site host, 2: Technical error message */
+				__( 'The webhook endpoint on %1$s is not reachable from outside: %2$s. The webhook was not registered — fix site reachability or configure payouts without webhooks (the hourly requery sweep still works).', 'chip-for-affiliatewp' ),
+				'' !== $host ? $host : __( 'this site', 'chip-for-affiliatewp' ),
 				$response->get_error_message()
 			)
 		);
@@ -268,7 +318,21 @@ function chip_affiliatewp_ensure_webhook( $force = false ) {
 				break;
 			}
 
-			if ( ! $stale_id && 'AffiliateWP Payouts' === (string) chip_affiliatewp_array_value( $row, 'name' ) ) {
+			/*
+			 * A name-only match is not safe to reuse. The name is the same on
+			 * every install ("AffiliateWP Payouts"), so a merchant running two
+			 * sites on one CHIP account has two webhooks with it - and adopting
+			 * the other site's would repoint it here, silently taking that
+			 * site's deliveries.
+			 *
+			 * The URL is the identifying part: it carries this site's own
+			 * secret. A name-only entry is only adopted when it also looks like
+			 * a leftover from this site, which the caller indicates by having no
+			 * recorded id of its own to reuse.
+			 */
+			if ( ! $stale_id
+				&& 'AffiliateWP Payouts' === (string) chip_affiliatewp_array_value( $row, 'name' )
+				&& chip_affiliatewp_webhook_url_belongs_to_site( $row_url ) ) {
 				$stale_id = absint( chip_affiliatewp_array_value( $row, 'id' ) );
 			}
 		}
@@ -656,17 +720,73 @@ function chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode 
 function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verified_mode, $instruction_id, $reference ) {
 	$payout_id = 0;
 
-	// Fast path: a payout already stores this instruction ID.
+	/*
+	 * Fast path: a payout already stores this instruction ID.
+	 *
+	 * The mode is passed in because the id alone is not unique across accounts:
+	 * test and live can both hold it, and picking the wrong row would leave this
+	 * delivery with no payout to reach.
+	 */
 	if ( $instruction_id ) {
-		$payout_id = chip_affiliatewp_find_payout_by_instruction_id( $instruction_id );
+		$payout_id = chip_affiliatewp_find_payout_by_instruction_id( $instruction_id, $verified_mode );
 	}
 
-	// Reference path: "<prefix>-PO-<payout_id>" or "<prefix>-R-<referral_id>".
+	/*
+	 * Reference path: "<prefix>-PO-<payout_id>" or "<prefix>-R-<referral_id>".
+	 *
+	 * Ownership is required here, not decorative. References are unique per
+	 * CHIP account rather than per site, so another installation sharing the
+	 * account holds references of the same shape under a different prefix -
+	 * which is exactly why the settings panel asks each site to set its own.
+	 * Reading the payout id out of any "*-PO-<n>" let that other site's
+	 * instruction land on whichever local payout carried the number, marking it
+	 * - and its referral - paid for money this account never sent.
+	 *
+	 * The prefix alone is not a sufficient test, though: it is a setting, and
+	 * the fallback is derived from the site URL, so a merchant can change it
+	 * while a payout is in flight. A payout submitted before the change carries
+	 * the old prefix in the reference CHIP delivers back, and for one whose
+	 * response was lost - so the instruction id was never stored - the reference
+	 * is the only link to it. Requiring the current prefix alone left that
+	 * payout on processing forever.
+	 *
+	 * So a reference counts as ours when it carries the current prefix, or when
+	 * it is exactly the reference the payout it resolves to was submitted
+	 * under. The second cannot match another site: that payout recorded the
+	 * reference at submission, and we are the ones who generated it.
+	 */
+	$our_prefix        = chip_affiliatewp_reference_prefix();
+	$reference_is_ours = '' === $our_prefix || 0 === strpos( $reference, $our_prefix . '-' );
+
 	if ( ! $payout_id && preg_match( '/-(PO|R)-(\d+)$/', $reference, $matches ) ) {
 		if ( 'PO' === $matches[1] ) {
-			$payout_id = absint( $matches[2] );
+			$candidate = absint( $matches[2] );
+
+			if ( $reference_is_ours || chip_affiliatewp_payout_reference_matches( $candidate, $reference ) ) {
+				$payout_id = $candidate;
+			}
 		} else {
-			$referral = affwp_get_referral( absint( $matches[2] ) );
+			$referral_id = absint( $matches[2] );
+			$referral    = affwp_get_referral( $referral_id );
+
+			/*
+			 * Ownership for the R path. A referral that already carries a payout
+			 * is checked against it, exactly as the PO path is: that payout
+			 * recorded the reference it was submitted under, so a prefix change
+			 * since then must not strand it. Everything else needs the current
+			 * prefix, because without a payout there is no recorded reference to
+			 * compare against and another site's reference would otherwise
+			 * materialise a payout row from its instruction.
+			 */
+			$owns = $reference_is_ours;
+
+			if ( ! $owns && $referral && ! empty( $referral->payout_id ) ) {
+				$owns = chip_affiliatewp_payout_reference_matches( absint( $referral->payout_id ), $reference );
+			}
+
+			if ( ! $owns ) {
+				$referral = null;
+			}
 
 			if ( $referral && ! empty( $referral->payout_id ) ) {
 				$payout_id = absint( $referral->payout_id );
@@ -746,36 +866,118 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 		return;
 	}
 
+	/*
+	 * The delivery must belong to the account this payout was submitted in.
+	 *
+	 * Instruction ids are unique per CHIP account, not globally: test and live
+	 * are separate accounts with separate id sequences, so a live instruction
+	 * can carry an id a test-mode payout also holds. The fast path above
+	 * resolves on that id alone, so without this check a live delivery settles
+	 * a test payout - and marks its referral paid - on the strength of an
+	 * instruction this site's account never issued.
+	 *
+	 * A payout records the mode it was submitted in. When it does not (a row
+	 * from before modes were recorded), the delivery's own mode is the only
+	 * statement available and the delivery is applied.
+	 */
+	$payout_data = chip_affiliatewp_payout_data( affwp_get_payout( $payout_id ) );
+	$payout_mode = (string) chip_affiliatewp_array_value( $payout_data, 'mode', '' );
+
+	if ( in_array( $payout_mode, array( 'test', 'live' ), true ) && $payout_mode !== $verified_mode ) {
+		return;
+	}
+
 	chip_affiliatewp_apply_instruction( $payout_id, $payload );
+}
+
+/**
+ * Whether a reference is the one a payout was submitted under.
+ *
+ * A payout records the reference it sent. Matching against it is how a delivery
+ * stays resolvable after the merchant changes the reference prefix, or after
+ * the site moves and the derived fallback changes with it - neither of which
+ * should orphan a payout that is already at CHIP.
+ *
+ * It cannot admit another site's instruction: the recorded value is one this
+ * site generated when submitting, so a reference belonging to a different site
+ * never equals it. It also has to match on a payout that exists, so there is
+ * nothing to confirm when the number names no row.
+ *
+ * @param int    $payout_id Payout ID parsed out of the reference.
+ * @param string $reference Reference the delivery carries.
+ * @return bool
+ */
+function chip_affiliatewp_payout_reference_matches( $payout_id, $reference ) {
+	$payout_id = absint( $payout_id );
+
+	if ( ! $payout_id ) {
+		return false;
+	}
+
+	$payout = affwp_get_payout( $payout_id );
+
+	if ( ! $payout || 'chip' !== $payout->payout_method ) {
+		return false;
+	}
+
+	$data = chip_affiliatewp_payout_data( $payout );
+
+	$recorded = (string) chip_affiliatewp_array_value( $data, 'reference', '' );
+
+	return '' !== $recorded && $recorded === (string) $reference;
 }
 
 /**
  * Finds a CHIP payout by its stored send instruction ID.
  *
- * @param int $instruction_id CHIP Send instruction ID.
+ * Instruction ids are unique per CHIP account, not globally, so two payouts can
+ * hold the same id - one per mode. The mode the delivery verified against picks
+ * between them; a row with no recorded mode (one written before modes were
+ * stored) is the only statement available for it and is taken as a fallback.
+ *
+ * Returning the first id-matched row regardless would leave the delivery unable
+ * to reach its own payout: the caller would find a payout of the other account,
+ * recognise it as such, and stop - never looking the right one up.
+ *
+ * @param int    $instruction_id CHIP Send instruction ID.
+ * @param string $mode           Optional. Mode the delivery verified against.
  * @return int Payout ID, or 0 when not found.
  */
-function chip_affiliatewp_find_payout_by_instruction_id( $instruction_id ) {
+function chip_affiliatewp_find_payout_by_instruction_id( $instruction_id, $mode = '' ) {
 	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
 		array(
 			'payout_method' => 'chip',
 			'status'        => array( 'processing', 'paid', 'failed' ),
 			'service_id'    => $instruction_id,
-			'number'        => 1,
 		)
 	);
 
-	if ( ! empty( $payouts ) ) {
-		$found = is_array( $payouts ) ? array_shift( $payouts ) : $payouts;
-
-		if ( is_object( $found ) ) {
-			return absint( $found->payout_id );
-		}
-
-		return absint( $found );
+	if ( empty( $payouts ) ) {
+		return 0;
 	}
 
-	return 0;
+	$payouts  = is_array( $payouts ) ? $payouts : array( $payouts );
+	$fallback = 0;
+
+	foreach ( $payouts as $candidate ) {
+		$candidate_id = is_object( $candidate ) ? absint( $candidate->payout_id ?? 0 ) : absint( $candidate );
+
+		if ( ! $candidate_id ) {
+			continue;
+		}
+
+		$candidate_mode = (string) chip_affiliatewp_array_value( chip_affiliatewp_payout_data( $candidate ), 'mode', '' );
+
+		if ( '' !== $mode && $candidate_mode === $mode ) {
+			return $candidate_id;
+		}
+
+		if ( ! $fallback && '' === $candidate_mode ) {
+			$fallback = $candidate_id;
+		}
+	}
+
+	return $fallback;
 }
 
 /**

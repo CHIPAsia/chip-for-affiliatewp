@@ -178,12 +178,13 @@ function chip_affiliatewp_payout_attempt( $data ) {
  * record no longer matches the current details (a changed account number or
  * bank invalidates the id — reusing it would pay the old account).
  *
- * @param int $affiliate_id Affiliate ID.
+ * @param int         $affiliate_id Affiliate ID.
+ * @param string|null $mode         'test' or 'live'; null uses the current mode.
  * @return array|null Bank account record, or null when none exists.
  */
-function chip_affiliatewp_get_bank_account( $affiliate_id ) {
+function chip_affiliatewp_get_bank_account( $affiliate_id, $mode = null ) {
 	$reference = chip_affiliatewp_bank_reference( $affiliate_id );
-	$mode      = chip_affiliatewp_current_mode();
+	$mode      = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
 
 	$stored = chip_affiliatewp_get_stored_bank_account( $affiliate_id, $reference, $mode );
 
@@ -440,7 +441,7 @@ function chip_affiliatewp_delete_superseded_bank_account( $affiliate_id, $accoun
 
 	$mode = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
 
-	if ( chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) ) {
+	if ( chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id, $mode ) ) {
 		return false;
 	}
 
@@ -469,16 +470,25 @@ function chip_affiliatewp_delete_superseded_bank_account( $affiliate_id, $accoun
  * column for it: its service_id holds the instruction id, so comparing against
  * that would never match and the guard would always answer "not in use".
  *
- * @param int $affiliate_id Affiliate ID.
- * @param int $account_id   CHIP bank account ID.
+ * The payout's mode is compared too. A bank account id is only unique within
+ * one CHIP account, so a live payout holding id 77 would otherwise make this
+ * refuse while a TEST account with the same number is being cleaned up: the
+ * superseded record stays marked, the delete is refused, and it is retried on
+ * every later registration without ever succeeding.
+ *
+ * @param int         $affiliate_id Affiliate ID.
+ * @param int         $account_id   CHIP bank account ID.
+ * @param string|null $mode         Optional. Mode whose account is being checked.
  * @return bool
  */
-function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
+function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id, $mode = null ) {
 	$account_id = absint( $account_id );
 
 	if ( ! $account_id ) {
 		return false;
 	}
+
+	$mode = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : null;
 
 	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
 		array(
@@ -492,9 +502,23 @@ function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
 	foreach ( (array) $payouts as $payout ) {
 		$data = chip_affiliatewp_payout_data( $payout );
 
-		if ( (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) === $account_id ) {
-			return true;
+		if ( (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) !== $account_id ) {
+			continue;
 		}
+
+		/*
+		 * A payout with no recorded mode (written before modes were stored)
+		 * cannot be attributed either way, so it protects the id everywhere.
+		 */
+		if ( null !== $mode ) {
+			$payout_mode = (string) chip_affiliatewp_array_value( $data, 'mode', '' );
+
+			if ( in_array( $payout_mode, array( 'test', 'live' ), true ) && $payout_mode !== $mode ) {
+				continue;
+			}
+		}
+
+		return true;
 	}
 
 	return false;
@@ -550,12 +574,21 @@ function chip_affiliatewp_bank_account_name( $affiliate_id ) {
  * rejects a duplicate registration of the same recipient, and this plugin
  * looks the account up first so repeat payouts reuse the existing record.
  *
- * @param int $affiliate_id Affiliate ID.
+ * @param int         $affiliate_id Affiliate ID.
+ * @param string|null $mode         'test' or 'live'; null uses the current mode.
  * @return array|WP_Error Bank account record with at least "id" and "status".
  */
-function chip_affiliatewp_ensure_bank_account( $affiliate_id ) {
-	$mode     = chip_affiliatewp_current_mode();
-	$existing = chip_affiliatewp_get_bank_account( $affiliate_id );
+function chip_affiliatewp_ensure_bank_account( $affiliate_id, $mode = null ) {
+	/*
+	 * The mode is a parameter so callers that have already resolved one - the
+	 * submission path, which resolves it once for the instruction and the
+	 * record - cannot have the bank account registered in the other
+	 * environment by a setting change in between. Resolving here as well means
+	 * the function deciding where the money goes and the one deciding which CHIP
+	 * account the recipient is registered in can disagree.
+	 */
+	$mode     = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
+	$existing = chip_affiliatewp_get_bank_account( $affiliate_id, $mode );
 
 	if ( is_array( $existing ) && ! empty( $existing['id'] ) ) {
 		$deleted_at = chip_affiliatewp_array_value( $existing, 'deleted_at' );

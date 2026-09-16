@@ -4,7 +4,7 @@ Tags: affiliatewp, affiliates, payouts, chip send, malaysia
 Requires at least: 7.1
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -60,19 +60,18 @@ In the CHIP portal under Control → Settings → Applications. The secret key i
 
 == Changelog ==
 
-= 1.1.0 =
-* Fixed: a failed payout left its referrals unpaid but still attached to it, so the single-pay action refused them and the commission could never be paid again. Failed payouts now detach their referrals.
-* Fixed: the affiliate "action required" email showed a raw `{affiliate_payout_settings_url}` placeholder instead of a link on sites without the Stripe integration. The plugin now provides the tag itself.
-* Fixed: the Malay translation never reached the site — the build wrote only the .po file, so the compiled .mo WordPress reads was stale, and plural strings were not extracted at all.
-* Fixed: a referral reassigned to another affiliate before submission was still paid from the original payout.
-* Fixed: the webhook recovery path could create a payout without checking that the store currency is MYR.
-* Fixed: a referral whose references CHIP had all refused retried forever; it is now refused with a clear reason.
-* Fixed: uninstall left the burnt-reference meta behind, which suppressed a fresh reference on a later reinstall.
-* Fixed: the CHIP note on an instruction was stored unbounded and reached the payout list and notification email; it is now capped.
-* Fixed: several smaller issues — an unescaped API error rendered on the settings screen, a superseded bank account left registered at CHIP, an account summary cache written and dropped under different key spellings, and an instruction CHIP no longer holds polling forever.
-* Also: the coding-standards check in CI had failed since 1.0.0 (a Composer plugin was blocked). It now installs from composer.json and runs the same command as a local checkout.
-
+= 1.2.0 =
+* Security: the settings screen no longer sends your stored CHIP API key and secret to the browser. They were rendered into the page as field values, so anything able to read the response could take them. The fields are blank now, with a note when a value is saved; leaving them blank keeps the current credentials.
+* Security: the "webhook is not reachable" notice no longer includes the webhook URL, which carries this site's private webhook secret.
+* Fixed: resetting the webhook could delete another site's. Ownership was partly decided by the webhook's name, and that name is identical on every install — so a merchant running two sites on one CHIP account had site A's reset remove site B's webhook, and B lost its deliveries with nothing to say why.
+* Fixed: a delivery from the other environment could settle a payout. Instruction ids are unique per CHIP account rather than globally, so the same number exists in test and in live.
+* Fixed: an instruction belonging to a different site on the same CHIP account could settle one of your payouts. Your reference prefix is now required before a reference is trusted.
+* Fixed: a payout could become unresolvable if you changed the reference prefix, or moved the site, after submitting it — it now also recognises the reference it was actually sent under.
+* Fixed: an adopted instruction (one whose submission reply was lost) did not record which environment it came from, so later checks could poll the wrong one.
+* Fixed: cleaning up a replaced bank account could be blocked forever by a payout in the other environment that happened to hold the same account number, leaving the old account registered at CHIP.
+* Fixed: bank accounts are now resolved in the payout's own environment instead of the site-wide setting, and a payout sent from one environment no longer reports the other's credentials.
+* Fixed: deactivating the plugin left scheduled payout checks behind.
 == Upgrade Notice ==
 
-= 1.1.0 =
-Fixes a payout that could become impossible to pay again after a failure, a broken link in the affiliate failure email, and a Malay translation that never reached the site. Recommended for all installs.
+= 1.2.0 =
+Fixes two ways stored credentials could be exposed, a webhook reset that could delete another site's webhook, and several cases where a payout in one environment could be settled — or stranded — by the other. Recommended for all installs.
