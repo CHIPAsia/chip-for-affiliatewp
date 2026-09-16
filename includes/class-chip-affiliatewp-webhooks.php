@@ -765,8 +765,28 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 			if ( $reference_is_ours || chip_affiliatewp_payout_reference_matches( $candidate, $reference ) ) {
 				$payout_id = $candidate;
 			}
-		} elseif ( $reference_is_ours ) {
-			$referral = affwp_get_referral( absint( $matches[2] ) );
+		} else {
+			$referral_id = absint( $matches[2] );
+			$referral    = affwp_get_referral( $referral_id );
+
+			/*
+			 * Ownership for the R path. A referral that already carries a payout
+			 * is checked against it, exactly as the PO path is: that payout
+			 * recorded the reference it was submitted under, so a prefix change
+			 * since then must not strand it. Everything else needs the current
+			 * prefix, because without a payout there is no recorded reference to
+			 * compare against and another site's reference would otherwise
+			 * materialise a payout row from its instruction.
+			 */
+			$owns = $reference_is_ours;
+
+			if ( ! $owns && $referral && ! empty( $referral->payout_id ) ) {
+				$owns = chip_affiliatewp_payout_reference_matches( absint( $referral->payout_id ), $reference );
+			}
+
+			if ( ! $owns ) {
+				$referral = null;
+			}
 
 			if ( $referral && ! empty( $referral->payout_id ) ) {
 				$payout_id = absint( $referral->payout_id );

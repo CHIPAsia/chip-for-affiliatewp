@@ -7144,6 +7144,90 @@ check(
 );
 
 /*
+ * == Test 142: the R path needs the same ownership rule as the PO path ==
+ *
+ * A single-referral run submits before any payout row exists, under
+ * "<prefix>-R-<referral_id>". If the reply is lost, the webhook is what
+ * materialises the payout - and it records the reference it was adopted under.
+ *
+ * Test 141 taught the PO path to accept a payout's own recorded reference, so a
+ * prefix change does not orphan it. The R path was left asking only for the
+ * current prefix, which is the same bug in the sibling branch: after a prefix
+ * change the delivery is skipped, and the payout sits on processing while CHIP
+ * has already paid it.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__affiliates_map'][5] = 11;
+$GLOBALS['__users'][11]         = new Fake_User( 11, 'other@test.dev' );
+
+/*
+ * No instruction id on either side: the fast path must not be what resolves
+ * this, or the reference path is never reached and nothing is being tested.
+ */
+$GLOBALS['__payout_rows'][9980] = (object) array(
+	'payout_id'     => 9980,
+	'affiliate_id'  => 5,
+	'referrals'     => '2400',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 0,
+	'description'   => wp_json_encode( array( 'mode' => 'test', 'reference' => 'XT-R-2400' ) ),
+);
+
+$GLOBALS['__referral_rows'][2400] = new Fake_Referral( 2400, 5, '20.00', 'unpaid', 9980 );
+
+// The merchant has since set a different prefix.
+$GLOBALS['__options']['chip_reference_prefix'] = 'AB';
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9200, 'state' => 'completed', 'reference' => 'XT-R-2400' ),
+	'test'
+);
+
+check(
+	'a single-referral payout resolves after a prefix change',
+	'paid' === $GLOBALS['__payout_rows'][9980]->status
+);
+
+/*
+ * The negative still holds: an R reference from another site, naming a referral
+ * with no payout of ours, must not materialise anything.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'AB';
+$GLOBALS['__affiliates_map'][5] = 11;
+$GLOBALS['__users'][11]         = new Fake_User( 11, 'other@test.dev' );
+
+$GLOBALS['__referral_rows'][2401] = new Fake_Referral( 2401, 5, '20.00', 'unpaid', 0 );
+
+$before = count( $GLOBALS['__payout_rows'] );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9201, 'state' => 'completed', 'reference' => 'ZZ-R-2401' ),
+	'test'
+);
+
+check(
+	'another site\'s R reference still creates nothing',
+	count( $GLOBALS['__payout_rows'] ) === $before
+);
+check(
+	'the referral is left unpaid',
+	'unpaid' === $GLOBALS['__referral_rows'][2401]->status
+);
+
+/*
  * An unpaid referral with no payout is still materialised: that is the ordinary
  * single-referral case the recovery path exists for.
  */
