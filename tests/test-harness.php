@@ -6990,6 +6990,70 @@ check(
 );
 
 /*
+ * == Test 140: the delivery must reach the payout of its OWN account ==
+ *
+ * Instruction ids collide across test and live, so both a test payout and a
+ * live payout can hold the same id. The fast path resolves on the id alone and
+ * takes the first row it finds.
+ *
+ * A live delivery that lands on the test row must not settle it - but it must
+ * still reach the live payout it actually belongs to. Filtering the found row
+ * after the lookup leaves the live payout unvisited: the reference path was
+ * already skipped because the lookup had "found" something.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][5] = 11;
+$GLOBALS['__users'][11]         = new Fake_User( 11, 'other@test.dev' );
+
+// The test-mode payout is inserted first, so it is what the id lookup returns.
+$GLOBALS['__payout_rows'][9960] = (object) array(
+	'payout_id'     => 9960,
+	'affiliate_id'  => 5,
+	'referrals'     => '2360',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 9900,
+	'description'   => wp_json_encode( array( 'instruction_id' => 9900, 'mode' => 'test' ) ),
+);
+
+$GLOBALS['__referral_rows'][2360] = new Fake_Referral( 2360, 5, '20.00', 'unpaid', 9960 );
+
+// A live payout holding the same instruction id, as a separate account would.
+$GLOBALS['__payout_rows'][9961] = (object) array(
+	'payout_id'     => 9961,
+	'affiliate_id'  => 5,
+	'referrals'     => '2361',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 9900,
+	'description'   => wp_json_encode( array( 'instruction_id' => 9900, 'mode' => 'live' ) ),
+);
+
+$GLOBALS['__referral_rows'][2361] = new Fake_Referral( 2361, 5, '20.00', 'unpaid', 9961 );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9900, 'state' => 'completed', 'reference' => 'XT-PO-9961' ),
+	'live'
+);
+
+check(
+	'the live delivery reaches its own payout',
+	'paid' === $GLOBALS['__payout_rows'][9961]->status
+);
+check(
+	'the test payout of the other account is untouched',
+	'processing' === $GLOBALS['__payout_rows'][9960]->status
+);
+
+/*
  * An unpaid referral with no payout is still materialised: that is the ordinary
  * single-referral case the recovery path exists for.
  */

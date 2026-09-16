@@ -720,9 +720,15 @@ function chip_affiliatewp_process_instruction_webhook( $payload, $verified_mode 
 function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verified_mode, $instruction_id, $reference ) {
 	$payout_id = 0;
 
-	// Fast path: a payout already stores this instruction ID.
+	/*
+	 * Fast path: a payout already stores this instruction ID.
+	 *
+	 * The mode is passed in because the id alone is not unique across accounts:
+	 * test and live can both hold it, and picking the wrong row would leave this
+	 * delivery with no payout to reach.
+	 */
 	if ( $instruction_id ) {
-		$payout_id = chip_affiliatewp_find_payout_by_instruction_id( $instruction_id );
+		$payout_id = chip_affiliatewp_find_payout_by_instruction_id( $instruction_id, $verified_mode );
 	}
 
 	/*
@@ -855,30 +861,54 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 /**
  * Finds a CHIP payout by its stored send instruction ID.
  *
- * @param int $instruction_id CHIP Send instruction ID.
+ * Instruction ids are unique per CHIP account, not globally, so two payouts can
+ * hold the same id - one per mode. The mode the delivery verified against picks
+ * between them; a row with no recorded mode (one written before modes were
+ * stored) is the only statement available for it and is taken as a fallback.
+ *
+ * Returning the first id-matched row regardless would leave the delivery unable
+ * to reach its own payout: the caller would find a payout of the other account,
+ * recognise it as such, and stop - never looking the right one up.
+ *
+ * @param int    $instruction_id CHIP Send instruction ID.
+ * @param string $mode           Optional. Mode the delivery verified against.
  * @return int Payout ID, or 0 when not found.
  */
-function chip_affiliatewp_find_payout_by_instruction_id( $instruction_id ) {
+function chip_affiliatewp_find_payout_by_instruction_id( $instruction_id, $mode = '' ) {
 	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
 		array(
 			'payout_method' => 'chip',
 			'status'        => array( 'processing', 'paid', 'failed' ),
 			'service_id'    => $instruction_id,
-			'number'        => 1,
 		)
 	);
 
-	if ( ! empty( $payouts ) ) {
-		$found = is_array( $payouts ) ? array_shift( $payouts ) : $payouts;
-
-		if ( is_object( $found ) ) {
-			return absint( $found->payout_id );
-		}
-
-		return absint( $found );
+	if ( empty( $payouts ) ) {
+		return 0;
 	}
 
-	return 0;
+	$payouts  = is_array( $payouts ) ? $payouts : array( $payouts );
+	$fallback = 0;
+
+	foreach ( $payouts as $candidate ) {
+		$candidate_id = is_object( $candidate ) ? absint( $candidate->payout_id ?? 0 ) : absint( $candidate );
+
+		if ( ! $candidate_id ) {
+			continue;
+		}
+
+		$candidate_mode = (string) chip_affiliatewp_array_value( chip_affiliatewp_payout_data( $candidate ), 'mode', '' );
+
+		if ( '' !== $mode && $candidate_mode === $mode ) {
+			return $candidate_id;
+		}
+
+		if ( ! $fallback && '' === $candidate_mode ) {
+			$fallback = $candidate_id;
+		}
+	}
+
+	return $fallback;
 }
 
 /**
