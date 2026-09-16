@@ -6896,7 +6896,7 @@ $GLOBALS['__referral_rows'][2300] = new Fake_Referral( 2300, 5, '20.00', 'unpaid
 
 // A LIVE delivery happens to carry the same instruction id 7700.
 chip_affiliatewp_process_instruction_webhook(
-	array( 'id' => 7700, 'state' => 'completed', 'reference' => 'ZZ-PO-9900', 'bank_account_id' => 0 ),
+	array( 'id' => 7700, 'state' => 'completed', 'reference' => 'XT-PO-9900', 'bank_account_id' => 0 ),
 	'live'
 );
 
@@ -6907,6 +6907,86 @@ check(
 check(
 	'the referral is not marked paid by another account\'s instruction',
 	'unpaid' === $GLOBALS['__referral_rows'][2300]->status
+);
+
+/*
+ * == Test 139: a reference is only ours when it carries our prefix ==
+ *
+ * References are unique per CHIP account, not per site. The plugin's answer is
+ * the reference prefix: the settings panel warns that each site sharing an
+ * account needs its own, and the submission path refuses to adopt an
+ * instruction that does not belong to the payout.
+ *
+ * The webhook's reference path never checked the prefix. It reads the payout id
+ * straight out of "<anything>-PO-<n>", so an instruction belonging to a
+ * different site on the same account - with a different prefix, exactly as the
+ * plugin asks - resolved to whichever local payout carried that number.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][5] = 11;
+$GLOBALS['__users'][11]         = new Fake_User( 11, 'other@test.dev' );
+
+// Our payout, not yet submitted under any instruction.
+$GLOBALS['__payout_rows'][9950] = (object) array(
+	'payout_id'     => 9950,
+	'affiliate_id'  => 5,
+	'referrals'     => '2350',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 0,
+	'description'   => wp_json_encode( array( 'mode' => 'test' ) ),
+);
+
+$GLOBALS['__referral_rows'][2350] = new Fake_Referral( 2350, 5, '20.00', 'unpaid', 9950 );
+
+/*
+ * Another site on the same CHIP account, using its own prefix as instructed.
+ * Its instruction carries its own payout number and an amount that has nothing
+ * to do with ours.
+ */
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8901, 'state' => 'completed', 'reference' => 'ZZ-PO-9950', 'amount' => '500.00', 'bank_account_id' => 424242 ),
+	'test'
+);
+
+check(
+	'another site\'s reference does not settle our payout',
+	'processing' === $GLOBALS['__payout_rows'][9950]->status
+);
+check(
+	'our referral is not marked paid by another site\'s instruction',
+	'unpaid' === $GLOBALS['__referral_rows'][2350]->status
+);
+
+// Our own reference still resolves: the recovery path must keep working.
+$GLOBALS['__payout_rows'][9951] = (object) array(
+	'payout_id'     => 9951,
+	'affiliate_id'  => 5,
+	'referrals'     => '2351',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 0,
+	'description'   => wp_json_encode( array( 'mode' => 'test' ) ),
+);
+
+$GLOBALS['__referral_rows'][2351] = new Fake_Referral( 2351, 5, '20.00', 'unpaid', 9951 );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 8902, 'state' => 'completed', 'reference' => 'XT-PO-9951' ),
+	'test'
+);
+
+check(
+	'our own reference still resolves the payout',
+	'paid' === $GLOBALS['__payout_rows'][9951]->status
 );
 
 /*

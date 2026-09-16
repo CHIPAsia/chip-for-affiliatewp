@@ -725,8 +725,26 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 		$payout_id = chip_affiliatewp_find_payout_by_instruction_id( $instruction_id );
 	}
 
-	// Reference path: "<prefix>-PO-<payout_id>" or "<prefix>-R-<referral_id>".
-	if ( ! $payout_id && preg_match( '/-(PO|R)-(\d+)$/', $reference, $matches ) ) {
+	/*
+	 * Reference path: "<prefix>-PO-<payout_id>" or "<prefix>-R-<referral_id>".
+	 *
+	 * The prefix is required here, not decorative. References are unique per
+	 * CHIP account rather than per site, so another installation sharing the
+	 * account holds references of the same shape under a different prefix -
+	 * which is exactly why the settings panel asks each site to set its own,
+	 * and why the submission path refuses to adopt an instruction that does not
+	 * belong to the payout. Reading the payout id out of any "*-PO-<n>" let
+	 * that other site's instruction land on whichever local payout carried the
+	 * number, marking it - and its referral - paid for money this account never
+	 * sent.
+	 *
+	 * An empty prefix (forced by a filter) keeps the previous behaviour: there
+	 * is nothing to match on.
+	 */
+	$our_prefix        = chip_affiliatewp_reference_prefix();
+	$reference_is_ours = '' === $our_prefix || 0 === strpos( $reference, $our_prefix . '-' );
+
+	if ( ! $payout_id && $reference_is_ours && preg_match( '/-(PO|R)-(\d+)$/', $reference, $matches ) ) {
 		if ( 'PO' === $matches[1] ) {
 			$payout_id = absint( $matches[2] );
 		} else {
