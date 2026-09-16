@@ -7054,6 +7054,96 @@ check(
 );
 
 /*
+ * == Test 141: a prefix change must not orphan a payout already in flight ==
+ *
+ * The reference prefix is a setting. A merchant can change it, and the fallback
+ * is derived from the site URL - so moving the site changes it too. A payout
+ * submitted before the change carries the old prefix in the reference CHIP
+ * holds and delivers back.
+ *
+ * Matching only the CURRENT prefix made that delivery unresolvable, and for a
+ * payout whose instruction id was never stored - the HTTP response was lost, so
+ * the id was never written - the reference is the only link back. The payout
+ * would sit on processing forever while CHIP had already paid it.
+ *
+ * The prefix still has to separate one site from another; it must not have to
+ * match a value that is allowed to change.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__affiliates_map'][5] = 11;
+$GLOBALS['__users'][11]         = new Fake_User( 11, 'other@test.dev' );
+
+// Submitted while the prefix was XT, with no instruction id stored: the reply
+// never arrived, which is exactly why the reference has to work.
+$GLOBALS['__payout_rows'][9970] = (object) array(
+	'payout_id'     => 9970,
+	'affiliate_id'  => 5,
+	'referrals'     => '2370',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 0,
+	'description'   => wp_json_encode( array( 'mode' => 'test', 'reference' => 'XT-PO-9970' ) ),
+);
+
+$GLOBALS['__referral_rows'][2370] = new Fake_Referral( 2370, 5, '20.00', 'unpaid', 9970 );
+
+// The merchant has since set a different prefix.
+$GLOBALS['__options']['chip_reference_prefix'] = 'AB';
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9100, 'state' => 'completed', 'reference' => 'XT-PO-9970' ),
+	'test'
+);
+
+check(
+	'a payout submitted under the old prefix still resolves',
+	'paid' === $GLOBALS['__payout_rows'][9970]->status
+);
+
+/*
+ * A reference from another site is still refused: the prefix separates sites,
+ * and ZZ is not one this site has ever used.
+ */
+reset_state();
+
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'AB';
+$GLOBALS['__affiliates_map'][5] = 11;
+$GLOBALS['__users'][11]         = new Fake_User( 11, 'other@test.dev' );
+
+$GLOBALS['__payout_rows'][9971] = (object) array(
+	'payout_id'     => 9971,
+	'affiliate_id'  => 5,
+	'referrals'     => '2371',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 0,
+	'description'   => wp_json_encode( array( 'mode' => 'test' ) ),
+);
+
+$GLOBALS['__referral_rows'][2371] = new Fake_Referral( 2371, 5, '20.00', 'unpaid', 9971 );
+
+chip_affiliatewp_process_instruction_webhook(
+	array( 'id' => 9101, 'state' => 'completed', 'reference' => 'ZZ-PO-9971' ),
+	'test'
+);
+
+check(
+	'an unrelated prefix is still refused',
+	'processing' === $GLOBALS['__payout_rows'][9971]->status
+);
+
+/*
  * An unpaid referral with no payout is still materialised: that is the ordinary
  * single-referral case the recovery path exists for.
  */
@@ -7307,10 +7397,17 @@ check(
 	array() === $orphans
 );
 
-// The two that were dead: a reference the code recomputes, and a duplicate of
-// the payout's own referrals column.
-check( 'no stale reference is stored', ! in_array( 'reference', $keys_written, true ) );
+// The one that was dead: a duplicate of the payout's own referrals column.
 check( 'no duplicate referral list is stored', ! in_array( 'referral_ids', $keys_written, true ) );
+
+/*
+ * The stored reference now HAS a reader, and is load-bearing: the webhook
+ * resolves a delivery by it when the reference prefix has changed since
+ * submission (or the site moved, changing the derived fallback). It is checked
+ * above by the orphan sweep, not by a hand-written list - an entry here would
+ * contradict that and pin the key as dead again.
+ */
+check( 'the stored reference is read, not dead weight', in_array( 'reference', $keys_read, true ) );
 
 echo "\n== Test 106: callout content is escaped at the call site ==\n";
 reset_state();

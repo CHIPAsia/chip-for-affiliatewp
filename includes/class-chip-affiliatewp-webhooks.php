@@ -734,26 +734,38 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 	/*
 	 * Reference path: "<prefix>-PO-<payout_id>" or "<prefix>-R-<referral_id>".
 	 *
-	 * The prefix is required here, not decorative. References are unique per
+	 * Ownership is required here, not decorative. References are unique per
 	 * CHIP account rather than per site, so another installation sharing the
 	 * account holds references of the same shape under a different prefix -
-	 * which is exactly why the settings panel asks each site to set its own,
-	 * and why the submission path refuses to adopt an instruction that does not
-	 * belong to the payout. Reading the payout id out of any "*-PO-<n>" let
-	 * that other site's instruction land on whichever local payout carried the
-	 * number, marking it - and its referral - paid for money this account never
-	 * sent.
+	 * which is exactly why the settings panel asks each site to set its own.
+	 * Reading the payout id out of any "*-PO-<n>" let that other site's
+	 * instruction land on whichever local payout carried the number, marking it
+	 * - and its referral - paid for money this account never sent.
 	 *
-	 * An empty prefix (forced by a filter) keeps the previous behaviour: there
-	 * is nothing to match on.
+	 * The prefix alone is not a sufficient test, though: it is a setting, and
+	 * the fallback is derived from the site URL, so a merchant can change it
+	 * while a payout is in flight. A payout submitted before the change carries
+	 * the old prefix in the reference CHIP delivers back, and for one whose
+	 * response was lost - so the instruction id was never stored - the reference
+	 * is the only link to it. Requiring the current prefix alone left that
+	 * payout on processing forever.
+	 *
+	 * So a reference counts as ours when it carries the current prefix, or when
+	 * it is exactly the reference the payout it resolves to was submitted
+	 * under. The second cannot match another site: that payout recorded the
+	 * reference at submission, and we are the ones who generated it.
 	 */
 	$our_prefix        = chip_affiliatewp_reference_prefix();
 	$reference_is_ours = '' === $our_prefix || 0 === strpos( $reference, $our_prefix . '-' );
 
-	if ( ! $payout_id && $reference_is_ours && preg_match( '/-(PO|R)-(\d+)$/', $reference, $matches ) ) {
+	if ( ! $payout_id && preg_match( '/-(PO|R)-(\d+)$/', $reference, $matches ) ) {
 		if ( 'PO' === $matches[1] ) {
-			$payout_id = absint( $matches[2] );
-		} else {
+			$candidate = absint( $matches[2] );
+
+			if ( $reference_is_ours || chip_affiliatewp_payout_reference_matches( $candidate, $reference ) ) {
+				$payout_id = $candidate;
+			}
+		} elseif ( $reference_is_ours ) {
 			$referral = affwp_get_referral( absint( $matches[2] ) );
 
 			if ( $referral && ! empty( $referral->payout_id ) ) {
@@ -856,6 +868,43 @@ function chip_affiliatewp_process_locked_instruction_webhook( $payload, $verifie
 	}
 
 	chip_affiliatewp_apply_instruction( $payout_id, $payload );
+}
+
+/**
+ * Whether a reference is the one a payout was submitted under.
+ *
+ * A payout records the reference it sent. Matching against it is how a delivery
+ * stays resolvable after the merchant changes the reference prefix, or after
+ * the site moves and the derived fallback changes with it - neither of which
+ * should orphan a payout that is already at CHIP.
+ *
+ * It cannot admit another site's instruction: the recorded value is one this
+ * site generated when submitting, so a reference belonging to a different site
+ * never equals it. It also has to match on a payout that exists, so there is
+ * nothing to confirm when the number names no row.
+ *
+ * @param int    $payout_id Payout ID parsed out of the reference.
+ * @param string $reference Reference the delivery carries.
+ * @return bool
+ */
+function chip_affiliatewp_payout_reference_matches( $payout_id, $reference ) {
+	$payout_id = absint( $payout_id );
+
+	if ( ! $payout_id ) {
+		return false;
+	}
+
+	$payout = affwp_get_payout( $payout_id );
+
+	if ( ! $payout || 'chip' !== $payout->payout_method ) {
+		return false;
+	}
+
+	$data = chip_affiliatewp_payout_data( $payout );
+
+	$recorded = (string) chip_affiliatewp_array_value( $data, 'reference', '' );
+
+	return '' !== $recorded && $recorded === (string) $reference;
 }
 
 /**

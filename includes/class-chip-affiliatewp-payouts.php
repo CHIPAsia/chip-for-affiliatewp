@@ -415,6 +415,21 @@ function chip_affiliatewp_submit_payout_locked( $payout_id, $payout ) {
 		$body['send_recipient_receipt'] = true;
 	}
 
+	/*
+	 * Remember the reference BEFORE sending, not after.
+	 *
+	 * It is what resolves a delivery when the merchant changes the reference
+	 * prefix, or moves the site and the derived fallback changes with it: CHIP
+	 * holds the reference used here and delivers it back, so the payout has to
+	 * be able to recognise its own. Writing it after the response would miss
+	 * exactly the case that needs it most - a create call that timed out after
+	 * CHIP accepted it, leaving no instruction id behind and the reference as
+	 * the only link to the payment.
+	 */
+	$data['reference'] = substr( (string) $reference, 0, 40 );
+
+	chip_affiliatewp_update_payout_data( $payout_id, $data );
+
 	$response = chip_affiliatewp_request( 'POST', '/send/send_instructions', $body, array(), $mode );
 
 	if ( is_wp_error( $response ) ) {
