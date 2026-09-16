@@ -10927,6 +10927,23 @@ $GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts/77', 'method
 $deleted_live = chip_affiliatewp_delete_superseded_bank_account( 3, 77, 'live' );
 check( 'the live account is still protected', false === $deleted_live );
 
+/*
+ * A floor on the number of checks that must run.
+ *
+ * The harness counts passes rather than asserting a total, so a block that stops
+ * executing - because it was moved past the summary, or its reset destroyed an
+ * earlier fixture - reports a LOWER count with no failure. That is how a test
+ * added in this codebase silently did not run at all.
+ *
+ * Raise this whenever checks are added; a drop below it is a failure.
+ */
+$chip_min_checks = 1155;
+
+check(
+	'the harness ran at least ' . $chip_min_checks . ' checks (got ' . ( $passes + count( $failures ) ) . ')',
+	( $passes + count( $failures ) ) >= $chip_min_checks
+);
+
 echo "PASSES: {$passes}  FAILURES: " . count( $failures ) . "\n";
 if ( $failures ) {
 	echo "Failed:\n  - " . implode( "\n  - ", $failures ) . "\n";

@@ -102,7 +102,7 @@ The real endpoint still verifies the CHIP RSA signature on every delivery.
 php -f tests/test-harness.php
 ```
 
-Standalone stub harness (no WordPress needed): 635 checks covering checksum
+Standalone stub harness (no WordPress needed): 1156 checks covering checksum
 signing, amount formatting, webhook signature verification (valid, tampered,
 missing), webhook reset ownership, payout state transitions,
 idempotency/replay, failed-payout healing, eligibility re-checks, currency
@@ -112,6 +112,11 @@ green on every change; add a check for any bug fixed.
 
 The harness stubs the minimal WP/AffiliateWP surface — when adding a call to a
 new WP function inside plugin modules, stub it in `tests/test-harness.php`.
+
+A floor asserts the number of checks that ran. The harness counts passes rather
+than checking a total, so a block that stops executing reports a LOWER count with
+no failure - a test added here once sat after the summary and never ran. Raise
+`$chip_min_checks` whenever checks are added.
 
 Assert on the **reason** for a failure, not just `is_wp_error()`. An unmocked
 HTTP call is also a `WP_Error`, so a bare `is_wp_error()` check passes even
