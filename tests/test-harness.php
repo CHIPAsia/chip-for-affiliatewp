@@ -1388,6 +1388,7 @@ $adopted = chip_affiliatewp_payout_data( affwp_get_payout( $adopt_id ) );
 check( 'the adopted instruction is stored', 9600 === (int) ( $adopted['instruction_id'] ?? 0 ) );
 check( 'the account it came from is stored too', 'test' === (string) ( $adopted['mode'] ?? '' ) );
 
+
 echo "\n== Test 7: submit idempotency (already has instruction) ==\n";
 $GLOBALS['__http_log'] = array();
 $result2 = chip_affiliatewp_submit_payout( $payout_id );
@@ -10875,6 +10876,57 @@ check(
 );
 
 echo "\n==============================\n";
+
+/*
+ * == Test 145: the in-use guard must count only the account's own mode ==
+ *
+ * A stale bank account is deleted once its replacement is registered. The guard
+ * that refuses the delete while a payout is still working against it matches on
+ * the account id alone.
+ *
+ * Bank account ids are per CHIP account, exactly like instruction ids. So a
+ * live payout carrying id 77 makes the guard refuse while a TEST account with id
+ * 77 is being cleaned up - and vice versa. The cleanup then never happens: the
+ * superseded record is marked, the delete is refused, and it is retried on every
+ * subsequent registration without ever succeeding.
+ */
+reset_state();
+$GLOBALS['__options']['chip_payouts']          = 1;
+$GLOBALS['__options']['chip_test_mode']        = 1;
+$GLOBALS['__options']['chip_test_api_key']     = 'k';
+$GLOBALS['__options']['chip_test_secret_key']  = 's';
+$GLOBALS['__options']['chip_reference_prefix'] = 'XT';
+$GLOBALS['__affiliates_map'][3] = 7;
+$GLOBALS['__users'][7]         = new Fake_User( 7, 'affiliate@test.dev' );
+// A LIVE payout is working against bank account 77.
+$GLOBALS['__payout_rows'][9950] = (object) array(
+	'payout_id'     => 9950,
+	'affiliate_id'  => 3,
+	'referrals'     => '2500',
+	'amount'        => '20.00',
+	'status'        => 'processing',
+	'payout_method' => 'chip',
+	'service_id'    => 0,
+	'description'   => wp_json_encode( array( 'mode' => 'live', 'bank_account_id' => 77 ) ),
+);
+check(
+	'the live payout does hold that id',
+	chip_affiliatewp_bank_account_is_in_use( 3, 77 )
+);
+// The TEST account that superseded it happens to carry the same number.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts/77', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
+$deleted = chip_affiliatewp_delete_superseded_bank_account( 3, 77, 'test' );
+check(
+	'a test account is not protected by a live payout holding the same number',
+	true === $deleted
+);
+// And the guard still protects the payout that really does own it.
+$GLOBALS['__http_queue'] = array();
+$GLOBALS['__http_queue'][] = array( 'match' => '/send/bank_accounts/77', 'method' => 'DELETE', 'code' => 200, 'body' => array( 'ok' => true ) );
+$deleted_live = chip_affiliatewp_delete_superseded_bank_account( 3, 77, 'live' );
+check( 'the live account is still protected', false === $deleted_live );
+
 echo "PASSES: {$passes}  FAILURES: " . count( $failures ) . "\n";
 if ( $failures ) {
 	echo "Failed:\n  - " . implode( "\n  - ", $failures ) . "\n";

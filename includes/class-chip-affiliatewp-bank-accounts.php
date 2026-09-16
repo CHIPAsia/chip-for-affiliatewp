@@ -441,7 +441,7 @@ function chip_affiliatewp_delete_superseded_bank_account( $affiliate_id, $accoun
 
 	$mode = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : chip_affiliatewp_current_mode();
 
-	if ( chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) ) {
+	if ( chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id, $mode ) ) {
 		return false;
 	}
 
@@ -470,16 +470,25 @@ function chip_affiliatewp_delete_superseded_bank_account( $affiliate_id, $accoun
  * column for it: its service_id holds the instruction id, so comparing against
  * that would never match and the guard would always answer "not in use".
  *
- * @param int $affiliate_id Affiliate ID.
- * @param int $account_id   CHIP bank account ID.
+ * The payout's mode is compared too. A bank account id is only unique within
+ * one CHIP account, so a live payout holding id 77 would otherwise make this
+ * refuse while a TEST account with the same number is being cleaned up: the
+ * superseded record stays marked, the delete is refused, and it is retried on
+ * every later registration without ever succeeding.
+ *
+ * @param int         $affiliate_id Affiliate ID.
+ * @param int         $account_id   CHIP bank account ID.
+ * @param string|null $mode         Optional. Mode whose account is being checked.
  * @return bool
  */
-function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
+function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id, $mode = null ) {
 	$account_id = absint( $account_id );
 
 	if ( ! $account_id ) {
 		return false;
 	}
+
+	$mode = in_array( $mode, array( 'test', 'live' ), true ) ? $mode : null;
 
 	$payouts = affiliate_wp()->affiliates->payouts->get_payouts(
 		array(
@@ -493,9 +502,23 @@ function chip_affiliatewp_bank_account_is_in_use( $affiliate_id, $account_id ) {
 	foreach ( (array) $payouts as $payout ) {
 		$data = chip_affiliatewp_payout_data( $payout );
 
-		if ( (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) === $account_id ) {
-			return true;
+		if ( (int) chip_affiliatewp_array_value( $data, 'bank_account_id', 0 ) !== $account_id ) {
+			continue;
 		}
+
+		/*
+		 * A payout with no recorded mode (written before modes were stored)
+		 * cannot be attributed either way, so it protects the id everywhere.
+		 */
+		if ( null !== $mode ) {
+			$payout_mode = (string) chip_affiliatewp_array_value( $data, 'mode', '' );
+
+			if ( in_array( $payout_mode, array( 'test', 'live' ), true ) && $payout_mode !== $mode ) {
+				continue;
+			}
+		}
+
+		return true;
 	}
 
 	return false;
