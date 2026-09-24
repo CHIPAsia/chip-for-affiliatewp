@@ -147,10 +147,13 @@ WordPress.org submissions must contain only runtime files plus `readme.txt`.
 Defined in three places — bump together:
 - `chip-for-affiliatewp.php` — header `Version:` + `CHIP_AFFILIATEWP_VERSION`
 - `readme.txt` — `Stable tag`
-- New changelog entry in `readme.txt`
+- New changelog entry in `changelog.txt` (the `readme.txt` changelog keeps only the current release)
 
 ## WordPress.org compliance notes
 
+- **`readme.txt` carries only the current release.** WordPress.org renders the
+  changelog from `readme.txt`, so it must hold exactly one version entry;
+  `changelog.txt` keeps the full history.
 - readme.txt follows the full WordPress readme format (headers, description,
   installation, FAQ, changelog, upgrade notice); `Requires at least` and
   `Tested up to` both track the current WordPress major release.
